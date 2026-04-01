@@ -1,0 +1,5 @@
+streamlit
+mercadopago
+pandas
+supabase
+python-dateutil
