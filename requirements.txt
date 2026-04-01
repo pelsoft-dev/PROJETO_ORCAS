@@ -1,5 +1,6 @@
 streamlit
 mercadopago
 pandas
+plotly
 supabase
 python-dateutil
