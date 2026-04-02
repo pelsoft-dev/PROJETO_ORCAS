@@ -7,32 +7,6 @@ import plotly.graph_objects as go
 import streamlit.components.v1 as components
 from supabase import Client
 
-
-import streamlit as st
-
-# 1. Configura o Título e o Ícone (A baleia)
-st.set_page_config(
-    page_title="ORCAS - Gestão Financeira",
-    page_icon="🐋",
-    layout="wide"
-)
-
-# 2. Código de Limpeza Pesada (CSS)
-hide_st_style = """
-            <style>
-            #MainMenu {visibility: hidden;}
-            footer {visibility: hidden;}
-            header {visibility: hidden;}
-            /* Esconde a barra de ferramentas do Streamlit no topo e rodapé */
-            .stAppHeader {visibility: hidden;}
-            .st-emotion-cache-10v0m0t {display: none !important;}
-            div[data-testid="stStatusWidget"] {visibility: hidden;}
-            #stDecoration {display:none !important;}
-            </style>
-            """
-st.markdown(hide_st_style, unsafe_allow_html=True)
-
-
 # --- 1. SEGURANÇA E CONEXÃO ---
 try:
     import orcas_v01_security as security
@@ -42,7 +16,7 @@ except Exception as e:
     st.stop()
 
 # --- 2. CONFIGURAÇÃO E ESTILO ---
-st.set_page_config(page_title="ORCAS - Gestão Financeira", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="ORCAS - Gestão Financeira", page_icon="🐋", layout="wide", initial_sidebar_state="expanded")
 
 def ir_para_o_topo():
     components.html("""<script>window.parent.document.getElementById('topo-ancora').scrollIntoView();</script>""", height=0)
@@ -52,6 +26,9 @@ st.markdown("""
     #MainMenu {visibility: hidden;} 
     footer {visibility: hidden;}
     [data-testid="stHeader"] {background: rgba(0,0,0,0) !important; color: transparent !important;}
+    [data-testid="stStatusWidget"] {visibility: hidden !important;}
+    .st-emotion-cache-10v0m0t {display: none !important;}
+    #stDecoration {display:none !important;}
     .block-container { padding-top: 0.1rem !important; }
     .logo-sidebar { font-size: 2.2rem !important; font-weight: bold; color: #1E3A8A; font-family: 'Arial Black', sans-serif; }
     .user-email { font-size: 0.85rem; color: #64748b; margin-bottom: 2px; }
