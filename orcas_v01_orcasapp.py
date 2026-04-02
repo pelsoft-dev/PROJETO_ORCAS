@@ -10,21 +10,24 @@ from supabase import Client
 
 import streamlit as st
 
-
-# 1. Configura o Título na aba do navegador e o Ícone (Baleia)
+# 1. Configura o Título e o Ícone (A baleia)
 st.set_page_config(
     page_title="ORCAS - Gestão Financeira",
     page_icon="🐋",
     layout="wide"
 )
 
-# 2. Código "mágico" para esconder o menu e o rodapé do Streamlit
+# 2. Código de Limpeza Pesada (CSS)
 hide_st_style = """
             <style>
             #MainMenu {visibility: hidden;}
             footer {visibility: hidden;}
             header {visibility: hidden;}
-            div.embeddedAppMetaInfoBar_container__D_aov {display: none;}
+            /* Esconde a barra de ferramentas do Streamlit no topo e rodapé */
+            .stAppHeader {visibility: hidden;}
+            .st-emotion-cache-10v0m0t {display: none !important;}
+            div[data-testid="stStatusWidget"] {visibility: hidden;}
+            #stDecoration {display:none !important;}
             </style>
             """
 st.markdown(hide_st_style, unsafe_allow_html=True)
