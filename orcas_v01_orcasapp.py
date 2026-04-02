@@ -7,6 +7,29 @@ import plotly.graph_objects as go
 import streamlit.components.v1 as components
 from supabase import Client
 
+
+import streamlit as st
+
+
+# 1. Configura o Título na aba do navegador e o Ícone (Baleia)
+st.set_page_config(
+    page_title="ORCAS - Gestão Financeira",
+    page_icon="🐋",
+    layout="wide"
+)
+
+# 2. Código "mágico" para esconder o menu e o rodapé do Streamlit
+hide_st_style = """
+            <style>
+            #MainMenu {visibility: hidden;}
+            footer {visibility: hidden;}
+            header {visibility: hidden;}
+            div.embeddedAppMetaInfoBar_container__D_aov {display: none;}
+            </style>
+            """
+st.markdown(hide_st_style, unsafe_allow_html=True)
+
+
 # --- 1. SEGURANÇA E CONEXÃO ---
 try:
     import orcas_v01_security as security
