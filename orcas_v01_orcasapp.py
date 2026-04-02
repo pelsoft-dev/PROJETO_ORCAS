@@ -23,17 +23,21 @@ def ir_para_o_topo():
 
 st.markdown("""
     <style>
+    /* Esconde o menu principal e o rodapé padrão */
     #MainMenu {visibility: hidden;} 
     footer {visibility: hidden;}
-    [data-testid="stHeader"] {background: rgba(0,0,0,0) !important; color: transparent !important;}
     
-    /* Comandos para remover a coroa, botão de deploy e status de conexão */
-    [data-testid="stStatusWidget"] {display: none !important;}
+    /* Esconde a barra de ferramentas superior (onde fica a coroa e o deploy) */
+    [data-testid="stHeader"] {display: none !important;}
     .stAppDeployButton {display: none !important;}
-    #stDecoration {display: none !important;}
     [data-testid="stToolbar"] {display: none !important;}
-    header {visibility: hidden !important;}
-
+    #stDecoration {display: none !important;}
+    
+    /* Esconde o widget de status de conexão (bolinha/coroa flutuante) */
+    [data-testid="stStatusWidget"] {display: none !important;}
+    div[class*="st-emotion-cache"] > div[data-testid="stStatusWidget"] {display: none !important;}
+    
+    /* Ajustes de layout originais mantidos rigorosamente */
     .block-container { padding-top: 0.1rem !important; }
     .logo-sidebar { font-size: 2.2rem !important; font-weight: bold; color: #1E3A8A; font-family: 'Arial Black', sans-serif; }
     .user-email { font-size: 0.85rem; color: #64748b; margin-bottom: 2px; }
