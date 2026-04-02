@@ -26,9 +26,14 @@ st.markdown("""
     #MainMenu {visibility: hidden;} 
     footer {visibility: hidden;}
     [data-testid="stHeader"] {background: rgba(0,0,0,0) !important; color: transparent !important;}
-    [data-testid="stStatusWidget"] {visibility: hidden !important;}
-    .st-emotion-cache-10v0m0t {display: none !important;}
-    #stDecoration {display:none !important;}
+    
+    /* Comandos para remover a coroa, botão de deploy e status de conexão */
+    [data-testid="stStatusWidget"] {display: none !important;}
+    .stAppDeployButton {display: none !important;}
+    #stDecoration {display: none !important;}
+    [data-testid="stToolbar"] {display: none !important;}
+    header {visibility: hidden !important;}
+
     .block-container { padding-top: 0.1rem !important; }
     .logo-sidebar { font-size: 2.2rem !important; font-weight: bold; color: #1E3A8A; font-family: 'Arial Black', sans-serif; }
     .user-email { font-size: 0.85rem; color: #64748b; margin-bottom: 2px; }
