@@ -16,40 +16,68 @@ except Exception as e:
     st.stop()
 
 # --- 2. CONFIGURAÇÃO E ESTILO ---
-st.set_page_config(page_title="ORCAS - Gestão Financeira", page_icon="🐋", layout="wide", initial_sidebar_state="expanded")
+# 1. Ícone da baleia definido no page_icon
+# 2. O estado inicial será controlado pelo Streamlit
+if 'sidebar_state' not in st.session_state:
+    st.session_state.sidebar_state = 'expanded'
+
+st.set_page_config(
+    page_title="ORCAS - Gestão Financeira", 
+    page_icon="🐋", 
+    layout="wide", 
+    initial_sidebar_state=st.session_state.sidebar_state
+)
 
 def ir_para_o_topo():
     components.html("""<script>window.parent.document.getElementById('topo-ancora').scrollIntoView();</script>""", height=0)
 
+# CSS PARA TORNAR O APP PROFISSIONAL E POSICIONAR O BOTÃO ">>"
 st.markdown("""
     <style>
-    /* 1. Esconde o menu de 3 linhas e o rodapé */
+    /* Esconde elementos nativos que poluem o visual */
     #MainMenu {visibility: hidden;} 
     footer {visibility: hidden;}
-    
-    /* 2. Deixa o cabeçalho transparente para manter o botão ">>" visível */
-    [data-testid="stHeader"] {
-        background: rgba(0,0,0,0) !important;
+    [data-testid="stDecoration"] {display: none !important;}
+    [data-testid="stToolbar"] {display: none !important;}
+    [data-testid="stHeader"] {background: rgba(0,0,0,0) !important;}
+
+    /* ESTILIZAÇÃO DO NOSSO BOTÃO ">>" FIXO NO CANTO */
+    .stButton > button:first-child {
+        position: fixed;
+        top: 12px;
+        left: 10px;
+        z-index: 999995;
+        width: 45px !important;
+        height: 35px !important;
+        background-color: #f0f2f6 !important;
         color: #1E3A8A !important;
+        border: 1px solid #d1d5db !important;
+        border-radius: 4px !important;
+        padding: 0px !important;
+        font-weight: bold !important;
     }
 
-    /* 3. Esconde especificamente a coroa, o botão de Deploy e o status */
-    .stAppDeployButton {display: none !important;}
-    [data-testid="stStatusWidget"] {display: none !important;}
-    #stDecoration {display: none !important;}
-    [data-testid="stToolbar"] {display: none !important;}
-
-    /* 4. Mantém seus formatos e estilos originais rigorosamente */
     .block-container { padding-top: 0.1rem !important; }
     .logo-sidebar { font-size: 2.2rem !important; font-weight: bold; color: #1E3A8A; font-family: 'Arial Black', sans-serif; }
     .user-email { font-size: 0.85rem; color: #64748b; margin-bottom: 2px; }
     .venc-text { font-size: 0.8rem; color: #e11d48; font-weight: bold; margin-bottom: 10px; }
     .titulo-tela { font-size: 1.6rem; font-weight: bold; color: #1E3A8A; border-bottom: 2px solid #E5E7EB; margin-bottom: 15px; padding-bottom: 5px; }
     .project-tag-sidebar { color: #1E3A8A; font-weight: bold; font-size: 0.9rem; margin-bottom: 15px; padding: 8px; border-left: 5px solid #1E3A8A; background: #F3F4F6; border-radius: 4px; }
+    
+    /* Garante que botões dentro das colunas continuem ocupando 100% (exceto o nosso >> fixo) */
     div[data-testid="column"] button { width: 100% !important; }
+    
     .info-pagamento { background: #f8fafc; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0; margin-top: 10px; margin-bottom: 10px; }
     </style>
 """, unsafe_allow_html=True)
+
+# BOTÃO ">>" QUE FUNCIONA VIA URL E LOCALMENTE
+if st.button(">>", key="btn_toggle_menu"):
+    if st.session_state.sidebar_state == 'expanded':
+        st.session_state.sidebar_state = 'collapsed'
+    else:
+        st.session_state.sidebar_state = 'expanded'
+    st.rerun()
 
 def format_moeda(v):
     return f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
