@@ -23,21 +23,23 @@ def ir_para_o_topo():
 
 st.markdown("""
     <style>
-    /* Esconde o menu principal e o rodapé padrão */
+    /* 1. Esconde o menu de 3 linhas e o rodapé */
     #MainMenu {visibility: hidden;} 
     footer {visibility: hidden;}
     
-    /* Esconde a barra de ferramentas superior (onde fica a coroa e o deploy) */
-    [data-testid="stHeader"] {display: none !important;}
+    /* 2. Deixa o cabeçalho transparente para manter o botão ">>" visível */
+    [data-testid="stHeader"] {
+        background: rgba(0,0,0,0) !important;
+        color: #1E3A8A !important;
+    }
+
+    /* 3. Esconde especificamente a coroa, o botão de Deploy e o status */
     .stAppDeployButton {display: none !important;}
-    [data-testid="stToolbar"] {display: none !important;}
-    #stDecoration {display: none !important;}
-    
-    /* Esconde o widget de status de conexão (bolinha/coroa flutuante) */
     [data-testid="stStatusWidget"] {display: none !important;}
-    div[class*="st-emotion-cache"] > div[data-testid="stStatusWidget"] {display: none !important;}
-    
-    /* Ajustes de layout originais mantidos rigorosamente */
+    #stDecoration {display: none !important;}
+    [data-testid="stToolbar"] {display: none !important;}
+
+    /* 4. Mantém seus formatos e estilos originais rigorosamente */
     .block-container { padding-top: 0.1rem !important; }
     .logo-sidebar { font-size: 2.2rem !important; font-weight: bold; color: #1E3A8A; font-family: 'Arial Black', sans-serif; }
     .user-email { font-size: 0.85rem; color: #64748b; margin-bottom: 2px; }
