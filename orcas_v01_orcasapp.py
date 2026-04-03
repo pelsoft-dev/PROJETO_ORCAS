@@ -16,82 +16,59 @@ except Exception as e:
     st.stop()
 
 # --- 2. CONFIGURAÇÃO E ESTILO ---
-# Inicializa o estado do menu se não existir
-if 'sidebar_state' not in st.session_state:
-    st.session_state.sidebar_state = 'expanded'
-
+# 1. BALEIA CONFIGURADA: Isso garante o ícone na aba do navegador.
+# 2. MENU EXPANDIDO: Garante que ele comece aberto.
 st.set_page_config(
     page_title="ORCAS - Gestão Financeira", 
     page_icon="🐋", 
     layout="wide", 
-    initial_sidebar_state=st.session_state.sidebar_state
+    initial_sidebar_state="expanded"
 )
 
-# INJEÇÃO DE BOTÃO ">>" QUE RESOLVE O PROBLEMA DA URL
-# Este componente flutua acima de qualquer bloqueio do Streamlit
-def inject_sidebar_toggle():
-    toggle_html = f"""
-    <div id="custom-toggle" style="
-        position: fixed; 
-        top: 10px; 
-        left: 10px; 
-        z-index: 999999; 
-        cursor: pointer;
-        background-color: #f0f2f6;
-        color: #1E3A8A;
-        border: 1px solid #d1d5db;
-        border-radius: 4px;
-        padding: 5px 10px;
-        font-family: sans-serif;
-        font-weight: bold;
-        user-select: none;
-    "> >> </div>
-    <script>
-        const btn = document.getElementById('custom-toggle');
-        btn.onclick = function() {{
-            // Simula o atalho 'L' que o Streamlit reconhece nativamente
-            window.parent.document.dispatchEvent(new KeyboardEvent('keydown', {{
-                key: 'l',
-                keyCode: 76,
-                code: 'KeyL',
-                which: 76,
-                bubbles: true,
-                target: window.parent.document
-            }}));
-        }};
-    </script>
-    """
-    components.html(toggle_html, height=45)
-
-inject_sidebar_toggle()
+def ir_para_o_topo():
+    components.html("""<script>window.parent.document.getElementById('topo-ancora').scrollIntoView();</script>""", height=0)
 
 st.markdown("""
     <style>
-    /* Limpeza Visual Profissional */
+    /* --- LIMPEZA DE INTERFACE --- */
     #MainMenu {visibility: hidden;} 
     footer {visibility: hidden;}
     [data-testid="stDecoration"] {display: none !important;}
-    [data-testid="stToolbar"] {display: none !important;}
     
-    /* Remove interferência do Header original */
-    [data-testid="stHeader"] {
-        background: rgba(0,0,0,0) !important;
-        pointer-events: none !important;
+    /* Remove os ícones de Deploy/Coroa mas MANTÉM o Header vivo */
+    /* Isso garante que o botão nativo >> do Streamlit continue funcionando */
+    [data-testid="stHeader"] [data-testid="stToolbar"] {
+        display: none !important;
     }
 
-    .block-container { padding-top: 0.5rem !important; }
+    /* ESTILIZAÇÃO DO HEADER PARA NÃO FICAR BRANCO SOBRE O CONTEÚDO */
+    [data-testid="stHeader"] {
+        background: rgba(0,0,0,0) !important;
+        color: #1E3A8A !important;
+    }
+
+    /* GARANTE QUE O BOTÃO NATIVO (>>) SEJA VISÍVEL */
+    /* Se o Streamlit esconder o botão, esse CSS força ele a aparecer em azul */
+    button[title="Open sidebar"], [data-testid="stSidebarCollapseIcon"] {
+        visibility: visible !important;
+        color: #1E3A8A !important;
+    }
+
+    /* --- AJUSTES DE LAYOUT --- */
+    .block-container { padding-top: 1.5rem !important; }
     .logo-sidebar { font-size: 2.2rem !important; font-weight: bold; color: #1E3A8A; font-family: 'Arial Black', sans-serif; }
     .user-email { font-size: 0.85rem; color: #64748b; margin-bottom: 2px; }
     .venc-text { font-size: 0.8rem; color: #e11d48; font-weight: bold; margin-bottom: 10px; }
     .titulo-tela { font-size: 1.6rem; font-weight: bold; color: #1E3A8A; border-bottom: 2px solid #E5E7EB; margin-bottom: 15px; padding-bottom: 5px; }
     
-    /* Botões de formulário (Login, etc) ocupando 100% da coluna */
+    /* Mantém os botões das colunas com 100% de largura */
     div[data-testid="column"] button { width: 100% !important; }
+    
+    .info-pagamento { background: #f8fafc; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0; margin-top: 10px; margin-bottom: 10px; }
     </style>
 """, unsafe_allow_html=True)
 
-def ir_para_o_topo():
-    components.html("""<script>window.parent.document.getElementById('topo-ancora').scrollIntoView();</script>""", height=0)
+# REMOVEMOS O BOTÃO MANUAL ">>" DAQUI PARA NÃO CONFLITAR COM O NATIVO
 
 def format_moeda(v):
     return f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
