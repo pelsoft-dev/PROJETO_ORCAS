@@ -16,8 +16,6 @@ except Exception as e:
     st.stop()
 
 # --- 2. CONFIGURAÇÃO E ESTILO ---
-# 1. Ícone da baleia definido no page_icon
-# 2. O estado inicial será controlado pelo Streamlit
 if 'sidebar_state' not in st.session_state:
     st.session_state.sidebar_state = 'expanded'
 
@@ -31,30 +29,32 @@ st.set_page_config(
 def ir_para_o_topo():
     components.html("""<script>window.parent.document.getElementById('topo-ancora').scrollIntoView();</script>""", height=0)
 
-# CSS PARA TORNAR O APP PROFISSIONAL E POSICIONAR O BOTÃO ">>"
 st.markdown("""
     <style>
-    /* Esconde elementos nativos que poluem o visual */
     #MainMenu {visibility: hidden;} 
     footer {visibility: hidden;}
     [data-testid="stDecoration"] {display: none !important;}
     [data-testid="stToolbar"] {display: none !important;}
     [data-testid="stHeader"] {background: rgba(0,0,0,0) !important;}
 
-    /* ESTILIZAÇÃO DO NOSSO BOTÃO ">>" FIXO NO CANTO */
-    .stButton > button:first-child {
+    /* ESTILO EXCLUSIVO PARA O BOTÃO DE CONTROLE DO MENU */
+    /* Usamos o atributo de dados para garantir que não afete outros botões */
+    div.stElementContainer:has(button[aria-label=">>"]) {
         position: fixed;
         top: 12px;
         left: 10px;
-        z-index: 999995;
-        width: 45px !important;
-        height: 35px !important;
+        z-index: 999999;
+        width: 50px !important;
+    }
+    
+    div.stElementContainer:has(button[aria-label=">>"]) button {
         background-color: #f0f2f6 !important;
         color: #1E3A8A !important;
         border: 1px solid #d1d5db !important;
         border-radius: 4px !important;
+        height: 35px !important;
+        width: 45px !important;
         padding: 0px !important;
-        font-weight: bold !important;
     }
 
     .block-container { padding-top: 0.1rem !important; }
@@ -64,19 +64,16 @@ st.markdown("""
     .titulo-tela { font-size: 1.6rem; font-weight: bold; color: #1E3A8A; border-bottom: 2px solid #E5E7EB; margin-bottom: 15px; padding-bottom: 5px; }
     .project-tag-sidebar { color: #1E3A8A; font-weight: bold; font-size: 0.9rem; margin-bottom: 15px; padding: 8px; border-left: 5px solid #1E3A8A; background: #F3F4F6; border-radius: 4px; }
     
-    /* Garante que botões dentro das colunas continuem ocupando 100% (exceto o nosso >> fixo) */
+    /* Mantém os botões das colunas (Login, Salvar, etc) com largura total */
     div[data-testid="column"] button { width: 100% !important; }
     
     .info-pagamento { background: #f8fafc; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0; margin-top: 10px; margin-bottom: 10px; }
     </style>
 """, unsafe_allow_html=True)
 
-# BOTÃO ">>" QUE FUNCIONA VIA URL E LOCALMENTE
-if st.button(">>", key="btn_toggle_menu"):
-    if st.session_state.sidebar_state == 'expanded':
-        st.session_state.sidebar_state = 'collapsed'
-    else:
-        st.session_state.sidebar_state = 'expanded'
+# Botão com label e help específico para facilitar o rastreio pelo CSS
+if st.button(">>", key="btn_toggle_menu", help="Expandir/Recolher Menu", aria_label=">>"):
+    st.session_state.sidebar_state = 'collapsed' if st.session_state.sidebar_state == 'expanded' else 'expanded'
     st.rerun()
 
 def format_moeda(v):
