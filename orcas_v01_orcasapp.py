@@ -31,23 +31,20 @@ def ir_para_o_topo():
 
 st.markdown("""
     <style>
+    /* Oculta menus e rodapé padrão */
     #MainMenu {visibility: hidden;} 
     footer {visibility: hidden;}
     [data-testid="stDecoration"] {display: none !important;}
     [data-testid="stToolbar"] {display: none !important;}
     [data-testid="stHeader"] {background: rgba(0,0,0,0) !important;}
 
-    /* ESTILO EXCLUSIVO PARA O BOTÃO DE CONTROLE DO MENU */
-    /* Usamos o atributo de dados para garantir que não afete outros botões */
-    div.stElementContainer:has(button[aria-label=">>"]) {
+    /* ESTILO DO BOTÃO DE CONTROLE DO MENU */
+    /* Posiciona o botão fixo no topo sem afetar os outros */
+    div.stButton > button[key="btn_toggle_menu"] {
         position: fixed;
         top: 12px;
         left: 10px;
         z-index: 999999;
-        width: 50px !important;
-    }
-    
-    div.stElementContainer:has(button[aria-label=">>"]) button {
         background-color: #f0f2f6 !important;
         color: #1E3A8A !important;
         border: 1px solid #d1d5db !important;
@@ -64,16 +61,19 @@ st.markdown("""
     .titulo-tela { font-size: 1.6rem; font-weight: bold; color: #1E3A8A; border-bottom: 2px solid #E5E7EB; margin-bottom: 15px; padding-bottom: 5px; }
     .project-tag-sidebar { color: #1E3A8A; font-weight: bold; font-size: 0.9rem; margin-bottom: 15px; padding: 8px; border-left: 5px solid #1E3A8A; background: #F3F4F6; border-radius: 4px; }
     
-    /* Mantém os botões das colunas (Login, Salvar, etc) com largura total */
+    /* Mantém os botões das colunas (Login/Ações) com largura total */
     div[data-testid="column"] button { width: 100% !important; }
     
     .info-pagamento { background: #f8fafc; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0; margin-top: 10px; margin-bottom: 10px; }
     </style>
 """, unsafe_allow_html=True)
 
-# Botão com label e help específico para facilitar o rastreio pelo CSS
-if st.button(">>", key="btn_toggle_menu", help="Expandir/Recolher Menu", aria_label=">>"):
-    st.session_state.sidebar_state = 'collapsed' if st.session_state.sidebar_state == 'expanded' else 'expanded'
+# Botão funcional que alterna o estado do menu
+if st.button(">>", key="btn_toggle_menu", help="Expandir/Recolher Menu"):
+    if st.session_state.sidebar_state == 'expanded':
+        st.session_state.sidebar_state = 'collapsed'
+    else:
+        st.session_state.sidebar_state = 'expanded'
     st.rerun()
 
 def format_moeda(v):
