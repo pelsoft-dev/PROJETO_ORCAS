@@ -16,7 +16,7 @@ except Exception as e:
     st.stop()
 
 # --- 2. CONFIGURAÇÃO E ESTILO ---
-# Gerenciamento do estado do menu lateral
+# Inicializa o estado do menu se não existir
 if 'sidebar_state' not in st.session_state:
     st.session_state.sidebar_state = 'expanded'
 
@@ -27,62 +27,71 @@ st.set_page_config(
     initial_sidebar_state=st.session_state.sidebar_state
 )
 
-def ir_para_o_topo():
-    components.html("""<script>window.parent.document.getElementById('topo-ancora').scrollIntoView();</script>""", height=0)
+# INJEÇÃO DE BOTÃO ">>" QUE RESOLVE O PROBLEMA DA URL
+# Este componente flutua acima de qualquer bloqueio do Streamlit
+def inject_sidebar_toggle():
+    toggle_html = f"""
+    <div id="custom-toggle" style="
+        position: fixed; 
+        top: 10px; 
+        left: 10px; 
+        z-index: 999999; 
+        cursor: pointer;
+        background-color: #f0f2f6;
+        color: #1E3A8A;
+        border: 1px solid #d1d5db;
+        border-radius: 4px;
+        padding: 5px 10px;
+        font-family: sans-serif;
+        font-weight: bold;
+        user-select: none;
+    "> >> </div>
+    <script>
+        const btn = document.getElementById('custom-toggle');
+        btn.onclick = function() {{
+            // Simula o atalho 'L' que o Streamlit reconhece nativamente
+            window.parent.document.dispatchEvent(new KeyboardEvent('keydown', {{
+                key: 'l',
+                keyCode: 76,
+                code: 'KeyL',
+                which: 76,
+                bubbles: true,
+                target: window.parent.document
+            }}));
+        }};
+    </script>
+    """
+    components.html(toggle_html, height=45)
+
+inject_sidebar_toggle()
 
 st.markdown("""
     <style>
-    /* Oculta menus e rodapé padrão */
+    /* Limpeza Visual Profissional */
     #MainMenu {visibility: hidden;} 
     footer {visibility: hidden;}
     [data-testid="stDecoration"] {display: none !important;}
     [data-testid="stToolbar"] {display: none !important;}
     
-    /* Importante: Deixa o header sem bloquear cliques (pointer-events: none) */
+    /* Remove interferência do Header original */
     [data-testid="stHeader"] {
         background: rgba(0,0,0,0) !important;
         pointer-events: none !important;
     }
 
-    /* ESTILO DO BOTÃO DE CONTROLE DO MENU */
-    /* Usamos seletor por atributo para garantir que o clique funcione */
-    div[data-testid="stButton"] button[key="btn_toggle_menu"] {
-        position: fixed;
-        top: 12px;
-        left: 10px;
-        z-index: 999999 !important;
-        pointer-events: auto !important; /* Reativa o clique especificamente no botão */
-        background-color: #f0f2f6 !important;
-        color: #1E3A8A !important;
-        border: 1px solid #d1d5db !important;
-        border-radius: 4px !important;
-        height: 35px !important;
-        width: 45px !important;
-        padding: 0px !important;
-        font-weight: bold !important;
-    }
-
-    .block-container { padding-top: 0.1rem !important; }
+    .block-container { padding-top: 0.5rem !important; }
     .logo-sidebar { font-size: 2.2rem !important; font-weight: bold; color: #1E3A8A; font-family: 'Arial Black', sans-serif; }
     .user-email { font-size: 0.85rem; color: #64748b; margin-bottom: 2px; }
     .venc-text { font-size: 0.8rem; color: #e11d48; font-weight: bold; margin-bottom: 10px; }
     .titulo-tela { font-size: 1.6rem; font-weight: bold; color: #1E3A8A; border-bottom: 2px solid #E5E7EB; margin-bottom: 15px; padding-bottom: 5px; }
-    .project-tag-sidebar { color: #1E3A8A; font-weight: bold; font-size: 0.9rem; margin-bottom: 15px; padding: 8px; border-left: 5px solid #1E3A8A; background: #F3F4F6; border-radius: 4px; }
     
-    /* Mantém os botões das colunas com largura total */
+    /* Botões de formulário (Login, etc) ocupando 100% da coluna */
     div[data-testid="column"] button { width: 100% !important; }
-    
-    .info-pagamento { background: #f8fafc; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0; margin-top: 10px; margin-bottom: 10px; }
     </style>
 """, unsafe_allow_html=True)
 
-# Botão de controle - A lógica de inversão agora é mais explícita
-if st.button(">>", key="btn_toggle_menu"):
-    if st.session_state.sidebar_state == 'expanded':
-        st.session_state.sidebar_state = 'collapsed'
-    else:
-        st.session_state.sidebar_state = 'expanded'
-    st.rerun()
+def ir_para_o_topo():
+    components.html("""<script>window.parent.document.getElementById('topo-ancora').scrollIntoView();</script>""", height=0)
 
 def format_moeda(v):
     return f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
