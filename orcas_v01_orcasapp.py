@@ -28,7 +28,7 @@ st.set_page_config(
     page_title="ORCAS - Gestão Financeira", 
     page_icon="🐋", 
     layout="wide", 
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
 def ir_para_o_topo():
@@ -36,42 +36,51 @@ def ir_para_o_topo():
 
 st.markdown("""
     <style>
-    /* Oculta o menu principal (hambúrguer/coroinha) e o rodapé padrão */
-    #MainMenu {visibility: hidden;} 
-    footer {visibility: hidden;}
-    
-    /* Oculta o ícone do GitHub no topo */
+    /* Oculta elementos nativos do Streamlit */
+    #MainMenu {visibility: hidden; display: none;} 
+    footer {visibility: hidden; display: none;}
+    header {visibility: hidden; display: none;}
     .stAppDeployButton {display:none;}
     [data-testid="stStatusWidget"] {display:none;}
-    header {visibility: hidden;}
+    [data-testid="stHeader"] {display: none;}
+    [data-testid="stToolbar"] {display: none;}
+    .stAppToolbar {display: none;}
+    [data-testid="stDecoration"] {display: none;}
 
-    /* Ajustes de espaçamento para compensar a retirada do header */
-    .block-container { padding-top: 0.1rem !important; }
+    /* HEADER FIXO NO TOPO */
+    .fixed-header {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        background-color: white;
+        z-index: 999;
+        border-bottom: 2px solid #E5E7EB;
+        padding: 10px 20px;
+    }
+
+    /* Ajuste para o conteúdo não ficar embaixo do header fixo */
+    .block-container { 
+        padding-top: 120px !important; 
+    }
     
     /* Estilos personalizados do ORCAS */
-    .logo-sidebar { font-size: 2.2rem !important; font-weight: bold; color: #1E3A8A; font-family: 'Arial Black', sans-serif; }
-    .user-email { font-size: 0.85rem; color: #64748b; margin-bottom: 2px; }
-    .venc-text { font-size: 0.8rem; color: #e11d48; font-weight: bold; margin-bottom: 10px; }
+    .logo-header { font-size: 1.8rem !important; font-weight: bold; color: #1E3A8A; font-family: 'Arial Black', sans-serif; display: inline-block; }
+    .info-header { font-size: 0.75rem; color: #64748b; line-height: 1.2; }
+    .venc-header { font-size: 0.75rem; color: #e11d48; font-weight: bold; }
     .titulo-tela { font-size: 1.6rem; font-weight: bold; color: #1E3A8A; border-bottom: 2px solid #E5E7EB; margin-bottom: 15px; padding-bottom: 5px; }
-    .project-tag-sidebar { color: #1E3A8A; font-weight: bold; font-size: 0.9rem; margin-bottom: 15px; padding: 8px; border-left: 5px solid #1E3A8A; background: #F3F4F6; border-radius: 4px; }
-    div[data-testid="column"] button { width: 100% !important; }
+    
+    /* Ajuste para o texto de assinatura na Gestão ser exibido completo */
+    .stAlert p { white-space: pre-wrap !important; }
+    
+    /* Botões de navegação em linha */
+    div.stButton > button {
+        border-radius: 5px;
+        padding: 5px 10px;
+        font-size: 14px;
+    }
     </style>
 """, unsafe_allow_html=True)
-
-#st.markdown("""
-#    <style>
-#    #MainMenu {visibility: hidden;} 
-#    footer {visibility: hidden;}
-#    [data-testid="stHeader"] {background: rgba(0,0,0,0) !important; color: transparent !important;}
-#    .block-container { padding-top: 0.1rem !important; }
-#    .logo-sidebar { font-size: 2.2rem !important; font-weight: bold; color: #1E3A8A; font-family: 'Arial Black', sans-serif; }
-#    .user-email { font-size: 0.85rem; color: #64748b; margin-bottom: 2px; }
-#    .venc-text { font-size: 0.8rem; color: #e11d48; font-weight: bold; margin-bottom: 10px; }
-#    .titulo-tela { font-size: 1.6rem; font-weight: bold; color: #1E3A8A; border-bottom: 2px solid #E5E7EB; margin-bottom: 15px; padding-bottom: 5px; }
-#    .project-tag-sidebar { color: #1E3A8A; font-weight: bold; font-size: 0.9rem; margin-bottom: 15px; padding: 8px; border-left: 5px solid #1E3A8A; background: #F3F4F6; border-radius: 4px; }
-#    .info-pagamento { background: #f8fafc; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0; margin-top: 10px; margin-bottom: 10px; }
-#    </style>
-#""", unsafe_allow_html=True)
 
 def format_moeda(v):
     return f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
@@ -108,6 +117,7 @@ if not st.session_state.logado:
                     st.session_state.vencimento = str(user_data['vencimento'])
                     st.session_state.zap_ativo = user_data.get('zap_ativo', 0)
                     st.session_state.projeto_ativo = None
+                    st.session_state.escolha = "⚙️ Gestão"
                     st.rerun()
                 else:
                     st.error("E-mail ou senha incorretos.")
@@ -136,6 +146,8 @@ if 'msg_sucesso' not in st.session_state:
     st.session_state.msg_sucesso = None
 if 'confirmar_exclusao_ativa' not in st.session_state:
     st.session_state.confirmar_exclusao_ativa = False
+if 'escolha' not in st.session_state:
+    st.session_state.escolha = "⚙️ Gestão" if st.session_state.projeto_ativo is None else "🏠 Dashboard"
 
 s_db = 0.0
 d_ini_db = None 
@@ -149,34 +161,39 @@ if st.session_state.projeto_ativo:
         d_ini_db = datetime.strptime(cfg['data_ini'], '%Y-%m-%d').date()
         d_fim_db = datetime.strptime(cfg['data_fim'], '%Y-%m-%d').date()
 
-# --- 5. BARRA LATERAL ---
-with st.sidebar:
-    st.markdown('<div class="logo-sidebar">🐋 ORCAS</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="user-email">👤 {st.session_state.usuario}</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="venc-text">📅 EXPIRA EM: {venc_dt_objeto.strftime("%d/%m/%Y")}</div>', unsafe_allow_html=True)
-
-    if st.session_state.projeto_ativo:
-        st.markdown(f'<div class="project-tag-sidebar">Plano Ativo: {st.session_state.projeto_ativo}</div>', unsafe_allow_html=True)
-
-    st.divider()
-    menu_opcoes = ["🏠 Dashboard", "📑 Lançamentos", "📅 Projetar", "✅ Conciliação", "⚙️ Gestão", "📊 Admin"]
-    
-    if 'escolha' not in st.session_state or st.session_state.escolha not in menu_opcoes:
-        st.session_state.escolha = "⚙️ Gestão" if st.session_state.projeto_ativo is None else "🏠 Dashboard"
-    
-    idx_atual = menu_opcoes.index(st.session_state.escolha)
-    
-    escolha_radio = st.radio("Navegação", menu_opcoes, index=idx_atual, key="navegacao_principal", label_visibility="collapsed")
-    
-    st.session_state.escolha = escolha_radio
-    escolha = st.session_state.escolha
-
-    st.divider()
-    if st.button("Sair do Sistema"):
-        st.session_state.clear()
-        st.rerun()
-
+# --- 5. HEADER FIXO E NAVEGAÇÃO ---
+# Container fixo simulado via columns no topo (dentro do fluxo de renderização do Streamlit com ancoragem CSS)
 st.markdown("<div id='topo-ancora'></div>", unsafe_allow_html=True)
+
+with st.container():
+    # Primeira linha: Logo e Info do Usuário
+    c_l, c_i, c_p, c_s = st.columns([1.5, 2, 2, 1])
+    with c_l:
+        st.markdown('<div class="logo-header">🐋 ORCAS</div>', unsafe_allow_html=True)
+    with c_i:
+        st.markdown(f'<div class="info-header">👤 {st.session_state.usuario}<br><span class="venc-header">📅 EXPIRA EM: {venc_dt_objeto.strftime("%d/%m/%Y")}</span></div>', unsafe_allow_html=True)
+    with c_p:
+        if st.session_state.projeto_ativo:
+            st.markdown(f'<div style="color:#1E3A8A; font-weight:bold; font-size:0.9rem; margin-top:5px;">Plano: {st.session_state.projeto_ativo}</div>', unsafe_allow_html=True)
+    with c_s:
+        if st.button("Sair"):
+            st.session_state.clear()
+            st.rerun()
+
+    # Segunda linha: Botões de Navegação (Solução para o bug do Combobox)
+    menu_opcoes = ["🏠 Dashboard", "📑 Lançamentos", "📅 Projetar", "✅ Conciliação", "⚙️ Gestão", "📊 Admin"]
+    cols_nav = st.columns(len(menu_opcoes))
+    
+    for i, opt in enumerate(menu_opcoes):
+        # Destaca o botão da tela ativa
+        tipo_btn = "primary" if st.session_state.escolha == opt else "secondary"
+        if cols_nav[i].button(opt, key=f"btn_nav_{i}", type=tipo_btn, use_container_width=True):
+            st.session_state.escolha = opt
+            st.rerun()
+
+st.divider()
+
+escolha = st.session_state.escolha
 
 if st.session_state.projeto_ativo is None and escolha not in ["⚙️ Gestão", "📊 Admin"]:
     st.session_state.escolha = "⚙️ Gestão"
@@ -196,16 +213,9 @@ else:
         'correcao_freq', 'correcao_valor', 'parcial_real'
     ])
 
-# --- 7. ROTEAMENTO DAS TELAS (CHAMADA DOS MÓDULOS ADEQUADOS) ---
-
-
+# --- 7. ROTEAMENTO DAS TELAS ---
 if escolha == "🏠 Dashboard":
-    # Chamada da sub-rotina que você enviou
     dash.exibir_dashboard(df, supabase, ID_USUARIO_LOGADO, s_db)
-
-#if escolha == "🏠 Dashboard":
-#    st.markdown(f'<div class="titulo-tela">Dashboard: {st.session_state.projeto_ativo}</div>', unsafe_allow_html=True)
-#    st.info("Módulo Dashboard em desenvolvimento ou integração.")
 
 elif escolha == "📑 Lançamentos":
     lanc.exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db, format_moeda, ir_para_o_topo)
