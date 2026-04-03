@@ -36,42 +36,19 @@ def ir_para_o_topo():
 
 st.markdown("""
     <style>
-    /* Oculta o menu principal (hambúrguer/coroinha) e o rodapé padrão */
     #MainMenu {visibility: hidden;} 
     footer {visibility: hidden;}
-    
-    /* Oculta o ícone do GitHub no topo */
-    .stAppDeployButton {display:none;}
-    [data-testid="stStatusWidget"] {display:none;}
-    header {visibility: hidden;}
-
-    /* Ajustes de espaçamento para compensar a retirada do header */
+    [data-testid="stHeader"] {background: rgba(0,0,0,0) !important; color: transparent !important;}
     .block-container { padding-top: 0.1rem !important; }
-    
-    /* Estilos personalizados do ORCAS */
     .logo-sidebar { font-size: 2.2rem !important; font-weight: bold; color: #1E3A8A; font-family: 'Arial Black', sans-serif; }
     .user-email { font-size: 0.85rem; color: #64748b; margin-bottom: 2px; }
     .venc-text { font-size: 0.8rem; color: #e11d48; font-weight: bold; margin-bottom: 10px; }
     .titulo-tela { font-size: 1.6rem; font-weight: bold; color: #1E3A8A; border-bottom: 2px solid #E5E7EB; margin-bottom: 15px; padding-bottom: 5px; }
     .project-tag-sidebar { color: #1E3A8A; font-weight: bold; font-size: 0.9rem; margin-bottom: 15px; padding: 8px; border-left: 5px solid #1E3A8A; background: #F3F4F6; border-radius: 4px; }
     div[data-testid="column"] button { width: 100% !important; }
+    .info-pagamento { background: #f8fafc; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0; margin-top: 10px; margin-bottom: 10px; }
     </style>
 """, unsafe_allow_html=True)
-
-#st.markdown("""
-#    <style>
-#    #MainMenu {visibility: hidden;} 
-#    footer {visibility: hidden;}
-#    [data-testid="stHeader"] {background: rgba(0,0,0,0) !important; color: transparent !important;}
-#    .block-container { padding-top: 0.1rem !important; }
-#    .logo-sidebar { font-size: 2.2rem !important; font-weight: bold; color: #1E3A8A; font-family: 'Arial Black', sans-serif; }
-#    .user-email { font-size: 0.85rem; color: #64748b; margin-bottom: 2px; }
-#    .venc-text { font-size: 0.8rem; color: #e11d48; font-weight: bold; margin-bottom: 10px; }
-#    .titulo-tela { font-size: 1.6rem; font-weight: bold; color: #1E3A8A; border-bottom: 2px solid #E5E7EB; margin-bottom: 15px; padding-bottom: 5px; }
-#    .project-tag-sidebar { color: #1E3A8A; font-weight: bold; font-size: 0.9rem; margin-bottom: 15px; padding: 8px; border-left: 5px solid #1E3A8A; background: #F3F4F6; border-radius: 4px; }
-#    .info-pagamento { background: #f8fafc; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0; margin-top: 10px; margin-bottom: 10px; }
-#    </style>
-#""", unsafe_allow_html=True)
 
 def format_moeda(v):
     return f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
