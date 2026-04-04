@@ -36,12 +36,17 @@ def ir_para_o_topo():
 
 st.markdown("""
     <style>
-    /* Oculta menus nativos para um visual limpo */
+    /* Oculta menus nativos desnecessários mas permite o botão de expansão >> */
     #MainMenu {visibility: hidden;} 
     footer {visibility: hidden;}
-    header {visibility: hidden;}
-    [data-testid="stHeader"] {display: none;}
+    [data-testid="stHeader"] { background-color: rgba(0,0,0,0); }
     
+    /* ADEQUAÇÃO (3): Sobe o conteúdo em aproximadamente 2cm */
+    .block-container {
+        padding-top: 0rem !important;
+        margin-top: -5rem !important;
+    }
+
     /* Estilos customizados ORCAS */
     .logo-sidebar { font-size: 2.2rem !important; font-weight: bold; color: #1E3A8A; font-family: 'Arial Black', sans-serif; margin-bottom: 20px; }
     .user-email { font-size: 0.85rem; color: #64748b; margin-bottom: 2px; }
@@ -49,8 +54,13 @@ st.markdown("""
     .titulo-tela { font-size: 1.6rem; font-weight: bold; color: #1E3A8A; border-bottom: 2px solid #E5E7EB; margin-bottom: 15px; padding-bottom: 5px; }
     .project-tag-sidebar { color: #1E3A8A; font-weight: bold; font-size: 0.9rem; margin-bottom: 15px; padding: 8px; border-left: 5px solid #1E3A8A; background: #F3F4F6; border-radius: 4px; }
     
-    /* Garante que o texto da assinatura na Gestão seja exibido completo */
-    .info-pagamento { white-space: normal !important; word-wrap: break-word !important; display: block !important; }
+    /* ADEQUAÇÃO (2): Garante que o texto da assinatura na Gestão seja exibido completo */
+    .info-pagamento, .stAlert p { 
+        white-space: normal !important; 
+        word-wrap: break-word !important; 
+        display: block !important;
+        overflow: visible !important;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -134,14 +144,18 @@ with st.sidebar:
     
     st.divider()
     
-    # Navegação por Radio (Evita o bug do combobox e é nativo)
     menu_opcoes = ["🏠 Dashboard", "📑 Lançamentos", "📅 Projetar", "✅ Conciliação", "⚙️ Gestão", "📊 Admin"]
     
-    # Se não houver projeto ativo, força a tela de Gestão
     idx_inicial = menu_opcoes.index(st.session_state.escolha) if st.session_state.escolha in menu_opcoes else 4
     
-    escolha = st.radio("Menu de Navegação", menu_opcoes, index=idx_inicial)
-    st.session_state.escolha = escolha
+    # ADEQUAÇÃO (1): Resolução da execução dupla no Menu
+    escolha_temp = st.radio("Menu de Navegação", menu_opcoes, index=idx_inicial)
+    
+    if escolha_temp != st.session_state.escolha:
+        st.session_state.escolha = escolha_temp
+        st.rerun()
+    
+    escolha = st.session_state.escolha
     
     st.divider()
     if st.button("Sair do Sistema"):
