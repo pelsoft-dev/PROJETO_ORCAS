@@ -46,15 +46,11 @@ st.markdown("""
     [data-testid="stHeader"] {
         background-color: rgba(0,0,0,0) !important;
     }
-    
-    /* Seletor específico para os links de Fork/Github na barra superior */
     [data-testid="stHeader"] a, 
     [data-testid="stHeader"] div:contains("Fork"),
     [data-testid="stHeader"] svg {
         display: none !important;
     }
-    
-    /* Garante que o botão de abrir/fechar a sidebar (>> e <<) permaneça visível */
     [data-testid="stHeader"] button {
         display: flex !important;
         visibility: visible !important;
@@ -74,6 +70,14 @@ st.markdown("""
         word-break: keep-all !important;
     }
 
+    /* DICA COPILOT: Oculta ícones flutuantes (roxo e coroa) no canto inferior direito */
+    .viewerBadge_container__1QSob,
+    .viewerBadge_link__1S137,
+    .css-1rs6os {
+        display: none !important;
+        visibility: hidden !important;
+    }
+
     /* Estilos customizados ORCAS */
     .logo-sidebar { font-size: 2.2rem !important; font-weight: bold; color: #1E3A8A; font-family: 'Arial Black', sans-serif; margin-bottom: 20px; }
     .user-email { font-size: 0.85rem; color: #64748b; margin-bottom: 2px; }
@@ -81,7 +85,6 @@ st.markdown("""
     .titulo-tela { font-size: 1.6rem; font-weight: bold; color: #1E3A8A; border-bottom: 2px solid #E5E7EB; margin-bottom: 15px; padding-bottom: 5px; }
     .project-tag-sidebar { color: #1E3A8A; font-weight: bold; font-size: 0.9rem; margin-bottom: 15px; padding: 8px; border-left: 5px solid #1E3A8A; background: #F3F4F6; border-radius: 4px; }
     
-    /* Texto da assinatura completo */
     .info-pagamento, .stAlert p { 
         white-space: normal !important; 
         word-wrap: break-word !important; 
@@ -90,6 +93,7 @@ st.markdown("""
     }
     </style>
 """, unsafe_allow_html=True)
+
 
 def format_moeda(v):
     return f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
