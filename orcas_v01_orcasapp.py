@@ -36,15 +36,24 @@ def ir_para_o_topo():
 
 st.markdown("""
     <style>
-    /* Oculta menus nativos desnecessários mas permite o botão de expansão >> */
+    /* Oculta menus nativos e "sujeiras" do Streamlit Cloud (Adequação 1) */
     #MainMenu {visibility: hidden;} 
     footer {visibility: hidden;}
-    [data-testid="stHeader"] { background-color: rgba(0,0,0,0); }
+    .stAppDeployButton {display:none;}
+    [data-testid="stStatusWidget"] {display:none;}
     
-    /* ADEQUAÇÃO (3): Sobe o conteúdo em aproximadamente 2cm */
+    /* Remove botões de Fork/Github no topo mobile */
+    [data-testid="stHeader"] > div:first-child {display:none;}
+    
+    /* ADEQUAÇÃO (2): Ajuste de altura (desce 1cm em relação ao anterior) e preserva títulos */
     .block-container {
-        padding-top: 0rem !important;
-        margin-top: -5rem !important;
+        padding-top: 1rem !important;
+        margin-top: -2.5rem !important;
+    }
+
+    /* ADEQUAÇÃO (3): Mantém dados das tabelas em uma única linha sem quebrar */
+    table td, table th {
+        white-space: nowrap !important;
     }
 
     /* Estilos customizados ORCAS */
@@ -54,7 +63,7 @@ st.markdown("""
     .titulo-tela { font-size: 1.6rem; font-weight: bold; color: #1E3A8A; border-bottom: 2px solid #E5E7EB; margin-bottom: 15px; padding-bottom: 5px; }
     .project-tag-sidebar { color: #1E3A8A; font-weight: bold; font-size: 0.9rem; margin-bottom: 15px; padding: 8px; border-left: 5px solid #1E3A8A; background: #F3F4F6; border-radius: 4px; }
     
-    /* ADEQUAÇÃO (2): Garante que o texto da assinatura na Gestão seja exibido completo */
+    /* Garante que o texto da assinatura na Gestão seja exibido completo */
     .info-pagamento, .stAlert p { 
         white-space: normal !important; 
         word-wrap: break-word !important; 
@@ -133,7 +142,7 @@ if st.session_state.projeto_ativo:
         d_ini_db = datetime.strptime(cfg['data_ini'], '%Y-%m-%d').date()
         d_fim_db = datetime.strptime(cfg['data_fim'], '%Y-%m-%d').date()
 
-# --- 6. NAVEGAÇÃO NA SIDEBAR (ESTÁVEL) ---
+# --- 6. NAVEGAÇÃO NA SIDEBAR ---
 with st.sidebar:
     st.markdown('<div class="logo-sidebar">🐋 ORCAS</div>', unsafe_allow_html=True)
     st.markdown(f'<div class="user-email">👤 {st.session_state.usuario}</div>', unsafe_allow_html=True)
@@ -148,7 +157,6 @@ with st.sidebar:
     
     idx_inicial = menu_opcoes.index(st.session_state.escolha) if st.session_state.escolha in menu_opcoes else 4
     
-    # ADEQUAÇÃO (1): Resolução da execução dupla no Menu
     escolha_temp = st.radio("Menu de Navegação", menu_opcoes, index=idx_inicial)
     
     if escolha_temp != st.session_state.escolha:
