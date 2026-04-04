@@ -36,22 +36,23 @@ def ir_para_o_topo():
 
 st.markdown("""
     <style>
-    /* Oculta menus nativos e "sujeiras" do Streamlit Cloud (Adequação 1) */
+    /* Oculta menus nativos e footer */
     #MainMenu {visibility: hidden;} 
     footer {visibility: hidden;}
     .stAppDeployButton {display:none;}
     [data-testid="stStatusWidget"] {display:none;}
     
-    /* Remove botões de Fork/Github no topo mobile */
-    [data-testid="stHeader"] > div:first-child {display:none;}
+    /* ADEQUAÇÃO (1): Remove apenas Fork/Github, PRESERVANDO o botão >> e << */
+    [data-testid="stHeader"] > div:first-child {display:none !important;}
+    [data-testid="stHeader"] a {display:none !important;}
     
-    /* ADEQUAÇÃO (2): Ajuste de altura (desce 1cm em relação ao anterior) e preserva títulos */
+    /* ADEQUAÇÃO (2): Ajuste para VOLTAR OS TÍTULOS e subir o conteúdo adequadamente */
     .block-container {
-        padding-top: 1rem !important;
-        margin-top: -2.5rem !important;
+        padding-top: 3.5rem !important;
+        margin-top: -2.0rem !important;
     }
 
-    /* ADEQUAÇÃO (3): Mantém dados das tabelas em uma única linha sem quebrar */
+    /* ADEQUAÇÃO (3): Tabelas sem quebra de linha para manter concisão */
     table td, table th {
         white-space: nowrap !important;
     }
@@ -63,7 +64,7 @@ st.markdown("""
     .titulo-tela { font-size: 1.6rem; font-weight: bold; color: #1E3A8A; border-bottom: 2px solid #E5E7EB; margin-bottom: 15px; padding-bottom: 5px; }
     .project-tag-sidebar { color: #1E3A8A; font-weight: bold; font-size: 0.9rem; margin-bottom: 15px; padding: 8px; border-left: 5px solid #1E3A8A; background: #F3F4F6; border-radius: 4px; }
     
-    /* Garante que o texto da assinatura na Gestão seja exibido completo */
+    /* Texto da assinatura completo */
     .info-pagamento, .stAlert p { 
         white-space: normal !important; 
         word-wrap: break-word !important; 
@@ -154,7 +155,6 @@ with st.sidebar:
     st.divider()
     
     menu_opcoes = ["🏠 Dashboard", "📑 Lançamentos", "📅 Projetar", "✅ Conciliação", "⚙️ Gestão", "📊 Admin"]
-    
     idx_inicial = menu_opcoes.index(st.session_state.escolha) if st.session_state.escolha in menu_opcoes else 4
     
     escolha_temp = st.radio("Menu de Navegação", menu_opcoes, index=idx_inicial)
