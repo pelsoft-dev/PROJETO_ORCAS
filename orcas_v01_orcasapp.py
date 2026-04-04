@@ -39,20 +39,27 @@ st.markdown("""
     /* Oculta menus nativos e footer */
     #MainMenu {visibility: hidden;} 
     footer {visibility: hidden;}
-    .stAppDeployButton {display:none;}
-    [data-testid="stStatusWidget"] {display:none;}
+    .stAppDeployButton {display:none !important;}
+    [data-testid="stStatusWidget"] {display:none !important;}
     
-    /* ADEQUAÇÃO (1): Remove apenas Fork/Github, PRESERVANDO o botão >> e << */
-    [data-testid="stHeader"] > div:first-child {display:none !important;}
-    [data-testid="stHeader"] a {display:none !important;}
+    /* ADEQUAÇÃO (1): Garante que a barra de cabeçalho seja clicável para os botões >> e << */
+    [data-testid="stHeader"] {
+        background-color: rgba(0,0,0,0) !important;
+        color: transparent !important;
+    }
     
-    /* ADEQUAÇÃO (2): Ajuste para VOLTAR OS TÍTULOS e subir o conteúdo adequadamente */
-    .block-container {
-        padding-top: 3.5rem !important;
-        margin-top: -2.0rem !important;
+    /* Remove especificamente os links de Fork/Github sem desativar os botões de controle */
+    [data-testid="stHeader"] a {
+        display: none !important;
     }
 
-    /* ADEQUAÇÃO (3): Tabelas sem quebra de linha para manter concisão */
+    /* ADEQUAÇÃO (2): Ajuste de altura para TÍTULOS visíveis e alinhados */
+    .block-container {
+        padding-top: 3.0rem !important;
+        margin-top: -1.5rem !important;
+    }
+
+    /* ADEQUAÇÃO (3): Tabelas concisas em uma única linha */
     table td, table th {
         white-space: nowrap !important;
     }
