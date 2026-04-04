@@ -42,26 +42,36 @@ st.markdown("""
     .stAppDeployButton {display:none !important;}
     [data-testid="stStatusWidget"] {display:none !important;}
     
-    /* ADEQUAÇÃO (1): Garante que a barra de cabeçalho seja clicável para os botões >> e << */
+    /* ADEQUAÇÃO (1): Remove "Fork" e ícone do GitHub no Mobile e Desktop */
     [data-testid="stHeader"] {
         background-color: rgba(0,0,0,0) !important;
-        color: transparent !important;
     }
     
-    /* Remove especificamente os links de Fork/Github sem desativar os botões de controle */
-    [data-testid="stHeader"] a {
+    /* Seletor específico para os links de Fork/Github na barra superior */
+    [data-testid="stHeader"] a, 
+    [data-testid="stHeader"] div:contains("Fork"),
+    [data-testid="stHeader"] svg {
         display: none !important;
     }
+    
+    /* Garante que o botão de abrir/fechar a sidebar (>> e <<) permaneça visível */
+    [data-testid="stHeader"] button {
+        display: flex !important;
+        visibility: visible !important;
+    }
 
-    /* ADEQUAÇÃO (2): Ajuste de altura para TÍTULOS visíveis e alinhados */
+    /* ADEQUAÇÃO (2): Ajuste de altura para TÍTULOS visíveis e conteúdo alinhado */
     .block-container {
         padding-top: 3.0rem !important;
         margin-top: -1.5rem !important;
     }
 
-    /* ADEQUAÇÃO (3): Tabelas concisas em uma única linha */
+    /* ADEQUAÇÃO (3): Força tabelas (Lançamentos/Conciliação) a ficarem em uma única linha */
+    [data-testid="stTable"] td, 
+    [data-testid="stTable"] th,
     table td, table th {
         white-space: nowrap !important;
+        word-break: keep-all !important;
     }
 
     /* Estilos customizados ORCAS */
