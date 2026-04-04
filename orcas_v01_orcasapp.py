@@ -91,17 +91,21 @@ st.markdown("""
         display: block !important;
         overflow: visible !important;
     }
-    /* DICA COPILOT: Oculta os ícones flutuantes (badge roxo e coroa vermelha) */
+    /* DICA COPILOT: Remove os ícones/badges do Streamlit Cloud no canto inferior direito */
     [data-testid="stDecoration"] {
         display: none !important;
         visibility: hidden !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
     }
 
-    /* fallback extra: remove qualquer container de badge no canto inferior direito */
-    div[class*="viewerBadge"] {
+    /* fallback extra: pega qualquer div com 'stDecoration' no nome da classe */
+    div[class*="stDecoration"] {
         display: none !important;
         visibility: hidden !important;
-    }        
+        opacity: 0 !important;
+        pointer-events: none !important;
+    }
     </style>
 """, unsafe_allow_html=True)
 
