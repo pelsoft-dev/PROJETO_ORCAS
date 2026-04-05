@@ -42,7 +42,7 @@ st.markdown("""
     .stAppDeployButton {display:none !important;}
     [data-testid="stStatusWidget"] {display:none !important;}
     
-    /* ADEQUAÇÃO (1): Remove "Fork" e ícone do GitHub no Mobile e Desktop */
+    /* ADEQUAÇÃO (1): Remove "Fork", GitHub e Badges flutuantes no Mobile/Desktop */
     [data-testid="stHeader"] {
         background-color: rgba(0,0,0,0) !important;
     }
@@ -51,31 +51,33 @@ st.markdown("""
     [data-testid="stHeader"] svg {
         display: none !important;
     }
+    /* Mantém botões >> e << funcionais */
     [data-testid="stHeader"] button {
         display: flex !important;
         visibility: visible !important;
     }
 
-    /* ADEQUAÇÃO (2): Ajuste de altura para TÍTULOS visíveis e conteúdo alinhado */
+    /* Remove badges flutuantes do canto inferior direito */
+    [data-testid="stDecoration"],
+    .viewerBadge_container__1QSob,
+    .viewerBadge_link__1S137,
+    div[class*="stDecoration"] {
+        display: none !important;
+        visibility: hidden !important;
+    }
+
+    /* ADEQUAÇÃO (2): Ajuste de altura para TÍTULOS e conteúdo */
     .block-container {
         padding-top: 3.0rem !important;
         margin-top: -1.5rem !important;
     }
 
-    /* ADEQUAÇÃO (3): Força tabelas (Lançamentos/Conciliação) a ficarem em uma única linha */
+    /* ADEQUAÇÃO (3): Força tabelas a manterem dados e títulos em uma única linha */
     [data-testid="stTable"] td, 
     [data-testid="stTable"] th,
     table td, table th {
         white-space: nowrap !important;
         word-break: keep-all !important;
-    }
-
-    /* DICA COPILOT: Oculta ícones flutuantes (roxo e coroa) no canto inferior direito */
-    .viewerBadge_container__1QSob,
-    .viewerBadge_link__1S137,
-    .css-1rs6os {
-        display: none !important;
-        visibility: hidden !important;
     }
 
     /* Estilos customizados ORCAS */
@@ -91,24 +93,8 @@ st.markdown("""
         display: block !important;
         overflow: visible !important;
     }
-    /* DICA COPILOT: Remove os ícones/badges do Streamlit Cloud no canto inferior direito */
-    [data-testid="stDecoration"] {
-        display: none !important;
-        visibility: hidden !important;
-        opacity: 0 !important;
-        pointer-events: none !important;
-    }
-
-    /* fallback extra: pega qualquer div com 'stDecoration' no nome da classe */
-    div[class*="stDecoration"] {
-        display: none !important;
-        visibility: hidden !important;
-        opacity: 0 !important;
-        pointer-events: none !important;
-    }
     </style>
 """, unsafe_allow_html=True)
-
 
 def format_moeda(v):
     return f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
