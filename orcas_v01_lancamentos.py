@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
+import streamlit.components.v1 as components
 
 def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db, format_moeda, ir_para_o_topo):
     """
@@ -8,40 +9,6 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
     """
     st.markdown(f'<div class="titulo-tela">Lançamentos: {st.session_state.projeto_ativo}</div>', unsafe_allow_html=True)
     
-    # CSS AJUSTADO: Container mestre para rolagem sincronizada de todas as linhas e cabeçalho
-    st.markdown("""
-        <style>
-        .container-scroll-mestre {
-            width: 100%;
-            overflow-x: auto; /* Única barra de rolagem para tudo */
-            -webkit-overflow-scrolling: touch;
-            background-color: white;
-        }
-        .bloco-tabela {
-            min-width: 450px; /* Garante que as colunas tenham espaço para respirar */
-            display: flex;
-            flex-direction: column;
-        }
-        .linha-compacta {
-            display: flex;
-            flex-direction: row;
-            flex-wrap: nowrap;
-            align-items: center;
-            justify-content: flex-start;
-            width: 100%;
-            border-bottom: 1px solid #f0f2f6;
-            padding: 6px 0;
-        }
-        .col-data { min-width: 85px; width: 85px; font-size: 0.8rem; }
-        .col-desc { min-width: 150px; width: 150px; font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 5px; }
-        .col-tipo { min-width: 30px; width: 30px; font-size: 0.8rem; text-align: center; }
-        .col-valor { min-width: 80px; width: 80px; font-size: 0.8rem; text-align: right; }
-        .col-status { min-width: 45px; width: 45px; font-size: 0.75rem; text-align: center; font-weight: bold; margin-left: 5px; }
-        
-        .header-compacto { font-weight: bold; background-color: #f8f9fa; border-top: 1px solid #e6e9ef; position: sticky; top: 0; }
-        </style>
-    """, unsafe_allow_html=True)
-
     if d_ini_db and d_fim_db:
         meses_periodo = []
         data_atual_loop = d_ini_db.replace(day=1)
@@ -83,18 +50,22 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                 st.divider()
 
                 if not df_mes.empty:
-                    # ABERTURA DO CONTAINER MESTRE DE ROLAGEM
-                    html_tabela = '<div class="container-scroll-mestre"><div class="bloco-tabela">'
-                    
-                    # Cabeçalho
-                    html_tabela += f"""
-                        <div class="linha-compacta header-compacto">
-                            <div class="col-data">Data</div>
-                            <div class="col-desc">Descrição</div>
-                            <div class="col-tipo">E/S</div>
-                            <div class="col-valor">V.Plan</div>
-                            <div class="col-valor">V.Real</div>
-                            <div class="col-status">St</div>
+                    # Construção do HTML com CSS embutido para garantir a linha única (no-wrap)
+                    html_content = """
+                    <style>
+                        .tabela-wrapper { font-family: sans-serif; width: 100%; overflow-x: auto; white-space: nowrap; }
+                        .linha { display: flex; border-bottom: 1px solid #eee; padding: 8px 0; align-items: center; min-width: 500px; }
+                        .cabecalho { font-weight: bold; background: #f9f9f9; border-top: 1px solid #ddd; }
+                        .c-data { width: 90px; font-size: 13px; }
+                        .c-desc { width: 180px; font-size: 13px; overflow: hidden; text-overflow: ellipsis; padding: 0 5px; }
+                        .c-es { width: 30px; font-size: 13px; text-align: center; }
+                        .c-val { width: 85px; font-size: 13px; text-align: right; }
+                        .c-st { width: 40px; font-size: 12px; text-align: center; font-weight: bold; margin-left: 10px; }
+                    </style>
+                    <div class="tabela-wrapper">
+                        <div class="linha cabecalho">
+                            <div class="c-data">Data</div><div class="c-desc">Descrição</div><div class="c-es">E/S</div>
+                            <div class="c-val">V.Plan</div><div class="c-val">V.Real</div><div class="c-st">St</div>
                         </div>
                     """
 
@@ -103,37 +74,36 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                     for _, row in df_exibir.iterrows():
                         v_acum = df_mes[df_mes['descricao'] == row['descricao']]['parcial_real'].sum()
                         v_real_exibir = v_acum if v_acum > 0 else row['valor_real']
-                        status_exibir = 'PL' if row['status'] == 'Planejado' else 'RL'
                         data_exibir = pd.to_datetime(row['data']).strftime('%d/%m/%Y')
-
-                        html_tabela += f"""
-                            <div class="linha-compacta">
-                                <div class="col-data">{data_exibir}</div>
-                                <div class="col-desc">{row['descricao']}</div>
-                                <div class="col-tipo">{row['tipo'][0]}</div>
-                                <div class="col-valor">{format_moeda(row['valor_plan'])}</div>
-                                <div class="col-valor">{format_moeda(v_real_exibir)}</div>
-                                <div class="col-status">{status_exibir}</div>
-                            </div>
+                        
+                        html_content += f"""
+                        <div class="linha">
+                            <div class="c-data">{data_exibir}</div>
+                            <div class="c-desc">{row['descricao']}</div>
+                            <div class="c-es">{row['tipo'][0]}</div>
+                            <div class="c-val">{format_moeda(row['valor_plan'])}</div>
+                            <div class="c-val">{format_moeda(v_real_exibir)}</div>
+                            <div class="c-st">{'PL' if row['status'] == 'Planejado' else 'RL'}</div>
+                        </div>
                         """
 
                         filhos = df_mes[(df_mes['descricao'] == row['descricao']) & (df_mes['valor_plan'] == 0) & (df_mes['parcial_real'] > 0)]
                         for _, filho in filhos.iterrows():
-                            data_filho = pd.to_datetime(filho['parcial_data']).strftime('%d/%m/%Y')
-                            html_tabela += f"""
-                                <div class="linha-compacta" style="color: gray;">
-                                    <div class="col-data"></div>
-                                    <div class="col-desc" style="padding-left:15px;">> {data_filho}</div>
-                                    <div class="col-tipo">{filho['tipo'][0]}</div>
-                                    <div class="col-valor">---</div>
-                                    <div class="col-valor">{format_moeda(filho['parcial_real'])}</div>
-                                    <div class="col-status">RL</div>
-                                </div>
+                            data_f = pd.to_datetime(filho['parcial_data']).strftime('%d/%m/%Y')
+                            html_content += f"""
+                            <div class="linha" style="color: gray;">
+                                <div class="c-data"></div>
+                                <div class="c-desc" style="padding-left:15px;">> {data_f}</div>
+                                <div class="c-es">{filho['tipo'][0]}</div>
+                                <div class="c-val">---</div>
+                                <div class="c-val">{format_moeda(filho['parcial_real'])}</div>
+                                <div class="c-st">RL</div>
+                            </div>
                             """
                     
-                    # FECHAMENTO DO CONTAINER MESTRE
-                    html_tabela += '</div></div>'
-                    st.markdown(html_tabela, unsafe_allow_html=True)
+                    html_content += "</div>"
+                    # Renderiza o HTML final garantindo que o Streamlit não trate como texto
+                    st.markdown(html_content, unsafe_allow_html=True)
                 else:
                     st.write("ℹ️ Nenhum lançamento para este mês.")
             
