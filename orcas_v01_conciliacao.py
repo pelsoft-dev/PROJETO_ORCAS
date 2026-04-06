@@ -8,6 +8,35 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
     """
     st.markdown(f'<div class="titulo-tela">Conciliação: {st.session_state.projeto_ativo}</div>', unsafe_allow_html=True)
     
+    # CSS para garantir que o cabeçalho e as colunas não quebrem no celular
+    st.markdown("""
+        <style>
+        .scroll-conciliacao {
+            width: 100%;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+        .bloco-conciliacao {
+            min-width: 650px; /* Largura mínima para manter todos os campos em linha */
+            display: flex;
+            flex-direction: column;
+        }
+        .header-conc {
+            font-weight: bold;
+            background-color: #f8f9fa;
+            padding: 10px 0;
+            border-top: 1px solid #ddd;
+            border-bottom: 2px solid #eee;
+        }
+        .row-conc {
+            border-bottom: 1px solid #eee;
+            padding: 5px 0;
+            display: flex;
+            align-items: center;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
     hoje_c = datetime.now().date()
     ini_mes_c = hoje_c.replace(day=1)
     limite_c = hoje_c - timedelta(days=3)
@@ -26,7 +55,6 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
         sp_tipo = cols_sp[1].selectbox("E/S", ["Entrada", "Saída"], key="sp_tipo")
         sp_valor = cols_sp[2].text_input("Valor Real", key="sp_valor", value="0,00")
         
-        # Alinhamento vertical preciso do botão com os inputs
         with cols_sp[3]:
             st.markdown('<div style="margin-top: 28px;"></div>', unsafe_allow_html=True)
             btn_confirmar = st.button("Confirmar", key="btn_sp_conf", use_container_width=True)
@@ -55,7 +83,6 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
     if not df_c.empty:
         df_c['dt_obj'] = pd.to_datetime(df_c['data']).dt.date
         
-        # Lógica de Filtro: Planejados passados, realizados recentes ou lançamentos diretos
         df_f = df_c[
             (df_c['dt_obj'] <= hoje_c) & 
             (
@@ -69,30 +96,36 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
         demais_itens = df_f[~df_f.index.isin(parciais_topo.index)].sort_values('dt_obj', ascending=False)
         df_final_concilia = pd.concat([parciais_topo, demais_itens])
 
-        # Cabeçalho Compacto
-        h1, h2, h3, h4, h5, h6 = st.columns([2.5, 0.5, 1.2, 1.8, 1.8, 1.2])
-        h1.write("**Data - Descrição**")
-        h2.write("**E/S**")
-        h3.write("**V. Plan.**")
-        h4.write("**V. Real**")
-        h5.write("**Valor Parcial**")
-        h6.write("**Ação**")
-        st.divider()
+        # ABERTURA DO CONTAINER DE ROLAGEM
+        st.markdown('<div class="scroll-conciliacao"><div class="bloco-conciliacao">', unsafe_allow_html=True)
+
+        # Cabeçalho Compacto dentro do Scroll
+        h = st.columns([2.5, 0.5, 1.2, 1.8, 1.8, 1.2])
+        h[0].write("**Data - Descrição**")
+        h[1].write("**E/S**")
+        h[2].write("**V. Plan.**")
+        h[3].write("**V. Real**")
+        h[4].write("**V. Parcial**")
+        h[5].write("**Ação**")
+        
+        st.markdown('<hr style="margin: 5px 0;">', unsafe_allow_html=True)
 
         for _, row in df_final_concilia.iterrows():
             v_acumulado_desc = df[df['descricao'] == row['descricao']]['parcial_real'].sum()
             cor_txt = "red" if (row['valor_plan'] > 0 and v_acumulado_desc > row['valor_plan']) else "black"
             
-            st.markdown('<div style="margin-bottom: -38px;"></div>', unsafe_allow_html=True)
+            # Ajuste de margem para compensar o Streamlit
+            st.markdown('<div style="margin-bottom: -35px;"></div>', unsafe_allow_html=True)
             c1, c2, c3, c4, c5, c6 = st.columns([2.5, 0.5, 1.2, 1.8, 1.8, 1.2])
             
-            c1.markdown(f"<span style='color:{cor_txt}'>{row['dt_obj'].strftime('%d/%m/%Y')} - {row['descricao']}</span>", unsafe_allow_html=True)
+            # Formato de data preservado: DD/MM/AAAA
+            c1.markdown(f"<span style='color:{cor_txt}; font-size: 0.85rem;'>{row['dt_obj'].strftime('%d/%m/%Y')} - {row['descricao']}</span>", unsafe_allow_html=True)
             cor_tipo = 'red' if row['tipo'] == 'Saída' else 'blue'
-            c2.markdown(f"<span style='color:{cor_tipo}'>{row['tipo'][0]}</span>", unsafe_allow_html=True)
+            c2.markdown(f"<span style='color:{cor_tipo}; font-size: 0.85rem;'>{row['tipo'][0]}</span>", unsafe_allow_html=True)
             
             if row['permite_parcial']:
-                c3.markdown(f"<span style='color:{cor_txt}'>{format_moeda(row['valor_plan'])}</span>", unsafe_allow_html=True)
-                c4.markdown(f"<span style='color:{cor_txt}'>{format_moeda(v_acumulado_desc)}</span>", unsafe_allow_html=True)
+                c3.markdown(f"<span style='color:{cor_txt}; font-size: 0.85rem;'>{format_moeda(row['valor_plan'])}</span>", unsafe_allow_html=True)
+                c4.markdown(f"<span style='color:{cor_txt}; font-size: 0.85rem;'>{format_moeda(v_acumulado_desc)}</span>", unsafe_allow_html=True)
                 
                 v_key = f"v_p_{row['id']}"
                 if v_key not in st.session_state:
@@ -120,9 +153,9 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                         st.session_state[v_key] += 1
                         st.rerun()
             else:
-                c3.write(format_moeda(row['valor_plan']))
+                c3.markdown(f"<span style='font-size: 0.85rem;'>{format_moeda(row['valor_plan'])}</span>", unsafe_allow_html=True)
                 if row['status'] == 'Realizado':
-                    c4.write(format_moeda(row['valor_real']))
+                    c4.markdown(f"<span style='font-size: 0.85rem;'>{format_moeda(row['valor_real'])}</span>", unsafe_allow_html=True)
                     c6.write("✅")
                 else:
                     v_norm_in = c4.text_input("", key=f"n_{row['id']}", value="0,00", label_visibility="collapsed")
@@ -136,6 +169,9 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                             "status": "Realizado"
                         }).eq("id", row['id']).execute()
                         st.rerun()
-            st.divider()
+            st.markdown('<hr style="margin: 5px 0; border: 0; border-bottom: 1px solid #eee;">', unsafe_allow_html=True)
+
+        # FECHAMENTO DO CONTAINER
+        st.markdown('</div></div>', unsafe_allow_html=True)
     else:
         st.info("Nenhum lançamento pendente para conciliação.")
