@@ -8,7 +8,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
     """
     st.markdown(f'<div class="titulo-tela">Lançamentos: {st.session_state.projeto_ativo}</div>', unsafe_allow_html=True)
     
-    # CSS específico para forçar linha única sem quebra no Mobile
+    # CSS AJUSTADO: Fixa larguras para garantir que tudo apareça no celular sem cortar
     st.markdown("""
         <style>
         .linha-compacta {
@@ -18,16 +18,16 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
             align-items: center;
             justify-content: flex-start;
             width: 100%;
-            overflow-x: auto;
             border-bottom: 1px solid #f0f2f6;
             padding: 4px 0;
-            gap: 10px;
         }
-        .col-data { min-width: 85px; font-size: 0.85rem; }
-        .col-desc { min-width: 140px; font-size: 0.85rem; flex-grow: 1; overflow: hidden; text-overflow: ellipsis; }
-        .col-tipo { min-width: 30px; font-size: 0.85rem; text-align: center; }
-        .col-valor { min-width: 80px; font-size: 0.85rem; text-align: right; }
-        .col-status { min-width: 50px; font-size: 0.8rem; text-align: center; font-weight: bold; }
+        /* Larguras calculadas para caber em ~360px (padrão celular) */
+        .col-data { min-width: 75px; width: 75px; font-size: 0.75rem; }
+        .col-desc { min-width: 100px; max-width: 120px; font-size: 0.75rem; flex-grow: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 4px; }
+        .col-tipo { min-width: 25px; width: 25px; font-size: 0.75rem; text-align: center; }
+        .col-valor { min-width: 65px; width: 65px; font-size: 0.75rem; text-align: right; }
+        .col-status { min-width: 40px; width: 40px; font-size: 0.7rem; text-align: center; font-weight: bold; margin-left: 5px; }
+        
         .header-compacto { font-weight: bold; background-color: #f8f9fa; border-top: 1px solid #e6e9ef; }
         </style>
     """, unsafe_allow_html=True)
@@ -52,16 +52,13 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
             # Lógica de soma condicional para Entradas e Saídas
             def calcular_total_tipo(df_tipo):
                 total = 0
-                # Considera itens planejados OU itens diretos (plan=0 e real>0)
                 itens_principais = df_tipo[(df_tipo['valor_plan'] > 0) | ((df_tipo['valor_plan'] == 0) & (df_tipo['valor_real'] > 0))]
                 
                 for _, x in itens_principais.iterrows():
                     if x['permite_parcial']:
-                        # Maior entre planejado e soma das parciais
                         v_parciais = df_mes[(df_mes['descricao'] == x['descricao']) & (df_mes['valor_plan'] == 0)]['parcial_real'].sum()
                         total += max(x['valor_plan'], v_parciais)
                     else:
-                        # Se valor realizado > 0, usa ele, senão usa o planejado
                         total += x['valor_real'] if x['valor_real'] > 0 else x['valor_plan']
                 return total
 
@@ -81,15 +78,15 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                 st.divider()
 
                 if not df_mes.empty:
-                    # Cabeçalho da Lista (Compacto e fixo na mesma linha)
+                    # Cabeçalho da Lista
                     st.markdown(f"""
                         <div class="linha-compacta header-compacto">
                             <div class="col-data">Data</div>
                             <div class="col-desc">Descrição</div>
                             <div class="col-tipo">E/S</div>
-                            <div class="col-valor">V. Plan</div>
-                            <div class="col-valor">V. Real</div>
-                            <div class="col-status">Status</div>
+                            <div class="col-valor">V.Plan</div>
+                            <div class="col-valor">V.Real</div>
+                            <div class="col-status">St</div>
                         </div>
                     """, unsafe_allow_html=True)
 
@@ -99,7 +96,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                     for _, row in df_exibir.iterrows():
                         v_acum = df_mes[df_mes['descricao'] == row['descricao']]['parcial_real'].sum()
                         v_real_exibir = v_acum if v_acum > 0 else row['valor_real']
-                        status_exibir = 'PLAN' if row['status'] == 'Planejado' else 'REAL'
+                        status_exibir = 'PL' if row['status'] == 'Planejado' else 'RL'
                         data_exibir = pd.to_datetime(row['data']).strftime('%d/%m/%Y')
 
                         st.markdown(f"""
@@ -120,11 +117,11 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                             st.markdown(f"""
                                 <div class="linha-compacta" style="color: gray;">
                                     <div class="col-data"></div>
-                                    <div class="col-desc" style="padding-left:20px;">>>> {data_filho}</div>
+                                    <div class="col-desc" style="padding-left:10px;">> {data_filho}</div>
                                     <div class="col-tipo">{filho['tipo'][0]}</div>
                                     <div class="col-valor">---</div>
                                     <div class="col-valor">{format_moeda(filho['parcial_real'])}</div>
-                                    <div class="col-status">REAL</div>
+                                    <div class="col-status">RL</div>
                                 </div>
                             """, unsafe_allow_html=True)
                 else:
