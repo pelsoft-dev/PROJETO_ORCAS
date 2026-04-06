@@ -42,7 +42,7 @@ st.markdown("""
     .stAppDeployButton {display:none !important;}
     [data-testid="stStatusWidget"] {display:none !important;}
     
-    /* ADEQUAÇÃO (1): Remove "Fork", GitHub e Badges flutuantes no Mobile/Desktop */
+    /* ADEQUAÇÃO (1): Cabeçalho e Botões >> e << */
     [data-testid="stHeader"] {
         background-color: rgba(0,0,0,0) !important;
     }
@@ -51,7 +51,6 @@ st.markdown("""
     [data-testid="stHeader"] svg {
         display: none !important;
     }
-    /* Mantém botões >> e << funcionais */
     [data-testid="stHeader"] button {
         display: flex !important;
         visibility: visible !important;
@@ -72,12 +71,22 @@ st.markdown("""
         margin-top: -1.5rem !important;
     }
 
-    /* ADEQUAÇÃO (3): Força tabelas a manterem dados e títulos em uma única linha */
+    /* ADEQUAÇÃO (3): FORÇA COMPACTAÇÃO RIGOROSA - SEM QUEBRA DE LINHA */
+    /* Aplica-se a tabelas estáticas, dataframes e tabelas de exibição */
     [data-testid="stTable"] td, 
     [data-testid="stTable"] th,
-    table td, table th {
+    [data-testid="stDataFrame"] td,
+    [data-testid="stDataFrame"] th,
+    table td, table th,
+    .stTable td, .stTable th {
         white-space: nowrap !important;
         word-break: keep-all !important;
+        vertical-align: middle !important;
+    }
+    
+    /* Adiciona barra de rolagem horizontal se necessário para evitar quebra */
+    [data-testid="stTable"], [data-testid="stDataFrame"] {
+        overflow-x: auto !important;
     }
 
     /* Estilos customizados ORCAS */
