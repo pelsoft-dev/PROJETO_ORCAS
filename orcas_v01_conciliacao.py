@@ -4,31 +4,26 @@ from datetime import datetime, timedelta
 
 def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moeda):
     """
-    Sub-rotina da Tela Conciliação - Versão com CSS Injetado para evitar erro de código na tela.
+    Sub-rotina da Tela Conciliação - Versão com Scroll Sincronizado (Cabeçalho + Linhas).
     """
     st.markdown(f'<div class="titulo-tela">Conciliação: {st.session_state.projeto_ativo}</div>', unsafe_allow_html=True)
     
-    # INJEÇÃO DE CSS DIRETA: Força o container do Streamlit a não quebrar linha e permitir scroll
+    # CSS GLOBAL: Cria uma classe que força o scroll horizontal no container pai
     st.markdown("""
         <style>
-        /* Força a área de colunas a ter scroll horizontal no celular */
-        [data-testid="stHorizontalBlock"] {
+        .mestre-conciliacao {
+            width: 100%;
             overflow-x: auto !important;
-            flex-wrap: nowrap !important;
             -webkit-overflow-scrolling: touch !important;
         }
-        /* Garante que as colunas mantenham uma largura mínima para não espremer */
-        [data-testid="column"] {
-            min-width: 100px !important;
-            flex-shrink: 0 !important;
+        .largura-minima-tabela {
+            min-width: 700px; /* Garante que as colunas não se apertem */
+            display: flex;
+            flex-direction: column;
         }
-        /* Ajuste específico para a coluna de Data/Descrição que é maior */
-        [data-testid="column"]:nth-child(1) {
-            min-width: 200px !important;
-        }
-        /* Ajuste para a coluna de E/S que é menor */
-        [data-testid="column"]:nth-child(2) {
-            min-width: 40px !important;
+        /* Força as colunas nativas do Streamlit a não quebrarem linha dentro do container mestre */
+        .mestre-conciliacao [data-testid="stHorizontalBlock"] {
+            flex-wrap: nowrap !important;
         }
         </style>
     """, unsafe_allow_html=True)
@@ -37,12 +32,14 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
     ini_mes_c = hoje_c.replace(day=1)
     limite_c = hoje_c - timedelta(days=3)
 
+    # Toggle alinhado à direita
     col_tit, col_tog = st.columns([5, 2])
     abrir_sem_plan = col_tog.toggle("Lançar sem Planejamento", value=st.session_state.get('abrir_sem_plan', False))
     st.session_state.abrir_sem_plan = abrir_sem_plan
     
     st.divider()
 
+    # Lógica de lançamento sem planejamento (Mantida intacta)
     if st.session_state.abrir_sem_plan:
         cols_sp = st.columns([2.5, 1, 1.2, 1])
         sp_desc = cols_sp[0].text_input("Descrição", key="sp_desc", placeholder="Ex: Gasto Extra")
@@ -90,7 +87,11 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
         demais_itens = df_f[~df_f.index.isin(parciais_topo.index)].sort_values('dt_obj', ascending=False)
         df_final_concilia = pd.concat([parciais_topo, demais_itens])
 
-        # Cabeçalho
+        # ABERTURA DO CONTAINER MESTRE (Scroll Único)
+        # Usamos st.container com uma div HTML para cercar TUDO
+        st.markdown('<div class="mestre-conciliacao"><div class="largura-minima-tabela">', unsafe_allow_html=True)
+
+        # Cabeçalho (Agora dentro do scroll)
         h1, h2, h3, h4, h5, h6 = st.columns([2.5, 0.5, 1.2, 1.8, 1.8, 1.2])
         h1.write("**Data - Descrição**")
         h2.write("**E/S**")
@@ -107,7 +108,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
             st.markdown('<div style="margin-bottom: -38px;"></div>', unsafe_allow_html=True)
             c1, c2, c3, c4, c5, c6 = st.columns([2.5, 0.5, 1.2, 1.8, 1.8, 1.2])
             
-            # Formato preservado: DD/MM/AAAA
+            # FORMATO DE DATA PRESERVADO: DD/MM/AAAA
             c1.markdown(f"<span style='color:{cor_txt}'>{row['dt_obj'].strftime('%d/%m/%Y')} - {row['descricao']}</span>", unsafe_allow_html=True)
             cor_tipo = 'red' if row['tipo'] == 'Saída' else 'blue'
             c2.markdown(f"<span style='color:{cor_tipo}'>{row['tipo'][0]}</span>", unsafe_allow_html=True)
@@ -159,5 +160,8 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                         }).eq("id", row['id']).execute()
                         st.rerun()
             st.divider()
+
+        # FECHAMENTO DO CONTAINER MESTRE
+        st.markdown('</div></div>', unsafe_allow_html=True)
     else:
         st.info("Nenhum lançamento pendente para conciliação.")
