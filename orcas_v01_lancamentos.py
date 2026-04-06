@@ -8,6 +8,30 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
     """
     st.markdown(f'<div class="titulo-tela">Lançamentos: {st.session_state.projeto_ativo}</div>', unsafe_allow_html=True)
     
+    # CSS específico para forçar linha única sem quebra no Mobile
+    st.markdown("""
+        <style>
+        .linha-compacta {
+            display: flex;
+            flex-direction: row;
+            flex-wrap: nowrap;
+            align-items: center;
+            justify-content: flex-start;
+            width: 100%;
+            overflow-x: auto;
+            border-bottom: 1px solid #f0f2f6;
+            padding: 4px 0;
+            gap: 10px;
+        }
+        .col-data { min-width: 85px; font-size: 0.85rem; }
+        .col-desc { min-width: 140px; font-size: 0.85rem; flex-grow: 1; overflow: hidden; text-overflow: ellipsis; }
+        .col-tipo { min-width: 30px; font-size: 0.85rem; text-align: center; }
+        .col-valor { min-width: 80px; font-size: 0.85rem; text-align: right; }
+        .col-status { min-width: 50px; font-size: 0.8rem; text-align: center; font-weight: bold; }
+        .header-compacto { font-weight: bold; background-color: #f8f9fa; border-top: 1px solid #e6e9ef; }
+        </style>
+    """, unsafe_allow_html=True)
+
     if d_ini_db and d_fim_db:
         # Loop de meses e saldo acumulado original (mantido integralmente)
         meses_periodo = []
@@ -57,35 +81,52 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                 st.divider()
 
                 if not df_mes.empty:
-                    # Cabeçalho da Lista
-                    h1, h2, h3, h4, h5, h6 = st.columns([1.2, 3, 0.5, 1.2, 1.2, 0.8])
-                    h1.write("**Data**"); h2.write("**Descrição**"); h3.write("**E/S**")
-                    h4.write("**V. Plan**"); h5.write("**V. Real**"); h6.write("**Status**")
+                    # Cabeçalho da Lista (Compacto e fixo na mesma linha)
+                    st.markdown(f"""
+                        <div class="linha-compacta header-compacto">
+                            <div class="col-data">Data</div>
+                            <div class="col-desc">Descrição</div>
+                            <div class="col-tipo">E/S</div>
+                            <div class="col-valor">V. Plan</div>
+                            <div class="col-valor">V. Real</div>
+                            <div class="col-status">Status</div>
+                        </div>
+                    """, unsafe_allow_html=True)
 
                     # Itens Pais ou Diretos
                     df_exibir = df_mes[(df_mes['valor_plan'] > 0) | ((df_mes['valor_plan'] == 0) & (df_mes['valor_real'] > 0))].sort_values('data')
                     
                     for _, row in df_exibir.iterrows():
-                        c1, c2, c3, c4, c5, c6 = st.columns([1.2, 3, 0.5, 1.2, 1.2, 0.8])
-                        # Formato DD/MM/AAAA mantido rigorosamente
-                        c1.write(pd.to_datetime(row['data']).strftime('%d/%m/%Y'))
-                        c2.write(row['descricao'])
-                        c3.write(row['tipo'][0])
-                        c4.write(format_moeda(row['valor_plan']))
-                        
                         v_acum = df_mes[df_mes['descricao'] == row['descricao']]['parcial_real'].sum()
-                        c5.write(format_moeda(v_acum if v_acum > 0 else row['valor_real']))
-                        c6.write('PLAN' if row['status'] == 'Planejado' else 'REAL')
+                        v_real_exibir = v_acum if v_acum > 0 else row['valor_real']
+                        status_exibir = 'PLAN' if row['status'] == 'Planejado' else 'REAL'
+                        data_exibir = pd.to_datetime(row['data']).strftime('%d/%m/%Y')
+
+                        st.markdown(f"""
+                            <div class="linha-compacta">
+                                <div class="col-data">{data_exibir}</div>
+                                <div class="col-desc">{row['descricao']}</div>
+                                <div class="col-tipo">{row['tipo'][0]}</div>
+                                <div class="col-valor">{format_moeda(row['valor_plan'])}</div>
+                                <div class="col-valor">{format_moeda(v_real_exibir)}</div>
+                                <div class="col-status">{status_exibir}</div>
+                            </div>
+                        """, unsafe_allow_html=True)
 
                         # Associação de Filhos (parciais)
                         filhos = df_mes[(df_mes['descricao'] == row['descricao']) & (df_mes['valor_plan'] == 0) & (df_mes['parcial_real'] > 0)]
                         for _, filho in filhos.iterrows():
-                            f1, f2, f3, f4, f5, f6 = st.columns([1.2, 3, 0.5, 1.2, 1.2, 0.8])
-                            # Retorno do formato DD/MM/AAAA (4 dígitos no ano)
-                            f2.markdown(f"<span style='color:gray; padding-left:20px;'> >>> {pd.to_datetime(filho['parcial_data']).strftime('%d/%m/%Y')}</span>", unsafe_allow_html=True)
-                            f3.markdown(f"<span style='color:gray;'>{filho['tipo'][0]}</span>", unsafe_allow_html=True)
-                            f5.markdown(f"<span style='color:gray;'>{format_moeda(filho['parcial_real'])}</span>", unsafe_allow_html=True)
-                            f6.markdown(f"<span style='color:gray;'>REAL</span>", unsafe_allow_html=True)
+                            data_filho = pd.to_datetime(filho['parcial_data']).strftime('%d/%m/%Y')
+                            st.markdown(f"""
+                                <div class="linha-compacta" style="color: gray;">
+                                    <div class="col-data"></div>
+                                    <div class="col-desc" style="padding-left:20px;">>>> {data_filho}</div>
+                                    <div class="col-tipo">{filho['tipo'][0]}</div>
+                                    <div class="col-valor">---</div>
+                                    <div class="col-valor">{format_moeda(filho['parcial_real'])}</div>
+                                    <div class="col-status">REAL</div>
+                                </div>
+                            """, unsafe_allow_html=True)
                 else:
                     st.write("ℹ️ Nenhum lançamento para este mês.")
             
