@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-import streamlit.components.v1 as components
 
 def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db, format_moeda, ir_para_o_topo):
     """
@@ -50,60 +49,48 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                 st.divider()
 
                 if not df_mes.empty:
-                    # Construção do HTML com CSS embutido para garantir a linha única (no-wrap)
-                    html_content = """
-                    <style>
-                        .tabela-wrapper { font-family: sans-serif; width: 100%; overflow-x: auto; white-space: nowrap; }
-                        .linha { display: flex; border-bottom: 1px solid #eee; padding: 8px 0; align-items: center; min-width: 500px; }
-                        .cabecalho { font-weight: bold; background: #f9f9f9; border-top: 1px solid #ddd; }
-                        .c-data { width: 90px; font-size: 13px; }
-                        .c-desc { width: 180px; font-size: 13px; overflow: hidden; text-overflow: ellipsis; padding: 0 5px; }
-                        .c-es { width: 30px; font-size: 13px; text-align: center; }
-                        .c-val { width: 85px; font-size: 13px; text-align: right; }
-                        .c-st { width: 40px; font-size: 12px; text-align: center; font-weight: bold; margin-left: 10px; }
-                    </style>
-                    <div class="tabela-wrapper">
-                        <div class="linha cabecalho">
-                            <div class="c-data">Data</div><div class="c-desc">Descrição</div><div class="c-es">E/S</div>
-                            <div class="c-val">V.Plan</div><div class="c-val">V.Real</div><div class="c-st">St</div>
-                        </div>
-                    """
+                    # Estilos CSS injetados de forma segura
+                    st.markdown("""
+                        <style>
+                        .tab-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin-bottom: 10px; }
+                        .tab-body { min-width: 520px; display: flex; flex-direction: column; font-family: sans-serif; }
+                        .tab-row { display: flex; flex-direction: row; align-items: center; padding: 7px 0; border-bottom: 1px solid #eee; }
+                        .tab-hdr { font-weight: bold; background-color: #f8f9fa; border-top: 1px solid #ddd; }
+                        .c-dt { width: 85px; font-size: 13px; flex-shrink: 0; }
+                        .c-ds { width: 160px; font-size: 13px; flex-shrink: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 5px; }
+                        .c-es { width: 35px; font-size: 13px; flex-shrink: 0; text-align: center; }
+                        .c-vl { width: 90px; font-size: 13px; flex-shrink: 0; text-align: right; }
+                        .c-st { width: 45px; font-size: 12px; flex-shrink: 0; text-align: center; font-weight: bold; margin-left: 5px; }
+                        </style>
+                    """, unsafe_allow_html=True)
+
+                    # Montagem da tabela em string única para evitar erro de renderização
+                    h = '<div class="tab-scroll"><div class="tab-body">'
+                    h += '<div class="tab-row tab-hdr"><div class="c-dt">Data</div><div class="c-ds">Descrição</div><div class="c-es">E/S</div><div class="c-vl">V.Plan</div><div class="c-vl">V.Real</div><div class="c-st">St</div></div>'
 
                     df_exibir = df_mes[(df_mes['valor_plan'] > 0) | ((df_mes['valor_plan'] == 0) & (df_mes['valor_real'] > 0))].sort_values('data')
                     
                     for _, row in df_exibir.iterrows():
-                        v_acum = df_mes[df_mes['descricao'] == row['descricao']]['parcial_real'].sum()
-                        v_real_exibir = v_acum if v_acum > 0 else row['valor_real']
-                        data_exibir = pd.to_datetime(row['data']).strftime('%d/%m/%Y')
+                        v_ac = df_mes[df_mes['descricao'] == row['descricao']]['parcial_real'].sum()
+                        v_re = v_ac if v_ac > 0 else row['valor_real']
+                        dt_e = pd.to_datetime(row['data']).strftime('%d/%m/%Y')
+                        st_e = 'PL' if row['status'] == 'Planejado' else 'RL'
                         
-                        html_content += f"""
-                        <div class="linha">
-                            <div class="c-data">{data_exibir}</div>
-                            <div class="c-desc">{row['descricao']}</div>
-                            <div class="c-es">{row['tipo'][0]}</div>
-                            <div class="c-val">{format_moeda(row['valor_plan'])}</div>
-                            <div class="c-val">{format_moeda(v_real_exibir)}</div>
-                            <div class="c-st">{'PL' if row['status'] == 'Planejado' else 'RL'}</div>
-                        </div>
-                        """
+                        h += f'<div class="tab-row">'
+                        h += f'<div class="c-dt">{dt_e}</div><div class="c-ds">{row["descricao"]}</div><div class="c-es">{row["tipo"][0]}</div>'
+                        h += f'<div class="c-vl">{format_moeda(row["valor_plan"])}</div><div class="c-vl">{format_moeda(v_re)}</div><div class="c-st">{st_e}</div>'
+                        h += f'</div>'
 
                         filhos = df_mes[(df_mes['descricao'] == row['descricao']) & (df_mes['valor_plan'] == 0) & (df_mes['parcial_real'] > 0)]
-                        for _, filho in filhos.iterrows():
-                            data_f = pd.to_datetime(filho['parcial_data']).strftime('%d/%m/%Y')
-                            html_content += f"""
-                            <div class="linha" style="color: gray;">
-                                <div class="c-data"></div>
-                                <div class="c-desc" style="padding-left:15px;">> {data_f}</div>
-                                <div class="c-es">{filho['tipo'][0]}</div>
-                                <div class="c-val">---</div>
-                                <div class="c-val">{format_moeda(filho['parcial_real'])}</div>
-                                <div class="c-st">RL</div>
-                            </div>
-                            """
+                        for _, f in filhos.iterrows():
+                            dt_f = pd.to_datetime(f['parcial_data']).strftime('%d/%m/%Y')
+                            h += f'<div class="tab-row" style="color: gray;">'
+                            h += f'<div class="c-dt"></div><div class="c-ds" style="padding-left:15px;">> {dt_f}</div><div class="c-es">{f["tipo"][0]}</div>'
+                            h += f'<div class="c-vl">---</div><div class="c-vl">{format_moeda(f["parcial_real"])}</div><div class="c-st">RL</div>'
+                            h += f'</div>'
                     
-                    html_content += "</div>"
-                    # Renderiza o HTML final garantindo que o Streamlit não trate como texto
-                    st.markdown(html_content, unsafe_allow_html=True)
+                    h += '</div></div>'
+                    st.write(h, unsafe_allow_html=True)
                 else:
                     st.write("ℹ️ Nenhum lançamento para este mês.")
             
