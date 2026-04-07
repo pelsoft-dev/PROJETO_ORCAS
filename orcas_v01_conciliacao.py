@@ -4,33 +4,26 @@ from datetime import datetime, timedelta
 
 def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moeda):
     """
-    Sub-rotina da Tela Conciliação - Versão Final com CSS Seguro para evitar quebra e erro de código.
+    Sub-rotina da Tela Conciliação - Versão com Scroll Mestre Sincronizado.
     """
     st.markdown(f'<div class="titulo-tela">Conciliação: {st.session_state.projeto_ativo}</div>', unsafe_allow_html=True)
     
-    # INJEÇÃO DE CSS SEGURO: Não usa tags abertas/fechadas no corpo do loop.
-    # Este bloco força o container de colunas do Streamlit a permitir scroll horizontal.
+    # CSS PARA SCROLL SINCRONIZADO: Envolve todo o conteúdo em um bloco de largura fixa
     st.markdown("""
         <style>
-        /* Seleciona o container de colunas e impede a quebra de linha */
-        [data-testid="stHorizontalBlock"] {
+        .container-mestre-scroll {
+            width: 100%;
             overflow-x: auto !important;
-            flex-wrap: nowrap !important;
             -webkit-overflow-scrolling: touch !important;
-            padding-bottom: 10px !important;
         }
-        /* Define larguras mínimas para as colunas não "espremerem" no celular */
-        [data-testid="column"] {
-            min-width: 110px !important;
-            flex-shrink: 0 !important;
+        .bloco-tabela-concilia {
+            min-width: 750px; /* Força a largura para que o scroll mova tudo junto */
+            display: flex;
+            flex-direction: column;
         }
-        /* Ajuste específico para a coluna de Data/Descrição que precisa de mais espaço */
-        [data-testid="column"]:nth-child(1) {
-            min-width: 220px !important;
-        }
-        /* Ajuste para a coluna de E/S que é estreita */
-        [data-testid="column"]:nth-child(2) {
-            min-width: 45px !important;
+        /* Garante que as colunas do Streamlit não quebrem linha dentro do container */
+        .container-mestre-scroll [data-testid="stHorizontalBlock"] {
+            flex-wrap: nowrap !important;
         }
         </style>
     """, unsafe_allow_html=True)
@@ -94,7 +87,10 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
         demais_itens = df_f[~df_f.index.isin(parciais_topo.index)].sort_values('dt_obj', ascending=False)
         df_final_concilia = pd.concat([parciais_topo, demais_itens])
 
-        # Cabeçalho
+        # ABERTURA DO CONTAINER MESTRE DE ROLAGEM
+        st.markdown('<div class="container-mestre-scroll"><div class="bloco-tabela-concilia">', unsafe_allow_html=True)
+
+        # Cabeçalho (Agora dentro do scroll)
         h1, h2, h3, h4, h5, h6 = st.columns([2.5, 0.5, 1.2, 1.8, 1.8, 1.2])
         h1.write("**Data - Descrição**")
         h2.write("**E/S**")
@@ -108,7 +104,6 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
             v_acumulado_desc = df[df['descricao'] == row['descricao']]['parcial_real'].sum()
             cor_txt = "red" if (row['valor_plan'] > 0 and v_acumulado_desc > row['valor_plan']) else "black"
             
-            # Ajuste de margem negativa para manter as linhas próximas
             st.markdown('<div style="margin-bottom: -38px;"></div>', unsafe_allow_html=True)
             c1, c2, c3, c4, c5, c6 = st.columns([2.5, 0.5, 1.2, 1.8, 1.8, 1.2])
             
@@ -137,12 +132,8 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                             "data": ini_mes_c.strftime('%Y-%m-%d'), 
                             "data_vencimento": ini_mes_c.strftime('%Y-%m-%d'), 
                             "tipo": row['tipo'],
-                            "valor_plan": 0,
-                            "valor_real": 0,
-                            "status": "Realizado",
-                            "parcial_real": v_dig,
-                            "parcial_data": hoje_c.strftime('%Y-%m-%d'),
-                            "permite_parcial": False
+                            "valor_plan": 0, "valor_real": 0, "status": "Realizado",
+                            "parcial_real": v_dig, "parcial_data": hoje_c.strftime('%Y-%m-%d'), "permite_parcial": False
                         }).execute()
                         st.session_state[v_key] += 1
                         st.rerun()
@@ -164,5 +155,8 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                         }).eq("id", row['id']).execute()
                         st.rerun()
             st.divider()
+
+        # FECHAMENTO DO CONTAINER MESTRE
+        st.markdown('</div></div>', unsafe_allow_html=True)
     else:
         st.info("Nenhum lançamento pendente para conciliação.")
