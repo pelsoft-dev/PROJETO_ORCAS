@@ -4,26 +4,33 @@ from datetime import datetime, timedelta
 
 def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moeda):
     """
-    Sub-rotina da Tela Conciliação - Versão com Scroll Sincronizado (Cabeçalho + Linhas).
+    Sub-rotina da Tela Conciliação - Versão Final com CSS Seguro para evitar quebra e erro de código.
     """
     st.markdown(f'<div class="titulo-tela">Conciliação: {st.session_state.projeto_ativo}</div>', unsafe_allow_html=True)
     
-    # CSS GLOBAL: Cria uma classe que força o scroll horizontal no container pai
+    # INJEÇÃO DE CSS SEGURO: Não usa tags abertas/fechadas no corpo do loop.
+    # Este bloco força o container de colunas do Streamlit a permitir scroll horizontal.
     st.markdown("""
         <style>
-        .mestre-conciliacao {
-            width: 100%;
+        /* Seleciona o container de colunas e impede a quebra de linha */
+        [data-testid="stHorizontalBlock"] {
             overflow-x: auto !important;
-            -webkit-overflow-scrolling: touch !important;
-        }
-        .largura-minima-tabela {
-            min-width: 700px; /* Garante que as colunas não se apertem */
-            display: flex;
-            flex-direction: column;
-        }
-        /* Força as colunas nativas do Streamlit a não quebrarem linha dentro do container mestre */
-        .mestre-conciliacao [data-testid="stHorizontalBlock"] {
             flex-wrap: nowrap !important;
+            -webkit-overflow-scrolling: touch !important;
+            padding-bottom: 10px !important;
+        }
+        /* Define larguras mínimas para as colunas não "espremerem" no celular */
+        [data-testid="column"] {
+            min-width: 110px !important;
+            flex-shrink: 0 !important;
+        }
+        /* Ajuste específico para a coluna de Data/Descrição que precisa de mais espaço */
+        [data-testid="column"]:nth-child(1) {
+            min-width: 220px !important;
+        }
+        /* Ajuste para a coluna de E/S que é estreita */
+        [data-testid="column"]:nth-child(2) {
+            min-width: 45px !important;
         }
         </style>
     """, unsafe_allow_html=True)
@@ -87,11 +94,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
         demais_itens = df_f[~df_f.index.isin(parciais_topo.index)].sort_values('dt_obj', ascending=False)
         df_final_concilia = pd.concat([parciais_topo, demais_itens])
 
-        # ABERTURA DO CONTAINER MESTRE (Scroll Único)
-        # Usamos st.container com uma div HTML para cercar TUDO
-        st.markdown('<div class="mestre-conciliacao"><div class="largura-minima-tabela">', unsafe_allow_html=True)
-
-        # Cabeçalho (Agora dentro do scroll)
+        # Cabeçalho
         h1, h2, h3, h4, h5, h6 = st.columns([2.5, 0.5, 1.2, 1.8, 1.8, 1.2])
         h1.write("**Data - Descrição**")
         h2.write("**E/S**")
@@ -105,6 +108,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
             v_acumulado_desc = df[df['descricao'] == row['descricao']]['parcial_real'].sum()
             cor_txt = "red" if (row['valor_plan'] > 0 and v_acumulado_desc > row['valor_plan']) else "black"
             
+            # Ajuste de margem negativa para manter as linhas próximas
             st.markdown('<div style="margin-bottom: -38px;"></div>', unsafe_allow_html=True)
             c1, c2, c3, c4, c5, c6 = st.columns([2.5, 0.5, 1.2, 1.8, 1.8, 1.2])
             
@@ -123,7 +127,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                 
                 v_parc_in = c5.text_input("", key=f"p_{row['id']}_{st.session_state[v_key]}", value="0,00", label_visibility="collapsed")
                 
-                if c6.button("Confirmar", key=f"btn_p_{row['id']}"):
+                if c6.button("Confirmar", key=f"btn_p_{row['id']}", use_container_width=True):
                     v_dig = parse_moeda(v_parc_in)
                     if v_dig > 0:
                         supabase.table("lancamentos").insert({
@@ -149,7 +153,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                     c6.write("✅")
                 else:
                     v_norm_in = c4.text_input("", key=f"n_{row['id']}", value="0,00", label_visibility="collapsed")
-                    if c6.button("Confirmar", key=f"btn_n_{row['id']}"):
+                    if c6.button("Confirmar", key=f"btn_n_{row['id']}", use_container_width=True):
                         v_para_gravar = parse_moeda(v_norm_in)
                         if v_para_gravar == 0:
                             v_para_gravar = row['valor_plan']
@@ -160,8 +164,5 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                         }).eq("id", row['id']).execute()
                         st.rerun()
             st.divider()
-
-        # FECHAMENTO DO CONTAINER MESTRE
-        st.markdown('</div></div>', unsafe_allow_html=True)
     else:
         st.info("Nenhum lançamento pendente para conciliação.")
