@@ -52,7 +52,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
     col_aviso, col_tog = st.columns([5, 2])
     
     # A mensagem aparece apenas se o layout for detectado como móvel (ajuste de colunas)
-    col_aviso.markdown('<div class="msg-orientacao">📱🔄 PARA ESTA OPÇÃO ACONSELHA-SE TRABALHAR COM O CELULAR DEITADO</div>', unsafe_allow_html=True)
+    col_aviso.markdown('<div class="msg-orientacao">📱🔄 SE USANDO O CELULAR, TRABALHE COM ELE NA HORIZONTAL</div>', unsafe_allow_html=True)
     
     abrir_sem_plan = col_tog.toggle("Lançar sem Planejamento", value=st.session_state.get('abrir_sem_plan', False))
     st.session_state.abrir_sem_plan = abrir_sem_plan
