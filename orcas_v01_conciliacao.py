@@ -4,31 +4,32 @@ from datetime import datetime, timedelta
 
 def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moeda):
     """
-    Sub-rotina da Tela Conciliação - Rigor total em formatos e scroll sincronizado via CSS Global.
+    Sub-rotina da Tela Conciliação - Scroll Sincronizado via CSS Injection.
     """
     st.markdown(f'<div class="titulo-tela">Conciliação: {st.session_state.projeto_ativo}</div>', unsafe_allow_html=True)
     
-    # ESTA É A CHAVE: Injetar o CSS que força o container nativo do Streamlit a ter scroll
+    # INJEÇÃO DE CSS DE ALTO RIGOR
+    # Força todos os blocos horizontais (st.columns) a não quebrarem e a terem scroll
     st.markdown("""
         <style>
-        /* Alvo: O container que envolve o conteúdo principal da tela */
+        /* Container principal da página para permitir o scroll do conjunto */
         [data-testid="stVerticalBlock"] > [data-testid="stVerticalBlock"] {
             overflow-x: auto !important;
             display: block !important;
             -webkit-overflow-scrolling: touch !important;
         }
-        /* Alvo: As linhas de colunas (Cabeçalho e Dados) */
+        /* Força as colunas a manterem largura mínima e não empilharem */
         [data-testid="stHorizontalBlock"] {
             flex-wrap: nowrap !important;
-            min-width: 750px !important; /* Mantém tudo em uma linha só no celular */
+            min-width: 750px !important; /* Largura que garante tudo em linha */
             margin-bottom: 0px !important;
         }
-        /* Alvo: Cada coluna individualmente */
+        /* Garante que os inputs não fiquem espremidos */
         [data-testid="column"] {
             flex-shrink: 0 !important;
             min-width: 50px !important;
         }
-        /* Ajuste de largura para a coluna de Descrição */
+        /* Largura específica para a primeira coluna (Data/Descrição) */
         [data-testid="column"]:nth-child(1) {
             min-width: 230px !important;
         }
@@ -37,9 +38,8 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
 
     hoje_c = datetime.now().date()
     ini_mes_c = hoje_c.replace(day=1)
-    limite_c = hoy_c - timedelta(days=3)
+    limite_c = hoje_c - timedelta(days=3)
 
-    # Lógica de Layout e Filtros - MANTIDA RIGOROSAMENTE
     col_tit, col_tog = st.columns([5, 2])
     abrir_sem_plan = col_tog.toggle("Lançar sem Planejamento", value=st.session_state.get('abrir_sem_plan', False))
     st.session_state.abrir_sem_plan = abrir_sem_plan
@@ -54,21 +54,23 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
         
         with cols_sp[3]:
             st.markdown('<div style="margin-top: 28px;"></div>', unsafe_allow_html=True)
-            if st.button("Confirmar", key="btn_sp_conf", use_container_width=True):
-                v_sp = parse_moeda(sp_valor)
-                if sp_desc and v_sp > 0:
-                    supabase.table("lancamentos").insert({
-                        "projeto_id": str(st.session_state.projeto_ativo),
-                        "usuario_id": str(ID_USUARIO_LOGADO),
-                        "descricao": sp_desc,
-                        "data": hoje_c.strftime('%Y-%m-%d'),
-                        "data_vencimento": hoje_c.strftime('%Y-%m-%d'),
-                        "tipo": sp_tipo,
-                        "valor_plan": 0, "valor_real": v_sp,
-                        "status": "Realizado", "parcial_real": 0, "permite_parcial": False
-                    }).execute()
-                    st.session_state.abrir_sem_plan = False
-                    st.rerun()
+            btn_confirmar = st.button("Confirmar", key="btn_sp_conf", use_container_width=True)
+        
+        if btn_confirmar:
+            v_sp = parse_moeda(sp_valor)
+            if sp_desc and v_sp > 0:
+                supabase.table("lancamentos").insert({
+                    "projeto_id": str(st.session_state.projeto_ativo),
+                    "usuario_id": str(ID_USUARIO_LOGADO),
+                    "descricao": sp_desc,
+                    "data": hoje_c.strftime('%Y-%m-%d'),
+                    "data_vencimento": hoje_c.strftime('%Y-%m-%d'),
+                    "tipo": sp_tipo,
+                    "valor_plan": 0, "valor_real": v_sp,
+                    "status": "Realizado", "parcial_real": 0, "permite_parcial": False
+                }).execute()
+                st.session_state.abrir_sem_plan = False
+                st.rerun()
         st.divider()
 
     df_c = df.copy()
@@ -93,10 +95,10 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
             v_acumulado_desc = df[df['descricao'] == row['descricao']]['parcial_real'].sum()
             cor_txt = "red" if (row['valor_plan'] > 0 and v_acumulado_desc > row['valor_plan']) else "black"
             
+            # Ajuste de margem para evitar espaços excessivos
             st.markdown('<div style="margin-bottom: -38px;"></div>', unsafe_allow_html=True)
             c1, c2, c3, c4, c5, c6 = st.columns([2.5, 0.5, 1.2, 1.8, 1.8, 1.2])
             
-            # FORMATO DATA: DD/MM/AAAA preservado
             c1.markdown(f"<span style='color:{cor_txt}'>{row['dt_obj'].strftime('%d/%m/%Y')} - {row['descricao']}</span>", unsafe_allow_html=True)
             cor_tipo = 'red' if row['tipo'] == 'Saída' else 'blue'
             c2.markdown(f"<span style='color:{cor_tipo}'>{row['tipo'][0]}</span>", unsafe_allow_html=True)
