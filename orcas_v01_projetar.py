@@ -78,6 +78,7 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
                 gerados = 0
                 d_map = {"Segunda":0,"Terça":1,"Quarta":2,"Quinta":3,"Sexta":4,"Sábado":5,"Domingo":6}
                 
+                # (4) AJUSTE DO LIMITE DE LOOP PARA GARANTIR ATÉ A DATA FINAL
                 limite_loop = f_p if n_ocorrencias == 0 else i_p + timedelta(days=3650)
 
                 while curr <= limite_loop:
@@ -144,6 +145,7 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
     # --- BOTÃO EXCLUIR ---
     if btn_col2.button("Excluir", use_container_width=True):
         if not desc: 
+            # (1) VALIDAÇÃO DE DESCRIÇÃO NA EXCLUSÃO
             st.error("É OBRIGATÓRIO ENTRAR COM A DESCRIÇÃO")
         else:
             st.session_state.confirmar_exclusao_ativa = True
