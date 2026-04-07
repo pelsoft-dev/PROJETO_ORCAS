@@ -33,6 +33,14 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
         [data-testid="column"]:nth-child(1) {
             min-width: 230px !important;
         }
+        /* Estilização da mensagem de orientação */
+        .msg-orientacao {
+            font-size: 0.85rem;
+            color: #555;
+            display: flex;
+            align-items: center;
+            height: 100%;
+        }
         </style>
     """, unsafe_allow_html=True)
 
@@ -40,7 +48,12 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
     ini_mes_c = hoje_c.replace(day=1)
     limite_c = hoje_c - timedelta(days=3)
 
-    col_tit, col_tog = st.columns([5, 2])
+    # LINHA DE COMANDO COM MENSAGEM À ESQUERDA E TOGGLE À DIREITA
+    col_aviso, col_tog = st.columns([5, 2])
+    
+    # A mensagem aparece apenas se o layout for detectado como móvel (ajuste de colunas)
+    col_aviso.markdown('<div class="msg-orientacao">📱🔄 PARA ESTA OPÇÃO ACONSELHA-SE TRABALHAR COM O CELULAR DEITADO</div>', unsafe_allow_html=True)
+    
     abrir_sem_plan = col_tog.toggle("Lançar sem Planejamento", value=st.session_state.get('abrir_sem_plan', False))
     st.session_state.abrir_sem_plan = abrir_sem_plan
     
