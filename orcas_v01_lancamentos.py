@@ -6,6 +6,9 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
     """
     Sub-rotina da Tela Lançamentos - Integridade total da lógica de meses e saldos.
     """
+    # Verificação de segurança para evitar os erros de AttributeError vistos nos prints
+    if 'msg_sucesso' not in st.session_state: st.session_state.msg_sucesso = False
+    
     st.markdown(f'<div class="titulo-tela">Lançamentos: {st.session_state.projeto_ativo}</div>', unsafe_allow_html=True)
     
     if d_ini_db and d_fim_db:
@@ -21,7 +24,6 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
         saldo_acumulado_mes = s_db
         
         for mes_str in meses_periodo:
-            # Mantém a máscara do mês para listar todos os dias (do dia 1 em diante)
             mask_mes = pd.to_datetime(df['data']).dt.strftime('%Y-%m') == mes_str
             df_mes = df[mask_mes].copy()
             
@@ -50,7 +52,6 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                 st.divider()
 
                 if not df_mes.empty:
-                    # CSS: c-ds aumentada em 50% (de 160px para 240px). c-st ajustada para o novo texto.
                     st.markdown("""
                         <style>
                         .tab-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin-bottom: 10px; }
@@ -62,10 +63,12 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         .c-es { width: 35px; font-size: 13px; flex-shrink: 0; text-align: center; }
                         .c-vl { width: 90px; font-size: 13px; flex-shrink: 0; text-align: right; }
                         .c-st { width: 55px; font-size: 12px; flex-shrink: 0; text-align: center; font-weight: bold; margin-left: 5px; }
+                        /* Classes de cor forçadas para garantir a exibição */
+                        .linha-alerta-saida { color: #FF0000 !important; font-weight: bold; }
+                        .linha-alerta-entrada { color: #0000FF !important; font-weight: bold; }
                         </style>
                     """, unsafe_allow_html=True)
 
-                    # Cabeçalho: 'Status'
                     h = '<div class="tab-scroll"><div class="tab-body">'
                     h += '<div class="tab-row tab-hdr"><div class="c-dt">Data</div><div class="c-ds">Descrição</div><div class="c-es">E/S</div><div class="c-vl">V.Plan</div><div class="c-vl">V.Real</div><div class="c-st">Status</div></div>'
 
@@ -75,19 +78,17 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         v_ac = df_mes[df_mes['descricao'] == row['descricao']]['parcial_real'].sum()
                         v_re = v_ac if v_ac > 0 else row['valor_real']
                         dt_e = pd.to_datetime(row['data']).strftime('%d/%m/%Y')
-                        
-                        # Detalhes: 'PLAN' e 'REAL'
                         st_e = 'PLAN' if row['status'] == 'Planejado' else 'REAL'
                         
-                        # Lógica de cores por linha
-                        estilo_linha = ""
+                        # Definição da classe de cor
+                        classe_cor = ""
                         if v_re > row['valor_plan']:
                             if row['tipo'] == 'Saída':
-                                estilo_linha = ' style="color: red;"'
+                                classe_cor = " linha-alerta-saida"
                             elif row['tipo'] == 'Entrada':
-                                estilo_linha = ' style="color: blue;"'
+                                classe_cor = " linha-alerta-entrada"
                         
-                        h += f'<div class="tab-row"{estilo_linha}>'
+                        h += f'<div class="tab-row{classe_cor}">'
                         h += f'<div class="c-dt">{dt_e}</div><div class="c-ds">{row["descricao"]}</div><div class="c-es">{row["tipo"][0]}</div>'
                         h += f'<div class="c-vl">{format_moeda(row["valor_plan"])}</div><div class="c-vl">{format_moeda(v_re)}</div><div class="c-st">{st_e}</div>'
                         h += f'</div>'
@@ -95,8 +96,8 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         filhos = df_mes[(df_mes['descricao'] == row['descricao']) & (df_mes['valor_plan'] == 0) & (df_mes['parcial_real'] > 0)]
                         for _, f in filhos.iterrows():
                             dt_f = pd.to_datetime(f['parcial_data']).strftime('%d/%m/%Y')
-                            # Parciais seguem a cor do pai para manter a integridade visual da linha
-                            h += f'<div class="tab-row" style="color: gray; font-style: italic;">'
+                            # Parciais mantêm a cor se o pai estiver em alerta
+                            h += f'<div class="tab-row{classe_cor}" style="font-style: italic; opacity: 0.8;">'
                             h += f'<div class="c-dt"></div><div class="c-ds" style="padding-left:15px;">> {dt_f}</div><div class="c-es">{f["tipo"][0]}</div>'
                             h += f'<div class="c-vl">---</div><div class="c-vl">{format_moeda(f["parcial_real"])}</div><div class="c-st">REAL</div>'
                             h += f'</div>'
