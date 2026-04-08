@@ -61,18 +61,22 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
         if not desc or desc.strip() == "":
             st.error("PARA INCLUIR OU EXCLUIR É OBRIGATÓRIO ENTRAR COM UMA DESCRIÇÃO")
         else:
+            # (1) Lógica Excludente
             opcoes_preenchidas = 0
             if d_m != "": opcoes_preenchidas += 1
             if d_s != "": opcoes_preenchidas += 1
             if d_e is not None: opcoes_preenchidas += 1
             
             if opcoes_preenchidas > 1:
-                st.session_state.erro_excludente = True
+                st.error("AS OPÇÕES (DIA DO MÊS, DIA DA SEMANA E DIA ESPECÍFICO) SÃO EXCLUDENTES E PORTANTO O ORCAS ACEITARÁ APENAS UMA DELAS")
+                if st.button("OK"):
+                    st.session_state.limpar_cont += 1
+                    st.rerun()
             else:
-                # Ajuste solicitado: se permitir parciais e dia do mês vazio, assume 1
-                d_m_processado = d_m
+                # (2) Lógica Parciais no Dia 1
+                d_m_final = d_m
                 if permitir_parcial and d_m == "":
-                    d_m_processado = "1"
+                    d_m_final = "1"
 
                 uid_local = st.session_state.get('CHAVE_MESTRA_UUID')
                 v_calc = parse_moeda(v_t)
@@ -86,13 +90,13 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
 
                 while curr <= limite_loop:
                     match_dm = False
-                    if "/" in d_m_processado:
+                    if "/" in d_m_final:
                         try:
-                            dia_a, mes_a = map(int, d_m_processado.split("/"))
+                            dia_a, mes_a = map(int, d_m_final.split("/"))
                             if curr.day == dia_a and curr.month == mes_a: match_dm = True
                         except: pass
                     else:
-                        match_dm = (d_m_processado == "" or d_m_processado == "*" or str(curr.day) == d_m_processado)
+                        match_dm = (d_m_final == "" or d_m_final == "*" or str(curr.day) == d_m_final)
 
                     if (d_e is None or curr == d_e) and match_dm and (d_s == "" or curr.weekday() == d_map[d_s]):
                         dt_f = curr
@@ -129,14 +133,6 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
                     st.session_state['msg_sucesso'] = f"Sucesso! {len(lista_bulk)} lançamentos gerados."
                     st.session_state.limpar_cont += 1
                     st.rerun()
-
-    # Modal de erro excludente
-    if st.session_state.get('erro_excludente', False):
-        st.error("AS OPÇÕES (DIA DO MÊS, DIA DA SEMANA E DIA ESPECÍFICO) SÃO EXCLUDENTES E PORTANTO O ORCAS ACEITARÁ APENAS UMA DELAS")
-        if st.button("OK"):
-            st.session_state.erro_excludente = False
-            st.session_state.limpar_cont += 1
-            st.rerun()
 
     if btn_col2.button("Excluir", use_container_width=True):
         if not desc or desc.strip() == "": 
