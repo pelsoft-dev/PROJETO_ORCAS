@@ -21,6 +21,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
         saldo_acumulado_mes = s_db
         
         for mes_str in meses_periodo:
+            # Mantém a máscara do mês para listar todos os dias (do dia 1 em diante)
             mask_mes = pd.to_datetime(df['data']).dt.strftime('%Y-%m') == mes_str
             df_mes = df[mask_mes].copy()
             
@@ -49,7 +50,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                 st.divider()
 
                 if not df_mes.empty:
-                    # Estilos CSS injetados: .c-ds aumentada em 50% (de 160px para 240px)
+                    # CSS: c-ds aumentada em 50% (de 160px para 240px). c-st ajustada para o novo texto.
                     st.markdown("""
                         <style>
                         .tab-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin-bottom: 10px; }
@@ -64,11 +65,10 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         </style>
                     """, unsafe_allow_html=True)
 
-                    # Montagem da tabela: Cabeçalho trocado de 'St' para 'Status'
+                    # Cabeçalho: 'Status'
                     h = '<div class="tab-scroll"><div class="tab-body">'
                     h += '<div class="tab-row tab-hdr"><div class="c-dt">Data</div><div class="c-ds">Descrição</div><div class="c-es">E/S</div><div class="c-vl">V.Plan</div><div class="c-vl">V.Real</div><div class="c-st">Status</div></div>'
 
-                    # Lógica do mês atual: Se o mês processado for o mês atual, garante que mostre desde o dia 1
                     df_exibir = df_mes[(df_mes['valor_plan'] > 0) | ((df_mes['valor_plan'] == 0) & (df_mes['valor_real'] > 0))].sort_values('data')
                     
                     for _, row in df_exibir.iterrows():
@@ -76,7 +76,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         v_re = v_ac if v_ac > 0 else row['valor_real']
                         dt_e = pd.to_datetime(row['data']).strftime('%d/%m/%Y')
                         
-                        # Troca de 'PL' para 'PLAN' e 'RL' para 'REAL'
+                        # Detalhes: 'PLAN' e 'REAL'
                         st_e = 'PLAN' if row['status'] == 'Planejado' else 'REAL'
                         
                         h += f'<div class="tab-row">'
