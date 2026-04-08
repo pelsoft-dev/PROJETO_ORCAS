@@ -4,13 +4,13 @@ from datetime import datetime, timedelta
 def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
     st.markdown(f'<div class="titulo-tela">Projetar: {st.session_state.projeto_ativo}</div>', unsafe_allow_html=True)
     
-    # Mantém a exibição da mensagem de sucesso no topo
-    if st.session_state.msg_sucesso: 
-        st.success(st.session_state.msg_sucesso)
-        st.session_state.msg_sucesso = None
+    # CORREÇÃO: Uso de .get() para evitar AttributeError se a chave não existir
+    if st.session_state.get('msg_sucesso'): 
+        st.success(st.session_state['msg_sucesso'])
+        st.session_state['msg_sucesso'] = None
 
     col_d1, col_d2 = st.columns([4, 2])
-    # Keys adicionadas para possibilitar a limpeza (Item 1)
+    # Widgets com chaves para permitir limpeza
     desc = col_d1.text_input("Descrição", key="pj_d")
     comp_txt = col_d2.text_input("Complemento", key="pj_comp", help="Será adicionado ao final da descrição")
     
@@ -54,11 +54,9 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
     btn_col1, btn_col2, _ = st.columns([1, 1, 2])
 
     if btn_col1.button("Incluir", use_container_width=True):
-        # (3) Validação de Descrição Vazia
         if not desc or desc.strip() == "":
             st.error("PARA INCLUIR OU EXCLUIR É OBRIGATÓRIO ENTRAR COM UMA DESCRIÇÃO")
         else:
-            # (2) Validação de Campos Excludentes
             opcoes_preenchidas = 0
             if d_m != "": opcoes_preenchidas += 1
             if d_s != "": opcoes_preenchidas += 1
@@ -119,14 +117,10 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
                 
                 if lista_bulk:
                     supabase.table("lancamentos").insert(lista_bulk).execute()
-                    st.session_state.msg_sucesso = f"Sucesso! {len(lista_bulk)} lançamentos gerados."
+                    st.session_state['msg_sucesso'] = f"Sucesso! {len(lista_bulk)} lançamentos gerados."
                     
-                    # (1) Limpeza dos campos após inclusão
-                    chaves_limpar = [
-                        "pj_d", "pj_comp", "pj_val", "pj_tipo", "pj_dm", "pj_ds", "pj_de", 
-                        "pj_noc", "pj_fds", "pj_cor", "pj_qdo", "pj_base", "pj_vfixo", 
-                        "pj_parc", "pj_pate", "pj_pdep"
-                    ]
+                    # CORREÇÃO: Limpeza segura dos campos
+                    chaves_limpar = ["pj_d", "pj_comp", "pj_val", "pj_dm", "pj_ds", "pj_de", "pj_noc", "pj_fds", "pj_cor", "pj_vfixo", "pj_parc"]
                     for k in chaves_limpar:
                         if k in st.session_state:
                             del st.session_state[k]
@@ -134,7 +128,6 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
                     st.rerun()
 
     if btn_col2.button("Excluir", use_container_width=True):
-        # (3) Validação de Descrição Vazia para Exclusão
         if not desc or desc.strip() == "": 
             st.error("PARA INCLUIR OU EXCLUIR É OBRIGATÓRIO ENTRAR COM UMA DESCRIÇÃO")
         else:
@@ -161,7 +154,7 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
                 res_exc = query.gte("data", i_p.strftime('%Y-%m-%d')).lte("data", f_p.strftime('%Y-%m-%d')).execute()
             
             num_excluidos = len(res_exc.data) if res_exc.data else 0
-            st.session_state.msg_sucesso = f"Sucesso! {num_excluidos} lançamentos excluídos com sucesso."
+            st.session_state['msg_sucesso'] = f"Sucesso! {num_excluidos} lançamentos excluídos com sucesso."
             st.session_state.confirmar_exclusao_ativa = False
             st.rerun()
             
