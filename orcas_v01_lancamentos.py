@@ -79,7 +79,15 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         # Detalhes: 'PLAN' e 'REAL'
                         st_e = 'PLAN' if row['status'] == 'Planejado' else 'REAL'
                         
-                        h += f'<div class="tab-row">'
+                        # Lógica de cores por linha
+                        estilo_linha = ""
+                        if v_re > row['valor_plan']:
+                            if row['tipo'] == 'Saída':
+                                estilo_linha = ' style="color: red;"'
+                            elif row['tipo'] == 'Entrada':
+                                estilo_linha = ' style="color: blue;"'
+                        
+                        h += f'<div class="tab-row"{estilo_linha}>'
                         h += f'<div class="c-dt">{dt_e}</div><div class="c-ds">{row["descricao"]}</div><div class="c-es">{row["tipo"][0]}</div>'
                         h += f'<div class="c-vl">{format_moeda(row["valor_plan"])}</div><div class="c-vl">{format_moeda(v_re)}</div><div class="c-st">{st_e}</div>'
                         h += f'</div>'
@@ -87,7 +95,8 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         filhos = df_mes[(df_mes['descricao'] == row['descricao']) & (df_mes['valor_plan'] == 0) & (df_mes['parcial_real'] > 0)]
                         for _, f in filhos.iterrows():
                             dt_f = pd.to_datetime(f['parcial_data']).strftime('%d/%m/%Y')
-                            h += f'<div class="tab-row" style="color: gray;">'
+                            # Parciais seguem a cor do pai para manter a integridade visual da linha
+                            h += f'<div class="tab-row" style="color: gray; font-style: italic;">'
                             h += f'<div class="c-dt"></div><div class="c-ds" style="padding-left:15px;">> {dt_f}</div><div class="c-es">{f["tipo"][0]}</div>'
                             h += f'<div class="c-vl">---</div><div class="c-vl">{format_moeda(f["parcial_real"])}</div><div class="c-st">REAL</div>'
                             h += f'</div>'
