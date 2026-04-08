@@ -4,52 +4,56 @@ from datetime import datetime, timedelta
 def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
     st.markdown(f'<div class="titulo-tela">Projetar: {st.session_state.projeto_ativo}</div>', unsafe_allow_html=True)
     
-    # CORREÇÃO: Uso de .get() para evitar AttributeError se a chave não existir
+    # Inicializa o versionador de limpeza se não existir
+    if 'limpar_cont' not in st.session_state:
+        st.session_state.limpar_cont = 0
+
     if st.session_state.get('msg_sucesso'): 
         st.success(st.session_state['msg_sucesso'])
         st.session_state['msg_sucesso'] = None
 
+    # O sufixo v torna a key única e força o reset quando alterado
+    v = st.session_state.limpar_cont
+
     col_d1, col_d2 = st.columns([4, 2])
-    # Widgets com chaves para permitir limpeza
-    desc = col_d1.text_input("Descrição", key="pj_d")
-    comp_txt = col_d2.text_input("Complemento", key="pj_comp", help="Será adicionado ao final da descrição")
+    desc = col_d1.text_input("Descrição", key=f"pj_d_{v}")
+    comp_txt = col_d2.text_input("Complemento", key=f"pj_comp_{v}", help="Será adicionado ao final da descrição")
     
     col_v, col_t = st.columns(2)
-    v_t = col_v.text_input("Valor", "0,00", key="pj_val")
-    tipo = col_t.selectbox("Tipo", ["Saída", "Entrada"], key="pj_tipo")
+    v_t = col_v.text_input("Valor", "0,00", key=f"pj_val_{v}")
+    tipo = col_t.selectbox("Tipo", ["Saída", "Entrada"], key=f"pj_tipo_{v}")
 
     with st.expander("Recorrência e Datas"):
         c1, c2, c3 = st.columns(3)
-        d_m = c1.text_input("Dia (1-31, DD/MM ou *)", "", key="pj_dm")
-        d_s = c2.selectbox("Dia da Semana", ["", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"], key="pj_ds")
-        d_e = c3.date_input("Dia Específico", value=None, format="DD/MM/YYYY", key="pj_de")
+        d_m = c1.text_input("Dia (1-31, DD/MM ou *)", "", key=f"pj_dm_{v}")
+        d_s = c2.selectbox("Dia da Semana", ["", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"], key=f"pj_ds_{v}")
+        d_e = c3.date_input("Dia Específico", value=None, format="DD/MM/YYYY", key=f"pj_de_{v}")
         
-        n_ocorrencias = st.number_input("Nº de Ocorrências (0 = usar Data Até)", min_value=0, step=1, key="pj_noc")
-        fds = st.radio("Se cair em Fim de Semana:", ["Manter", "Antecipa", "Posterga"], horizontal=True, key="pj_fds")
+        n_ocorrencias = st.number_input("Nº de Ocorrências (0 = usar Data Até)", min_value=0, step=1, key=f"pj_noc_{v}")
+        fds = st.radio("Se cair em Fim de Semana:", ["Manter", "Antecipa", "Posterga"], horizontal=True, key=f"pj_fds_{v}")
         
         c_i, c_f = st.columns(2)
-        i_p = c_i.date_input("Início", value=datetime.now().date(), format="DD/MM/YYYY", key="pj_data_ini")
-        f_p = c_f.date_input("Até", value=d_fim_db if d_fim_db else datetime.now().date(), format="DD/MM/YYYY", key="pj_data_fim")
+        i_p = c_i.date_input("Início", value=datetime.now().date(), format="DD/MM/YYYY", key=f"pj_data_ini_{v}")
+        f_p = c_f.date_input("Até", value=d_fim_db if d_fim_db else datetime.now().date(), format="DD/MM/YYYY", key=f"pj_data_fim_{v}")
 
     with st.expander("🛠️ Projeção Avançada", expanded=False):
         st.markdown("**Regras de Correção Automática**")
         col_c1, col_c2, col_c3 = st.columns([2, 2, 3])
-        usar_corrc = col_c1.checkbox("Corrigir este valor?", key="pj_cor")
-        c_quando = col_c2.selectbox("Quando:", ["Todo mês", "Todo ano"], key="pj_qdo")
-        c_base = col_c3.selectbox("Com base em:", ["Média dos Realizados", "Percentual Fixo (%)", "IGPM"], key="pj_base")
-        c_val_fixo = st.text_input("Valor do Percentual (se fixo)", "0,00", key="pj_vfixo")
+        usar_corrc = col_c1.checkbox("Corrigir este valor?", key=f"pj_cor_{v}")
+        c_quando = col_c2.selectbox("Quando:", ["Todo mês", "Todo ano"], key=f"pj_qdo_{v}")
+        c_base = col_c3.selectbox("Com base em:", ["Média dos Realizados", "Percentual Fixo (%)", "IGPM"], key=f"pj_base_{v}")
+        c_val_fixo = st.text_input("Valor do Percentual (se fixo)", "0,00", key=f"pj_vfixo_{v}")
 
         st.divider()
-
         st.markdown("**Realizações Parciais e Resíduos**")
         col_p1, col_p2, col_p3 = st.columns([2, 2, 3])
-        permitir_parcial = col_p1.checkbox("Permitir parciais?", key="pj_parc")
-        p_ate = col_p2.selectbox("Até:", ["Último dia do mês", "Último dia do ano", "Sempre"], key="pj_pate")
+        permitir_parcial = col_p1.checkbox("Permitir parciais?", key=f"pj_parc_{v}")
+        p_ate = col_p2.selectbox("Até:", ["Último dia do mês", "Último dia do ano", "Sempre"], key=f"pj_pate_{v}")
         p_depois = col_p3.selectbox("Depois disso:", [
             "Zera o Realizado", 
             "Adiciona a diferença no próximo Planejado",
             "Copia Planejado atualizado para o próximo"
-        ], key="pj_pdep")
+        ], key=f"pj_pdep_{v}")
 
     btn_col1, btn_col2, _ = st.columns([1, 1, 2])
 
@@ -66,7 +70,7 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
                 st.error("NÃO É POSSÍVEL USAR MAIS DE UMA DESSAS OPÇÕES (DIA DO MÊS, DIA DA SEMANA E DIA ESPECÍFICO) JUNTAS, UTILIZE APENAS UMA DESSAS OPÇÕES")
             else:
                 uid_local = st.session_state.get('CHAVE_MESTRA_UUID')
-                v = parse_moeda(v_t)
+                v_calc = parse_moeda(v_t)
                 v_pct = parse_moeda(c_val_fixo) / 100
                 curr = i_p
                 lista_bulk = [] 
@@ -99,7 +103,7 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
                             "data": dt_f.strftime('%Y-%m-%d'), 
                             "data_vencimento": dt_f.strftime('%Y-%m-%d'),
                             "descricao": nome_final, 
-                            "valor_plan": v, 
+                            "valor_plan": v_calc, 
                             "valor_real": 0.0, 
                             "tipo": tipo, 
                             "status": 'Planejado',
@@ -110,7 +114,7 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
                             "correcao_valor": v_pct if c_base == "Percentual Fixo (%)" else 0.0
                         })
                         gerados += 1
-                        if usar_corrc and c_quando == "Todo mês" and c_base == "Percentual Fixo (%)": v *= (1 + v_pct)
+                        if usar_corrc and c_quando == "Todo mês" and c_base == "Percentual Fixo (%)": v_calc *= (1 + v_pct)
 
                     if n_ocorrencias > 0 and gerados >= n_ocorrencias: break
                     curr += timedelta(days=1)
@@ -119,12 +123,8 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
                     supabase.table("lancamentos").insert(lista_bulk).execute()
                     st.session_state['msg_sucesso'] = f"Sucesso! {len(lista_bulk)} lançamentos gerados."
                     
-                    # CORREÇÃO: Limpeza segura dos campos
-                    chaves_limpar = ["pj_d", "pj_comp", "pj_val", "pj_dm", "pj_ds", "pj_de", "pj_noc", "pj_fds", "pj_cor", "pj_vfixo", "pj_parc"]
-                    for k in chaves_limpar:
-                        if k in st.session_state:
-                            del st.session_state[k]
-                            
+                    # RESET SEGURO: Aumenta o contador para mudar todas as keys dos widgets
+                    st.session_state.limpar_cont += 1
                     st.rerun()
 
     if btn_col2.button("Excluir", use_container_width=True):
