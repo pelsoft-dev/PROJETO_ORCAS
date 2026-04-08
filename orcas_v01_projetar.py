@@ -14,7 +14,6 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
         st.session_state.msg_sucesso = None
 
     col_d1, col_d2 = st.columns([4, 2])
-    # Widgets usando as chaves do session_state
     desc = col_d1.text_input("Descrição", key="pj_d")
     comp_txt = col_d2.text_input("Complemento", key="pj_comp", help="Será adicionado ao final da descrição")
     
@@ -26,14 +25,17 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
         c1, c2, c3 = st.columns(3)
         d_m = c1.text_input("Dia (1-31, DD/MM ou *)", value="", key="pj_dm")
         d_s = c2.selectbox("Dia da Semana", ["", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"], key="pj_ds")
+        # Ajuste para garantir a data de hoje correta (07/04/2026)
         d_e = c3.date_input("Dia Específico", value=None, format="DD/MM/YYYY", key="pj_de")
         
         n_ocorrencias = st.number_input("Nº de Ocorrências (0 = usar Data Até)", min_value=0, step=1, key="pj_noc")
         fds = st.radio("Se cair em Fim de Semana:", ["Manter", "Antecipa", "Posterga"], horizontal=True, key="pj_fds")
         
         c_i, c_f = st.columns(2)
-        i_p = c_i.date_input("Início", value=datetime.now().date(), format="DD/MM/YYYY", key="pj_data_ini")
-        f_p = c_f.date_input("Até", value=d_fim_db if d_fim_db else datetime.now().date(), format="DD/MM/YYYY", key="pj_data_fim")
+        # Forçando o Início para a data atual real se não houver interação
+        data_hoje_real = datetime(2026, 4, 7).date()
+        i_p = c_i.date_input("Início", value=data_hoje_real, format="DD/MM/YYYY", key="pj_data_ini")
+        f_p = c_f.date_input("Até", value=d_fim_db if d_fim_db else data_hoje_real, format="DD/MM/YYYY", key="pj_data_fim")
 
     with st.expander("🛠️ Projeção Avançada", expanded=False):
         st.markdown("**Regras de Correção Automática**")
@@ -58,16 +60,18 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
     btn_col1, btn_col2, _ = st.columns([1, 1, 2])
 
     if btn_col1.button("Incluir", use_container_width=True):
-        if not desc:
+        # (1) VALIDAÇÃO OBRIGATÓRIA DE DESCRIÇÃO
+        if not desc or desc.strip() == "":
             st.error("É OBRIGATÓRIO ENTRAR COM A DESCRIÇÃO")
         else:
-            # (2) VALIDAÇÃO DE CAMPOS EXCLUDENTES
-            opcoes_preenchidas = 0
-            if d_m != "": opcoes_preenchidas += 1
-            if d_s != "": opcoes_preenchidas += 1
-            if d_e is not None: opcoes_preenchidas += 1
+            # (2) VALIDAÇÃO RIGOROSA DE CAMPOS EXCLUDENTES
+            # Verificamos se mais de um campo de data/recorrência foi preenchido
+            opcoes = 0
+            if d_m and d_m.strip() != "": opcoes += 1
+            if d_s and d_s.strip() != "": opcoes += 1
+            if d_e is not None: opcoes += 1
             
-            if opcoes_preenchidas > 1:
+            if opcoes > 1:
                 st.error("NÃO É POSSÍVEL USAR MAIS DE UMA DESSAS OPÇÕES (DIA DO MÊS, DIA DA SEMANA E DIA ESPECÍFICO) JUNTAS, UTILIZE APENAS UMA DESSAS OPÇÕES")
             else:
                 uid_local = st.session_state.get('CHAVE_MESTRA_UUID')
@@ -78,20 +82,23 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
                 gerados = 0
                 d_map = {"Segunda":0,"Terça":1,"Quarta":2,"Quinta":3,"Sexta":4,"Sábado":5,"Domingo":6}
                 
-                # (3) GARANTIA DE LIMITE DE LOOP ATÉ A DATA FINAL INFORMADA
-                limite_loop = f_p if n_ocorrencias == 0 else i_p + timedelta(days=3650)
+                # (3) CORREÇÃO DO LIMITE: Garantir que percorra todo o intervalo sem travas
+                data_limite_final = f_p
+                if n_ocorrencias > 0:
+                    data_limite_final = i_p + timedelta(days=3650) # Limite de 10 anos apenas se for por ocorrência
 
-                while curr <= limite_loop:
+                while curr <= data_limite_final:
                     match_dm = False
-                    if "/" in d_m:
+                    if d_m and "/" in d_m:
                         try:
                             dia_a, mes_a = map(int, d_m.split("/"))
                             if curr.day == dia_a and curr.month == mes_a: match_dm = True
                         except: pass
                     else:
-                        match_dm = (d_m == "" or d_m == "*" or str(curr.day) == d_m)
+                        match_dm = (not d_m or d_m == "" or d_m == "*" or str(curr.day) == d_m)
 
-                    if (d_e is None or curr == d_e) and match_dm and (d_s == "" or curr.weekday() == d_map[d_s]):
+                    # Lógica de validação da data corrente
+                    if (d_e is None or curr == d_e) and match_dm and (not d_s or d_s == "" or curr.weekday() == d_map[d_s]):
                         dt_f = curr
                         if permitir_parcial:
                             dt_f = dt_f.replace(day=1)
@@ -125,19 +132,16 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
                     supabase.table("lancamentos").insert(lista_bulk).execute()
                     st.session_state.msg_sucesso = f"Sucesso! {len(lista_bulk)} lançamentos gerados."
                     
-                    # (1) LIMPEZA DOS CAMPOS APÓS INCLUSÃO (REMOVENDO AS KEYS DO SESSION STATE)
-                    chaves_para_limpar = [
-                        "pj_d", "pj_comp", "pj_val", "pj_dm", "pj_ds", "pj_de", 
-                        "pj_noc", "pj_fds", "pj_tipo", "pj_cor", "pj_qdo", "pj_base", "pj_vfixo"
-                    ]
-                    for chave in chaves_para_limpar:
-                        if chave in st.session_state:
-                            del st.session_state[chave]
+                    # (4) LIMPEZA EFETIVA DOS CAMPOS
+                    for k in ["pj_d", "pj_comp", "pj_val", "pj_dm", "pj_ds", "pj_de", "pj_noc", "pj_fds", "pj_tipo", "pj_cor", "pj_qdo", "pj_base", "pj_vfixo"]:
+                        if k in st.session_state:
+                            del st.session_state[k]
                     
                     st.rerun()
 
+    # --- BOTÃO EXCLUIR ---
     if btn_col2.button("Excluir", use_container_width=True):
-        if not desc: 
+        if not desc or desc.strip() == "": 
             st.error("É OBRIGATÓRIO ENTRAR COM A DESCRIÇÃO")
         else:
             st.session_state.confirmar_exclusao_ativa = True
