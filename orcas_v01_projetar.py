@@ -67,8 +67,13 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
             if d_e is not None: opcoes_preenchidas += 1
             
             if opcoes_preenchidas > 1:
-                st.error("NÃO É POSSÍVEL USAR MAIS DE UMA DESSAS OPÇÕES (DIA DO MÊS, DIA DA SEMANA E DIA ESPECÍFICO) JUNTAS, UTILIZE APENAS UMA DESSAS OPÇÕES")
+                st.session_state.erro_excludente = True
             else:
+                # Ajuste solicitado: se permitir parciais e dia do mês vazio, assume 1
+                d_m_processado = d_m
+                if permitir_parcial and d_m == "":
+                    d_m_processado = "1"
+
                 uid_local = st.session_state.get('CHAVE_MESTRA_UUID')
                 v_calc = parse_moeda(v_t)
                 v_pct = parse_moeda(c_val_fixo) / 100
@@ -81,13 +86,13 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
 
                 while curr <= limite_loop:
                     match_dm = False
-                    if "/" in d_m:
+                    if "/" in d_m_processado:
                         try:
-                            dia_a, mes_a = map(int, d_m.split("/"))
+                            dia_a, mes_a = map(int, d_m_processado.split("/"))
                             if curr.day == dia_a and curr.month == mes_a: match_dm = True
                         except: pass
                     else:
-                        match_dm = (d_m == "" or d_m == "*" or str(curr.day) == d_m)
+                        match_dm = (d_m_processado == "" or d_m_processado == "*" or str(curr.day) == d_m_processado)
 
                     if (d_e is None or curr == d_e) and match_dm and (d_s == "" or curr.weekday() == d_map[d_s]):
                         dt_f = curr
@@ -122,10 +127,16 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
                 if lista_bulk:
                     supabase.table("lancamentos").insert(lista_bulk).execute()
                     st.session_state['msg_sucesso'] = f"Sucesso! {len(lista_bulk)} lançamentos gerados."
-                    
-                    # RESET SEGURO: Aumenta o contador para mudar todas as keys dos widgets
                     st.session_state.limpar_cont += 1
                     st.rerun()
+
+    # Modal de erro excludente
+    if st.session_state.get('erro_excludente', False):
+        st.error("AS OPÇÕES (DIA DO MÊS, DIA DA SEMANA E DIA ESPECÍFICO) SÃO EXCLUDENTES E PORTANTO O ORCAS ACEITARÁ APENAS UMA DELAS")
+        if st.button("OK"):
+            st.session_state.erro_excludente = False
+            st.session_state.limpar_cont += 1
+            st.rerun()
 
     if btn_col2.button("Excluir", use_container_width=True):
         if not desc or desc.strip() == "": 
