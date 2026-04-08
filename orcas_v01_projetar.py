@@ -61,6 +61,7 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
         if not desc:
             st.error("É OBRIGATÓRIO ENTRAR COM A DESCRIÇÃO")
         else:
+            # (2) VALIDAÇÃO DE CAMPOS EXCLUDENTES
             opcoes_preenchidas = 0
             if d_m != "": opcoes_preenchidas += 1
             if d_s != "": opcoes_preenchidas += 1
@@ -77,7 +78,7 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
                 gerados = 0
                 d_map = {"Segunda":0,"Terça":1,"Quarta":2,"Quinta":3,"Sexta":4,"Sábado":5,"Domingo":6}
                 
-                # Ajustado para garantir que o loop processe corretamente até a data final
+                # (3) GARANTIA DE LIMITE DE LOOP ATÉ A DATA FINAL INFORMADA
                 limite_loop = f_p if n_ocorrencias == 0 else i_p + timedelta(days=3650)
 
                 while curr <= limite_loop:
@@ -124,7 +125,7 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
                     supabase.table("lancamentos").insert(lista_bulk).execute()
                     st.session_state.msg_sucesso = f"Sucesso! {len(lista_bulk)} lançamentos gerados."
                     
-                    # Limpeza correta: deletamos as chaves para que o widget resete ao valor 'value' padrão no rerun
+                    # (1) LIMPEZA DOS CAMPOS APÓS INCLUSÃO (REMOVENDO AS KEYS DO SESSION STATE)
                     chaves_para_limpar = [
                         "pj_d", "pj_comp", "pj_val", "pj_dm", "pj_ds", "pj_de", 
                         "pj_noc", "pj_fds", "pj_tipo", "pj_cor", "pj_qdo", "pj_base", "pj_vfixo"
