@@ -4,25 +4,26 @@ from datetime import datetime, timedelta
 def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
     st.markdown(f'<div class="titulo-tela">Projetar: {st.session_state.projeto_ativo}</div>', unsafe_allow_html=True)
     
-    # Inicializa o versionador de limpeza se não existir
+    # Inicializa o versionador de limpeza e controle de erro se não existir
     if 'limpar_cont' not in st.session_state:
         st.session_state.limpar_cont = 0
+    if 'bloqueio_excludente' not in st.session_state:
+        st.session_state.bloqueio_excludente = False
 
     if st.session_state.get('msg_sucesso'): 
         st.success(st.session_state['msg_sucesso'])
         st.session_state['msg_sucesso'] = None
 
-    # O sufixo v torna a key única e força o reset quando alterado
-    v = st.session_state.limpar_cont
-
-    # --- BLOCO DE CONTROLE DE ERRO EXCLUDENTE (PROBLEMA 1) ---
-    if st.session_state.get('erro_excludente', False):
+    # --- (1) TRAVA DE SEGURANÇA EXCLUDENTE ---
+    if st.session_state.bloqueio_excludente:
         st.error("AS OPÇÕES (DIA DO MÊS, DIA DA SEMANA E DIA ESPECÍFICO) SÃO EXCLUDENTES E PORTANTO O ORCAS ACEITARÁ APENAS UMA DELAS")
-        if st.button("OK", key="btn_limpar_erro"):
-            st.session_state.erro_excludente = False
+        if st.button("OK", key="confirmar_erro_excludente"):
+            st.session_state.bloqueio_excludente = False
             st.session_state.limpar_cont += 1
             st.rerun()
-        st.stop() # Interrompe a renderização do resto da tela até clicar em OK
+        st.stop()
+
+    v = st.session_state.limpar_cont
 
     col_d1, col_d2 = st.columns([4, 2])
     desc = col_d1.text_input("Descrição", key=f"pj_d_{v}")
@@ -70,29 +71,27 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
         if not desc or desc.strip() == "":
             st.error("PARA INCLUIR OU EXCLUIR É OBRIGATÓRIO ENTRAR COM UMA DESCRIÇÃO")
         else:
-            # (1) Verificação Excludente
-            opcoes_preenchidas = 0
-            if d_m != "": opcoes_preenchidas += 1
-            if d_s != "": opcoes_preenchidas += 1
-            if d_e is not None: opcoes_preenchidas += 1
+            # (1) Validação Excludente
+            opcoes = 0
+            if d_m != "": opcoes += 1
+            if d_s != "": opcoes += 1
+            if d_e is not None: opcoes += 1
             
-            if opcoes_preenchidas > 1:
-                st.session_state.erro_excludente = True
+            if opcoes > 1:
+                st.session_state.bloqueio_excludente = True
                 st.rerun()
             else:
-                # (2) Ajuste da Lógica de Datas para Parciais e Dia 01
+                # (2) Lógica de Datas e Retroatividade (Dia 01 ou Dia do Mês)
                 d_m_final = d_m
-                # Se parcial e vazio, o dia base é 1.
                 if permitir_parcial and d_m == "":
                     d_m_final = "1"
+
+                # Começamos o loop do primeiro dia do mês da data de início para capturar o mês atual
+                curr = i_p.replace(day=1) 
                 
                 uid_local = st.session_state.get('CHAVE_MESTRA_UUID')
                 v_calc = parse_moeda(v_t)
                 v_pct = parse_moeda(c_val_fixo) / 100
-                
-                # Para garantir o dia 01 do mês atual (mesmo que passado), começamos do dia 1 do mês de i_p
-                curr = i_p.replace(day=1) if (permitir_parcial and d_m == "") else i_p
-                
                 lista_bulk = [] 
                 gerados = 0
                 d_map = {"Segunda":0,"Terça":1,"Quarta":2,"Quinta":3,"Sexta":4,"Sábado":5,"Domingo":6}
@@ -110,8 +109,8 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
                         match_dm = (d_m_final == "" or d_m_final == "*" or str(curr.day) == d_m_final)
 
                     if (d_e is None or curr == d_e) and match_dm and (d_s == "" or curr.weekday() == d_map[d_s]):
-                        # Adicionamos o lançamento se a data for >= i_p OU se for o dia 01 forçado do mês inicial
-                        if curr >= i_p or (permitir_parcial and d_m == "" and curr == i_p.replace(day=1)):
+                        # A condição permite incluir se for >= i_p OU se estivermos forçando o dia base do mês atual
+                        if curr >= i_p or curr.month == i_p.month:
                             dt_f = curr
                             if permitir_parcial:
                                 dt_f = dt_f.replace(day=1)
@@ -156,7 +155,6 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
     if st.session_state.get('confirmar_exclusao_ativa', False):
         nome_busca = f"{desc} {comp_txt}".strip() if comp_txt else desc
         uid_exec = st.session_state.get('CHAVE_MESTRA_UUID') 
-        
         if d_e:
             msg_confirma = f"VOCÊ DESEJA EXCLUIR O LANÇAMENTO {nome_busca} DO DIA {d_e.strftime('%d/%m/%Y')}. SIM/NÃO?"
         else:
@@ -164,20 +162,15 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
         
         st.warning(msg_confirma)
         exc_c1, exc_c2 = st.columns(2)
-        
         if exc_c1.button("SIM", key="btn_confirm_exc_sim"):
             query = supabase.table("lancamentos").delete().eq("projeto_id", st.session_state.projeto_ativo).eq("usuario_id", uid_exec).eq("descricao", nome_busca)
-            
             if d_e:
                 res_exc = query.eq("data", d_e.strftime('%Y-%m-%d')).execute()
             else:
                 res_exc = query.gte("data", i_p.strftime('%Y-%m-%d')).lte("data", f_p.strftime('%Y-%m-%d')).execute()
-            
-            num_excluidos = len(res_exc.data) if res_exc.data else 0
-            st.session_state['msg_sucesso'] = f"Sucesso! {num_excluidos} lançamentos excluídos com sucesso."
+            st.session_state['msg_sucesso'] = f"Sucesso! {len(res_exc.data) if res_exc.data else 0} lançamentos excluídos."
             st.session_state.confirmar_exclusao_ativa = False
             st.rerun()
-            
         if exc_c2.button("NÃO", key="btn_confirm_exc_nao"):
             st.session_state.confirmar_exclusao_ativa = False
             st.rerun()
