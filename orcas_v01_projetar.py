@@ -42,6 +42,16 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
         d_s = c2.selectbox("Dia da Semana", ["", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"], key=f"pj_ds_{v}")
         d_e = c3.date_input("Dia Específico", value=None, format="DD/MM/YYYY", key=f"pj_de_{v}")
         
+        # Validação reativa: se o usuário preencher mais de um campo, ativa o bloqueio imediatamente
+        opcoes_preenchidas = 0
+        if d_m != "": opcoes_preenchidas += 1
+        if d_s != "": opcoes_preenchidas += 1
+        if d_e is not None: opcoes_preenchidas += 1
+        
+        if opcoes_preenchidas > 1:
+            st.session_state.bloqueio_excludente = True
+            st.rerun()
+            
         n_ocorrencias = st.number_input("Nº de Ocorrências (0 = usar Data Até)", min_value=0, step=1, key=f"pj_noc_{v}")
         fds = st.radio("Se cair em Fim de Semana:", ["Manter", "Antecipa", "Posterga"], horizontal=True, key=f"pj_fds_{v}")
         
@@ -71,7 +81,7 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
         if not desc or desc.strip() == "":
             st.error("PARA INCLUIR OU EXCLUIR É OBRIGATÓRIO ENTRAR COM UMA DESCRIÇÃO")
         else:
-            # Validação Excludente
+            # Validação Excludente adicional no clique do botão
             opcoes = 0
             if d_m != "": opcoes += 1
             if d_s != "": opcoes += 1
