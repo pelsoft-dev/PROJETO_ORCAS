@@ -15,6 +15,15 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
     # O sufixo v torna a key única e força o reset quando alterado
     v = st.session_state.limpar_cont
 
+    # --- BLOCO DE CONTROLE DE ERRO EXCLUDENTE (PROBLEMA 1) ---
+    if st.session_state.get('erro_excludente', False):
+        st.error("AS OPÇÕES (DIA DO MÊS, DIA DA SEMANA E DIA ESPECÍFICO) SÃO EXCLUDENTES E PORTANTO O ORCAS ACEITARÁ APENAS UMA DELAS")
+        if st.button("OK", key="btn_limpar_erro"):
+            st.session_state.erro_excludente = False
+            st.session_state.limpar_cont += 1
+            st.rerun()
+        st.stop() # Interrompe a renderização do resto da tela até clicar em OK
+
     col_d1, col_d2 = st.columns([4, 2])
     desc = col_d1.text_input("Descrição", key=f"pj_d_{v}")
     comp_txt = col_d2.text_input("Complemento", key=f"pj_comp_{v}", help="Será adicionado ao final da descrição")
@@ -61,29 +70,29 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
         if not desc or desc.strip() == "":
             st.error("PARA INCLUIR OU EXCLUIR É OBRIGATÓRIO ENTRAR COM UMA DESCRIÇÃO")
         else:
-            # (1) Lógica Excludente
+            # (1) Verificação Excludente
             opcoes_preenchidas = 0
             if d_m != "": opcoes_preenchidas += 1
             if d_s != "": opcoes_preenchidas += 1
             if d_e is not None: opcoes_preenchidas += 1
             
             if opcoes_preenchidas > 1:
-                st.error("AS OPÇÕES (DIA DO MÊS, DIA DA SEMANA E DIA ESPECÍFICO) SÃO EXCLUDENTES E PORTANTO O ORCAS ACEITARÁ APENAS UMA DELAS")
-                if st.button("OK"):
-                    st.session_state.limpar_cont += 1
-                    st.rerun()
+                st.session_state.erro_excludente = True
+                st.rerun()
             else:
-                # (2) Lógica Parciais no Dia 1
+                # (2) Ajuste da Lógica de Datas para Parciais e Dia 01
                 d_m_final = d_m
-                curr = i_p
+                # Se parcial e vazio, o dia base é 1.
                 if permitir_parcial and d_m == "":
                     d_m_final = "1"
-                    # Força o início da verificação para o dia 01 do mês de início selecionado
-                    curr = i_p.replace(day=1)
-
+                
                 uid_local = st.session_state.get('CHAVE_MESTRA_UUID')
                 v_calc = parse_moeda(v_t)
                 v_pct = parse_moeda(c_val_fixo) / 100
+                
+                # Para garantir o dia 01 do mês atual (mesmo que passado), começamos do dia 1 do mês de i_p
+                curr = i_p.replace(day=1) if (permitir_parcial and d_m == "") else i_p
+                
                 lista_bulk = [] 
                 gerados = 0
                 d_map = {"Segunda":0,"Terça":1,"Quarta":2,"Quinta":3,"Sexta":4,"Sábado":5,"Domingo":6}
@@ -100,8 +109,8 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
                     else:
                         match_dm = (d_m_final == "" or d_m_final == "*" or str(curr.day) == d_m_final)
 
-                    # Garante que não processe datas anteriores ao i_p (exceto o dia 01 forçado pela parcial)
                     if (d_e is None or curr == d_e) and match_dm and (d_s == "" or curr.weekday() == d_map[d_s]):
+                        # Adicionamos o lançamento se a data for >= i_p OU se for o dia 01 forçado do mês inicial
                         if curr >= i_p or (permitir_parcial and d_m == "" and curr == i_p.replace(day=1)):
                             dt_f = curr
                             if permitir_parcial:
