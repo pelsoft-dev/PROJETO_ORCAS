@@ -1,0 +1,24 @@
+name: ORCAS Madrugada Job
+
+on:
+  schedule:
+    # 06:00 UTC equivale às 03:00 de Jundiaí/Brasília
+    - cron: '0 6 * * *'
+  workflow_dispatch: # Isso permite o botão de "Testar Agora"
+
+jobs:
+  executar_batch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Configurar Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      - name: Instalar Bibliotecas
+        run: pip install supabase
+      - name: Rodar Script
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python orcas_v01_batch01_3am.py
