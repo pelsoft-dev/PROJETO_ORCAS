@@ -13,6 +13,7 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
     if 'bloqueio_excludente' not in st.session_state:
         st.session_state.bloqueio_excludente = False
 
+    # Busca segura da mensagem de sucesso
     if st.session_state.get('msg_sucesso'): 
         st.success(st.session_state['msg_sucesso'])
         st.session_state['msg_sucesso'] = None
@@ -42,13 +43,12 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
         d_s = c2.selectbox("Dia da Semana", ["", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"], key=f"pj_ds_{v}")
         d_e = c3.date_input("Dia Específico", value=None, format="DD/MM/YYYY", key=f"pj_de_{v}")
         
-        # Validação reativa: se o usuário preencher mais de um campo, ativa o bloqueio imediatamente
-        opcoes_preenchidas = 0
-        if d_m != "": opcoes_preenchidas += 1
-        if d_s != "": opcoes_preenchidas += 1
-        if d_e is not None: opcoes_preenchidas += 1
+        op_preenchidas = 0
+        if d_m != "": op_preenchidas += 1
+        if d_s != "": op_preenchidas += 1
+        if d_e is not None: op_preenchidas += 1
         
-        if opcoes_preenchidas > 1:
+        if op_preenchidas > 1:
             st.session_state.bloqueio_excludente = True
             st.rerun()
             
@@ -56,7 +56,6 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
         fds = st.radio("Se cair em Fim de Semana:", ["Manter", "Antecipa", "Posterga"], horizontal=True, key=f"pj_fds_{v}")
         
         c_i, c_f = st.columns(2)
-        # Data de Início corrigida para o fuso correto
         i_p = c_i.date_input("Início", value=hoje_br, format="DD/MM/YYYY", key=f"pj_data_ini_{v}")
         f_p = c_f.date_input("Até", value=d_fim_db if d_fim_db else hoje_br, format="DD/MM/YYYY", key=f"pj_data_fim_{v}")
 
@@ -70,10 +69,15 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
 
         st.divider()
         st.markdown("**Realizações Parciais e Resíduos**")
-        col_p1, col_p2, col_p3 = st.columns([2, 2, 3])
+        col_p1, col_p2 = st.columns([2, 5])
         permitir_parcial = col_p1.checkbox("Permitir parciais?", key=f"pj_parc_{v}")
-        p_ate = col_p2.selectbox("Até:", ["Último dia do mês", "Último dia do ano", "Sempre"], key=f"pj_pate_{v}")
-        p_depois = col_p3.selectbox("Depois disso:", ["Zera o Realizado", "Adiciona a diferença no próximo Planejado", "Copia Planejado atualizado para o próximo"], key=f"pj_pdep_{v}")
+        
+        opcoes_residuo = [
+            "Zera o Realizado", 
+            "Adicione a diferença (P-R) no próximo Planejado", 
+            "Copia a diferença (P-R) no próximo Planejado"
+        ]
+        p_depois = col_p2.selectbox("No último dia do Mês:", opcoes_residuo, index=0, key=f"pj_pdep_{v}")
 
     btn_col1, btn_col2, _ = st.columns([1, 1, 2])
 
@@ -81,75 +85,74 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
         if not desc or desc.strip() == "":
             st.error("PARA INCLUIR OU EXCLUIR É OBRIGATÓRIO ENTRAR COM UMA DESCRIÇÃO")
         else:
-            # Validação Excludente adicional no clique do botão
-            opcoes = 0
-            if d_m != "": opcoes += 1
-            if d_s != "": opcoes += 1
-            if d_e is not None: opcoes += 1
+            d_m_final = d_m
+            # Se permitir parcial e não tiver dia, assume dia 1 do mês
+            if permitir_parcial and d_m == "" and d_e is None and d_s == "":
+                d_m_final = "1"
+
+            curr = i_p.replace(day=1)
+            uid_local = st.session_state.get('CHAVE_MESTRA_UUID')
+            v_calc = parse_moeda(v_t)
+            v_pct = parse_moeda(c_val_fixo) / 100
+            lista_bulk = [] 
+            gerados = 0
+            d_map = {"Segunda":0,"Terça":1,"Quarta":2,"Quinta":3,"Sexta":4,"Sábado":5,"Domingo":6}
             
-            if opcoes > 1:
-                st.session_state.bloqueio_excludente = True
-                st.rerun()
-            else:
-                d_m_final = d_m
-                if permitir_parcial and d_m == "":
-                    d_m_final = "1"
+            limite_loop = f_p if n_ocorrencias == 0 else i_p + timedelta(days=3650)
 
-                # Inicia o loop no dia 1 do mês de início para garantir retroatividade no mês atual
-                curr = i_p.replace(day=1)
-                
-                uid_local = st.session_state.get('CHAVE_MESTRA_UUID')
-                v_calc = parse_moeda(v_t)
-                v_pct = parse_moeda(c_val_fixo) / 100
-                lista_bulk = [] 
-                gerados = 0
-                d_map = {"Segunda":0,"Terça":1,"Quarta":2,"Quinta":3,"Sexta":4,"Sábado":5,"Domingo":6}
-                
-                limite_loop = f_p if n_ocorrencias == 0 else i_p + timedelta(days=3650)
+            while curr <= limite_loop:
+                match_dm = False
+                if "/" in d_m_final:
+                    try:
+                        dia_a, mes_a = map(int, d_m_final.split("/"))
+                        if curr.day == dia_a and curr.month == mes_a: match_dm = True
+                    except: pass
+                else:
+                    match_dm = (d_m_final == "" or d_m_final == "*" or str(curr.day) == d_m_final)
 
-                while curr <= limite_loop:
-                    match_dm = False
-                    if "/" in d_m_final:
-                        try:
-                            dia_a, mes_a = map(int, d_m_final.split("/"))
-                            if curr.day == dia_a and curr.month == mes_a: match_dm = True
-                        except: pass
-                    else:
-                        match_dm = (d_m_final == "" or d_m_final == "*" or str(curr.day) == d_m_final)
+                if (d_e is None or curr == d_e) and match_dm and (d_s == "" or curr.weekday() == d_map[d_s]):
+                    # Ajuste para aceitar a data de hoje ou do mês de início
+                    if curr >= i_p or (curr.month == i_p.month and curr.year == i_p.year):
+                        dt_f = curr
+                        if permitir_parcial:
+                            dt_f = dt_f.replace(day=1)
+                        elif fds != "Manter" and dt_f.weekday() >= 5: 
+                            dt_f += timedelta(days=(2 if dt_f.weekday()==5 else 1) if fds=="Posterga" else -1)
+                        
+                        nome_final = f"{desc} {comp_txt}".strip() if comp_txt else desc
+                        lista_bulk.append({
+                            "projeto_id": st.session_state.projeto_ativo, 
+                            "usuario_id": uid_local, 
+                            "data": dt_f.strftime('%Y-%m-%d'), 
+                            "data_vencimento": dt_f.strftime('%Y-%m-%d'),
+                            "descricao": nome_final, 
+                            "valor_plan": float(v_calc), 
+                            "valor_real": 0.0, 
+                            "tipo": tipo, 
+                            "status": 'Planejado', 
+                            "permite_parcial": bool(permitir_parcial),
+                            "usar_media": bool(usar_corrc and c_base == "Média dos Realizados"),
+                            "complemento_texto": comp_txt if comp_txt else None,
+                            "correcao_freq": c_quando if usar_corrc else None,
+                            "correcao_valor": float(v_pct) if c_base == "Percentual Fixo (%)" else 0.0,
+                            "regra_parcial": str(p_depois)
+                        })
+                        gerados += 1
+                        if usar_corrc and c_quando == "Todo mês" and c_base == "Percentual Fixo (%)": v_calc *= (1 + v_pct)
 
-                    if (d_e is None or curr == d_e) and match_dm and (d_s == "" or curr.weekday() == d_map[d_s]):
-                        # Inclui se for o mês atual ou datas futuras dentro do critério
-                        if curr >= i_p or curr.month == i_p.month:
-                            dt_f = curr
-                            if permitir_parcial:
-                                dt_f = dt_f.replace(day=1)
-                            elif fds != "Manter" and dt_f.weekday() >= 5: 
-                                dt_f += timedelta(days=(2 if dt_f.weekday()==5 else 1) if fds=="Posterga" else -1)
-                            
-                            nome_final = f"{desc} {comp_txt}".strip() if comp_txt else desc
-                            lista_bulk.append({
-                                "projeto_id": st.session_state.projeto_ativo, 
-                                "usuario_id": uid_local, 
-                                "data": dt_f.strftime('%Y-%m-%d'), 
-                                "data_vencimento": dt_f.strftime('%Y-%m-%d'),
-                                "descricao": nome_final, "valor_plan": v_calc, "valor_real": 0.0, "tipo": tipo, 
-                                "status": 'Planejado', "permite_parcial": permitir_parcial,
-                                "usar_media": (usar_corrc and c_base == "Média dos Realizados"),
-                                "complemento_texto": comp_txt if comp_txt else None,
-                                "correcao_freq": c_quando if usar_corrc else None,
-                                "correcao_valor": v_pct if c_base == "Percentual Fixo (%)" else 0.0
-                            })
-                            gerados += 1
-                            if usar_corrc and c_quando == "Todo mês" and c_base == "Percentual Fixo (%)": v_calc *= (1 + v_pct)
-
-                    if n_ocorrencias > 0 and gerados >= n_ocorrencias: break
-                    curr += timedelta(days=1)
-                
-                if lista_bulk:
+                if n_ocorrencias > 0 and gerados >= n_ocorrencias: break
+                curr += timedelta(days=1)
+            
+            if lista_bulk:
+                try:
                     supabase.table("lancamentos").insert(lista_bulk).execute()
                     st.session_state['msg_sucesso'] = f"Sucesso! {len(lista_bulk)} lançamentos gerados."
                     st.session_state.limpar_cont += 1
                     st.rerun()
+                except Exception as e:
+                    st.error(f"Erro no Supabase: {e}")
+            else:
+                st.warning("Nenhum lançamento gerado. Verifique as datas de Início e o Dia selecionado.")
 
     if btn_col2.button("Excluir", use_container_width=True):
         if not desc or desc.strip() == "": 
@@ -160,13 +163,17 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
     if st.session_state.get('confirmar_exclusao_ativa', False):
         nome_busca = f"{desc} {comp_txt}".strip() if comp_txt else desc
         uid_exec = st.session_state.get('CHAVE_MESTRA_UUID') 
-        msg_confirma = f"VOCÊ DESEJA EXCLUIR O LANÇAMENTO {nome_busca} DO DIA {d_e.strftime('%d/%m/%Y')}. SIM/NÃO?" if d_e else f"VOCÊ DESEJA EXCLUIR TODOS OS LANÇAMENTOS DE {nome_busca} DO PERÍODO DE {i_p.strftime('%d/%m/%Y')} A {f_p.strftime('%d/%m/%Y')}. SIM/NÃO?"
+        msg_confirma = f"VOCÊ DESEJA EXCLUIR O LANÇAMENTO {nome_busca} DO DIA {d_e.strftime('%d/%m/%Y') if d_e else ''}. SIM/NÃO?" if d_e else f"VOCÊ DESEJA EXCLUIR TODOS OS LANÇAMENTOS DE {nome_busca} DO PERÍODO DE {i_p.strftime('%d/%m/%Y')} A {f_p.strftime('%d/%m/%Y')}. SIM/NÃO?"
         st.warning(msg_confirma)
         exc_c1, exc_c2 = st.columns(2)
         if exc_c1.button("SIM", key="btn_conf_sim"):
             query = supabase.table("lancamentos").delete().eq("projeto_id", st.session_state.projeto_ativo).eq("usuario_id", uid_exec).eq("descricao", nome_busca)
-            res_exc = query.eq("data", d_e.strftime('%Y-%m-%d')).execute() if d_e else query.gte("data", i_p.strftime('%Y-%m-%d')).lte("data", f_p.strftime('%Y-%m-%d')).execute()
-            st.session_state['msg_sucesso'] = f"Sucesso! {len(res_exc.data) if res_exc.data else 0} lançamentos excluídos."
+            if d_e:
+                res_exc = query.eq("data", d_e.strftime('%Y-%m-%d')).execute()
+            else:
+                res_exc = query.gte("data", i_p.strftime('%Y-%m-%d')).lte("data", f_p.strftime('%Y-%m-%d')).execute()
+            
+            st.session_state['msg_sucesso'] = f"Sucesso! Exclusão concluída."
             st.session_state.confirmar_exclusao_ativa = False
             st.rerun()
         if exc_c2.button("NÃO", key="btn_conf_nao"):
