@@ -75,13 +75,15 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
             else:
                 # (2) Lógica Parciais no Dia 1
                 d_m_final = d_m
+                curr = i_p
                 if permitir_parcial and d_m == "":
                     d_m_final = "1"
+                    # Força o início da verificação para o dia 01 do mês de início selecionado
+                    curr = i_p.replace(day=1)
 
                 uid_local = st.session_state.get('CHAVE_MESTRA_UUID')
                 v_calc = parse_moeda(v_t)
                 v_pct = parse_moeda(c_val_fixo) / 100
-                curr = i_p
                 lista_bulk = [] 
                 gerados = 0
                 d_map = {"Segunda":0,"Terça":1,"Quarta":2,"Quinta":3,"Sexta":4,"Sábado":5,"Domingo":6}
@@ -98,32 +100,34 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
                     else:
                         match_dm = (d_m_final == "" or d_m_final == "*" or str(curr.day) == d_m_final)
 
+                    # Garante que não processe datas anteriores ao i_p (exceto o dia 01 forçado pela parcial)
                     if (d_e is None or curr == d_e) and match_dm and (d_s == "" or curr.weekday() == d_map[d_s]):
-                        dt_f = curr
-                        if permitir_parcial:
-                            dt_f = dt_f.replace(day=1)
-                        elif fds != "Manter" and dt_f.weekday() >= 5: 
-                            dt_f += timedelta(days=(2 if dt_f.weekday()==5 else 1) if fds=="Posterga" else -1)
-                        
-                        nome_final = f"{desc} {comp_txt}".strip() if comp_txt else desc
-                        lista_bulk.append({
-                            "projeto_id": st.session_state.projeto_ativo, 
-                            "usuario_id": uid_local, 
-                            "data": dt_f.strftime('%Y-%m-%d'), 
-                            "data_vencimento": dt_f.strftime('%Y-%m-%d'),
-                            "descricao": nome_final, 
-                            "valor_plan": v_calc, 
-                            "valor_real": 0.0, 
-                            "tipo": tipo, 
-                            "status": 'Planejado',
-                            "permite_parcial": permitir_parcial,
-                            "usar_media": (usar_corrc and c_base == "Média dos Realizados"),
-                            "complemento_texto": comp_txt if comp_txt else None,
-                            "correcao_freq": c_quando if usar_corrc else None,
-                            "correcao_valor": v_pct if c_base == "Percentual Fixo (%)" else 0.0
-                        })
-                        gerados += 1
-                        if usar_corrc and c_quando == "Todo mês" and c_base == "Percentual Fixo (%)": v_calc *= (1 + v_pct)
+                        if curr >= i_p or (permitir_parcial and d_m == "" and curr == i_p.replace(day=1)):
+                            dt_f = curr
+                            if permitir_parcial:
+                                dt_f = dt_f.replace(day=1)
+                            elif fds != "Manter" and dt_f.weekday() >= 5: 
+                                dt_f += timedelta(days=(2 if dt_f.weekday()==5 else 1) if fds=="Posterga" else -1)
+                            
+                            nome_final = f"{desc} {comp_txt}".strip() if comp_txt else desc
+                            lista_bulk.append({
+                                "projeto_id": st.session_state.projeto_ativo, 
+                                "usuario_id": uid_local, 
+                                "data": dt_f.strftime('%Y-%m-%d'), 
+                                "data_vencimento": dt_f.strftime('%Y-%m-%d'),
+                                "descricao": nome_final, 
+                                "valor_plan": v_calc, 
+                                "valor_real": 0.0, 
+                                "tipo": tipo, 
+                                "status": 'Planejado',
+                                "permite_parcial": permitir_parcial,
+                                "usar_media": (usar_corrc and c_base == "Média dos Realizados"),
+                                "complemento_texto": comp_txt if comp_txt else None,
+                                "correcao_freq": c_quando if usar_corrc else None,
+                                "correcao_valor": v_pct if c_base == "Percentual Fixo (%)" else 0.0
+                            })
+                            gerados += 1
+                            if usar_corrc and c_quando == "Todo mês" and c_base == "Percentual Fixo (%)": v_calc *= (1 + v_pct)
 
                     if n_ocorrencias > 0 and gerados >= n_ocorrencias: break
                     curr += timedelta(days=1)
