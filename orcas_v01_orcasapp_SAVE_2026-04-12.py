@@ -24,16 +24,11 @@ except Exception as e:
     st.stop()
 
 # --- 3. CONFIGURAÇÃO E ESTILO ---
-
-# Lógica para definir o estado da sidebar (Expandida no login/erro, recolhida na navegação)
-if 'sidebar_state' not in st.session_state:
-    st.session_state.sidebar_state = "expanded"
-
 st.set_page_config(
     page_title="ORCAS - Gestão Financeira", 
     page_icon="🐋", 
     layout="wide", 
-    initial_sidebar_state=st.session_state.sidebar_state
+    initial_sidebar_state="expanded"
 )
 
 def ir_para_o_topo():
@@ -77,6 +72,7 @@ st.markdown("""
     }
 
     /* ADEQUAÇÃO (3): FORÇA COMPACTAÇÃO RIGOROSA - SEM QUEBRA DE LINHA */
+    /* Aplica-se a tabelas estáticas, dataframes e tabelas de exibição */
     [data-testid="stTable"] td, 
     [data-testid="stTable"] th,
     [data-testid="stDataFrame"] td,
@@ -88,6 +84,7 @@ st.markdown("""
         vertical-align: middle !important;
     }
     
+    /* Adiciona barra de rolagem horizontal se necessário para evitar quebra */
     [data-testid="stTable"], [data-testid="stDataFrame"] {
         overflow-x: auto !important;
     }
@@ -195,7 +192,6 @@ with st.sidebar:
     
     if escolha_temp != st.session_state.escolha:
         st.session_state.escolha = escolha_temp
-        st.session_state.sidebar_state = "collapsed" # Altera para recolhido após a escolha
         st.rerun()
     
     escolha = st.session_state.escolha
@@ -203,7 +199,6 @@ with st.sidebar:
     st.divider()
     if st.button("Sair do Sistema"):
         st.session_state.clear()
-        st.session_state.sidebar_state = "expanded"
         st.rerun()
 
 # --- 7. CARREGAMENTO DO DATAFRAME ---
