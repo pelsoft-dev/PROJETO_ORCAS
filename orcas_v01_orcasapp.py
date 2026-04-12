@@ -6,6 +6,7 @@ import hashlib
 import plotly.graph_objects as go
 import streamlit.components.v1 as components
 from supabase import Client
+from streamlit_js_eval import streamlit_js_eval
 
 # --- 1. IMPORTAÇÃO DOS MÓDULOS EXTERNOS ---
 import orcas_v01_gestao as gestao
@@ -164,8 +165,8 @@ with st.sidebar:
     
     if escolha_temp != st.session_state.escolha:
         st.session_state.escolha = escolha_temp
-        # Aqui está o segredo: mudamos para "collapsed" antes do rerun
-        st.session_state.estado_sidebar = "collapsed"
+        # Comando definitivo via JS Eval para clicar no botão de fechar nativo
+        streamlit_js_eval(js_expressions="window.parent.document.querySelector('button[aria-label=\"Close sidebar\"]').click()")
         st.rerun()
     
     st.divider()
@@ -184,9 +185,6 @@ else:
 
 # --- 8. ROTEAMENTO ---
 st.markdown("<div id='topo-ancora'></div>", unsafe_allow_html=True)
-
-# LÓGICA PARA VOLTAR A SIDEBAR AO NORMAL NA PRÓXIMA INTERAÇÃO SE O USUÁRIO ABRIR
-st.session_state.estado_sidebar = "collapsed"
 
 if st.session_state.escolha == "🏠 Dashboard":
     dash.exibir_dashboard(df, supabase, ID_USUARIO_LOGADO, s_db)
