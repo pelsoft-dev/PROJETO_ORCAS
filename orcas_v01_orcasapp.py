@@ -192,6 +192,21 @@ with st.sidebar:
     
     if escolha_temp != st.session_state.escolha:
         st.session_state.escolha = escolha_temp
+        # ADEQUAÇÃO (1): Recolhe o menu lateral ao trocar de opção
+        components.html(
+            """
+            <script>
+                var windowParent = window.parent;
+                var buttons = windowParent.document.querySelectorAll('button');
+                for (var i = 0; i < buttons.length; i++) {
+                    if (buttons[i].getAttribute('aria-label') === 'Close sidebar') {
+                        buttons[i].click();
+                    }
+                }
+            </script>
+            """,
+            height=0
+        )
         st.rerun()
     
     escolha = st.session_state.escolha
