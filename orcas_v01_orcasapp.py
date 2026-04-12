@@ -6,7 +6,6 @@ import hashlib
 import plotly.graph_objects as go
 import streamlit.components.v1 as components
 from supabase import Client
-from streamlit_js_eval import streamlit_js_eval
 
 # --- 1. IMPORTAÇÃO DOS MÓDULOS EXTERNOS ---
 import orcas_v01_gestao as gestao
@@ -26,19 +25,34 @@ except Exception as e:
 
 # --- 3. CONFIGURAÇÃO E ESTILO ---
 
-# Controle de estado da Sidebar via Session State
-if 'estado_sidebar' not in st.session_state:
-    st.session_state.estado_sidebar = "expanded"
+# Estado para controlar se devemos recolher o menu
+if 'recolher_menu' not in st.session_state:
+    st.session_state.recolher_menu = False
 
 st.set_page_config(
     page_title="ORCAS - Gestão Financeira", 
     page_icon="🐋", 
     layout="wide", 
-    initial_sidebar_state=st.session_state.estado_sidebar
+    initial_sidebar_state="expanded"
 )
 
 def ir_para_o_topo():
     components.html("""<script>window.parent.document.getElementById('topo-ancora').scrollIntoView();</script>""", height=0)
+
+# CSS que força o recolhimento se a flag estiver ativa
+if st.session_state.recolher_menu:
+    st.markdown("""
+        <style>
+            [data-testid="stSidebar"] {
+                display: none;
+            }
+            [data-testid="stSidebarCollapsedControl"] {
+                display: flex !important;
+            }
+        </style>
+    """, unsafe_allow_html=True)
+    # Voltamos a flag para False para que o botão ">>" funcione se clicado
+    st.session_state.recolher_menu = False
 
 st.markdown("""
     <style>
@@ -160,13 +174,11 @@ with st.sidebar:
     menu_opcoes = ["🏠 Dashboard", "📑 Lançamentos", "📅 Projetar", "✅ Conciliação", "⚙️ Gestão", "📊 Admin"]
     idx_inicial = menu_opcoes.index(st.session_state.escolha) if st.session_state.escolha in menu_opcoes else 4
     
-    # Captura da escolha
     escolha_temp = st.radio("Menu de Navegação", menu_opcoes, index=idx_inicial)
     
     if escolha_temp != st.session_state.escolha:
         st.session_state.escolha = escolha_temp
-        # AÇÃO DIRETA: Tentativa de fechar antes do rerun
-        streamlit_js_eval(js_expressions="window.parent.document.querySelector('button[aria-label=\"Close sidebar\"]').click()")
+        st.session_state.recolher_menu = True  # Ativa o recolhimento via CSS
         st.rerun()
     
     st.divider()
@@ -185,11 +197,6 @@ else:
 
 # --- 8. ROTEAMENTO ---
 st.markdown("<div id='topo-ancora'></div>", unsafe_allow_html=True)
-
-# LÓGICA DE SEGURANÇA: Se trocou de menu, força o fechamento via JS novamente aqui no corpo principal
-if st.session_state.get('escolha_mudou', False):
-    streamlit_js_eval(js_expressions="window.parent.document.querySelector('button[aria-label=\"Close sidebar\"]').click()")
-    st.session_state.escolha_mudou = False
 
 if st.session_state.escolha == "🏠 Dashboard":
     dash.exibir_dashboard(df, supabase, ID_USUARIO_LOGADO, s_db)
