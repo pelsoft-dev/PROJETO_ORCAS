@@ -34,17 +34,27 @@ st.set_page_config(
 def ir_para_o_topo():
     components.html("""<script>window.parent.document.getElementById('topo-ancora').scrollIntoView();</script>""", height=0)
 
-# FUNÇÃO RIGOROSA PARA RECOLHER O MENU USANDO O BOTÃO NATIVO
-def recolher_menu_nativo():
-    components.html(
-        """
-        <script>
-            var fechar = window.parent.document.querySelector('button[aria-label="Close sidebar"]');
-            if (fechar) { fechar.click(); }
-        </script>
-        """,
-        height=0,
-    )
+# CSS RIGOROSO PARA RECOLHIMENTO AUTOMÁTICO SEM MATAR O BOTÃO >>
+# Esta lógica verifica se houve uma mudança de estado e instrui o navegador a fechar a barra lateral nativamente.
+if 'menu_mudou' not in st.session_state:
+    st.session_state.menu_mudou = False
+
+if st.session_state.menu_mudou:
+    st.markdown("""
+        <style>
+            /* Instrução ao Navegador: Se o menu mudou, recolha a sidebar nativa */
+            section[data-testid="stSidebar"] {
+                transition: margin-left 0.3s ease;
+                margin-left: -21rem !important;
+            }
+            /* Garante que o botão >> fique visível para reabrir */
+            button[kind="headerNoContext"] {
+                display: flex !important;
+                visibility: visible !important;
+            }
+        </style>
+    """, unsafe_allow_html=True)
+    st.session_state.menu_mudou = False
 
 st.markdown("""
     <style>
@@ -202,7 +212,7 @@ with st.sidebar:
     
     if escolha_temp != st.session_state.escolha:
         st.session_state.escolha = escolha_temp
-        recolher_menu_nativo() # Única alteração: dispara o clique no botão nativo
+        st.session_state.menu_mudou = True # Ativa a transição de CSS para recolher
         st.rerun()
     
     escolha = st.session_state.escolha
