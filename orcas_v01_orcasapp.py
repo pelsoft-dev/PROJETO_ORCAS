@@ -39,19 +39,24 @@ st.set_page_config(
 def ir_para_o_topo():
     components.html("""<script>window.parent.document.getElementById('topo-ancora').scrollIntoView();</script>""", height=0)
 
-# CSS que força o recolhimento se a flag estiver ativa
+# CSS DINÂMICO: Recolhe a barra sem "matar" o botão >>
 if st.session_state.recolher_menu:
     st.markdown("""
         <style>
+            /* Força a barra lateral a encolher mas mantém o controle ativo */
             [data-testid="stSidebar"] {
-                display: none;
+                min-width: 0px !important;
+                width: 0px !important;
+                margin-left: -500px !important;
             }
+            /* Garante que o botão >> apareça no topo esquerdo */
             [data-testid="stSidebarCollapsedControl"] {
                 display: flex !important;
+                visibility: visible !important;
+                left: 0 !important;
             }
         </style>
     """, unsafe_allow_html=True)
-    # Voltamos a flag para False para que o botão ">>" funcione se clicado
     st.session_state.recolher_menu = False
 
 st.markdown("""
@@ -178,7 +183,7 @@ with st.sidebar:
     
     if escolha_temp != st.session_state.escolha:
         st.session_state.escolha = escolha_temp
-        st.session_state.recolher_menu = True  # Ativa o recolhimento via CSS
+        st.session_state.recolher_menu = True 
         st.rerun()
     
     st.divider()
