@@ -6,7 +6,6 @@ import hashlib
 import plotly.graph_objects as go
 import streamlit.components.v1 as components
 from supabase import Client
-from streamlit_js_eval import streamlit_js_eval
 
 # --- 1. IMPORTAÇÃO DOS MÓDULOS EXTERNOS ---
 import orcas_v01_gestao as gestao
@@ -36,39 +35,33 @@ st.set_page_config(
 def ir_para_o_topo():
     components.html("""<script>window.parent.document.getElementById('topo-ancora').scrollIntoView();</script>""", height=0)
 
+# FUNÇÃO PARA RECOLHER SIDEBAR SEM QUEBRAR O LAYOUT
+def recolher_sidebar_nativa():
+    components.html(
+        """
+        <script>
+            var fechar = window.parent.document.querySelector('button[aria-label="Close sidebar"]');
+            if (fechar) {
+                fechar.click();
+            }
+        </script>
+        """,
+        height=0,
+    )
+
 st.markdown("""
     <style>
-    /* Oculta menus nativos e footer */
     #MainMenu {visibility: hidden;} 
     footer {visibility: hidden;}
     .stAppDeployButton {display:none !important;}
     [data-testid="stStatusWidget"] {display:none !important;}
-    
-    /* Cabeçalho */
-    [data-testid="stHeader"] {
-        background-color: rgba(0,0,0,0) !important;
-    }
-    
-    /* Remove badges flutuantes do canto inferior direito */
-    [data-testid="stDecoration"],
-    .viewerBadge_container__1QSob,
-    .viewerBadge_link__1S137,
-    div[class*="stDecoration"] {
-        display: none !important;
-        visibility: hidden !important;
-    }
+    [data-testid="stHeader"] { background-color: rgba(0,0,0,0) !important; }
+    [data-testid="stDecoration"] { display: none !important; }
 
-    /* Ajuste de altura para conteúdo */
-    .block-container {
-        padding-top: 3.0rem !important;
-        margin-top: -1.5rem !important;
-    }
-
-    /* Estilos customizados ORCAS */
+    .block-container { padding-top: 3.0rem !important; margin-top: -1.5rem !important; }
     .logo-sidebar { font-size: 2.2rem !important; font-weight: bold; color: #1E3A8A; font-family: 'Arial Black', sans-serif; margin-bottom: 20px; }
     .user-email { font-size: 0.85rem; color: #64748b; margin-bottom: 2px; }
     .venc-text { font-size: 0.8rem; color: #e11d48; font-weight: bold; margin-bottom: 10px; }
-    .titulo-tela { font-size: 1.6rem; font-weight: bold; color: #1E3A8A; border-bottom: 2px solid #E5E7EB; margin-bottom: 15px; padding-bottom: 5px; }
     .project-tag-sidebar { color: #1E3A8A; font-weight: bold; font-size: 0.9rem; margin-bottom: 15px; padding: 8px; border-left: 5px solid #1E3A8A; background: #F3F4F6; border-radius: 4px; }
     </style>
 """, unsafe_allow_html=True)
@@ -95,32 +88,24 @@ if not st.session_state.logado:
         with aba[0]:
             em = st.text_input("E-mail Cadastrado")
             se = st.text_input("Senha de Acesso", type="password")
-            col_btn_l1, col_btn_l2 = st.columns(2)
-            if col_btn_l1.button("Entrar no Sistema"):
+            if st.button("Entrar no Sistema"):
                 senha_hash = hashlib.sha256(str.encode(se)).hexdigest()
-                res = supabase.table("usuarios").select("id, vencimento, zap_ativo").eq("email", em).eq("senha", senha_hash).execute()
+                res = supabase.table("usuarios").select("id, vencimento").eq("email", em).eq("senha", senha_hash).execute()
                 if res.data: 
-                    user_data = res.data[0]
                     st.session_state.logado = True
-                    st.session_state.CHAVE_MESTRA_UUID = str(user_data['id'])
+                    st.session_state.CHAVE_MESTRA_UUID = str(res.data[0]['id'])
                     st.session_state.usuario = em
-                    st.session_state.vencimento = str(user_data['vencimento'])
-                    st.session_state.zap_ativo = user_data.get('zap_ativo', 0)
+                    st.session_state.vencimento = str(res.data[0]['vencimento'])
                     st.session_state.projeto_ativo = None
                     st.rerun()
                 else:
                     st.error("E-mail ou senha incorretos.")
-            if col_btn_l2.button("Esqueci minha Senha"):
-                st.info("Entre em contato com o suporte administrativo.")
     st.stop()
 
 # --- 5. ESTADO E DADOS ---
 ID_USUARIO_LOGADO = str(st.session_state.get('CHAVE_MESTRA_UUID', ''))
 vencimento_str = st.session_state.get('vencimento', '2026-01-01')
 venc_dt_objeto = datetime.strptime(vencimento_str, '%Y-%m-%d').date()
-
-if ID_USUARIO_LOGADO:
-    security.verificar_bloqueio_v01(ID_USUARIO_LOGADO, (venc_dt_objeto - datetime.now().date()).days)
 
 projs_req = supabase.table("config_projetos").select("projeto_id").eq("usuario_id", ID_USUARIO_LOGADO).execute()
 projs = [r['projeto_id'] for r in projs_req.data]
@@ -130,10 +115,7 @@ if 'projeto_ativo' not in st.session_state:
 if 'escolha' not in st.session_state:
     st.session_state.escolha = "🏠 Dashboard" if st.session_state.projeto_ativo else "⚙️ Gestão"
 
-s_db = 0.0
-d_ini_db = None 
-d_fim_db = None 
-
+s_db, d_ini_db, d_fim_db = 0.0, None, None
 if st.session_state.projeto_ativo:
     cfg_req = supabase.table("config_projetos").select("*").eq("projeto_id", st.session_state.projeto_ativo).eq("usuario_id", ID_USUARIO_LOGADO).execute()
     if cfg_req.data:
@@ -152,7 +134,6 @@ with st.sidebar:
         st.markdown(f'<div class="project-tag-sidebar">Plano Ativo: {st.session_state.projeto_ativo}</div>', unsafe_allow_html=True)
     
     st.divider()
-    
     menu_opcoes = ["🏠 Dashboard", "📑 Lançamentos", "📅 Projetar", "✅ Conciliação", "⚙️ Gestão", "📊 Admin"]
     idx_inicial = menu_opcoes.index(st.session_state.escolha) if st.session_state.escolha in menu_opcoes else 4
     
@@ -160,20 +141,12 @@ with st.sidebar:
     
     if escolha_temp != st.session_state.escolha:
         st.session_state.escolha = escolha_temp
-        # O PULO DO GATO: Simula o clique no botão nativo de fechar "<<"
-        # Isso garante que o botão ">>" continue existindo e funcionando normalmente
-        streamlit_js_eval(js_expressions="window.parent.document.querySelector('button[aria-label=\"Close sidebar\"]').click()")
-        st.rerun()
-    
-    st.divider()
-    if st.button("Sair do Sistema"):
-        st.session_state.clear()
+        recolher_sidebar_nativa() # CHAMA O RECOLHIMENTO AQUI
         st.rerun()
 
-# --- 7. CARREGAMENTO DO DATAFRAME ---
+# --- 7. CARREGAMENTO DOS DADOS ---
 res_l = supabase.table("lancamentos").select("*").eq("projeto_id", st.session_state.projeto_ativo).eq("usuario_id", ID_USUARIO_LOGADO).order("data").execute()
 df = pd.DataFrame(res_l.data)
-
 if not df.empty:
     df.columns = [c.lower() for c in df.columns]
 else:
