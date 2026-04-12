@@ -190,15 +190,13 @@ with st.sidebar:
     
     if escolha_temp != st.session_state.escolha:
         st.session_state.escolha = escolha_temp
-        # ADEQUAÇÃO: JS para fechar a sidebar buscando o botão específico do Streamlit
+        # ADEQUAÇÃO: JS otimizado para fechar a sidebar em dispositivos móveis e desktop
         components.html(
             """
             <script>
-                var buttons = window.parent.document.getElementsByTagName('button');
-                for (var i = 0; i < buttons.length; i++) {
-                    if (buttons[i].getAttribute('aria-label') === 'Close sidebar') {
-                        buttons[i].click();
-                    }
+                var buttons = window.parent.document.querySelectorAll('button[aria-label="Close sidebar"]');
+                if (buttons.length > 0) {
+                    buttons[0].click();
                 }
             </script>
             """,
