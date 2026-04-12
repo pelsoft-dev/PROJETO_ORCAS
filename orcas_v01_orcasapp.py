@@ -24,19 +24,35 @@ except Exception as e:
     st.stop()
 
 # --- 3. CONFIGURAÇÃO E ESTILO ---
-# ADEQUAÇÃO (1): Controle dinâmico do estado da sidebar via session_state
-if 'sidebar_state' not in st.session_state:
-    st.session_state.sidebar_state = "expanded"
-
 st.set_page_config(
     page_title="ORCAS - Gestão Financeira", 
     page_icon="🐋", 
     layout="wide", 
-    initial_sidebar_state=st.session_state.sidebar_state
+    initial_sidebar_state="expanded"
 )
 
 def ir_para_o_topo():
     components.html("""<script>window.parent.document.getElementById('topo-ancora').scrollIntoView();</script>""", height=0)
+
+# Controle de fechamento via Session State
+if 'sidebar_fechada' not in st.session_state:
+    st.session_state.sidebar_fechada = False
+
+# ADEQUAÇÃO (1): Injeção de CSS que esconde a sidebar se sidebar_fechada for True
+# Esta é a técnica de "Canvas" para Web: se a variável for True, o CSS mata a visibilidade
+if st.session_state.sidebar_fechada:
+    st.markdown("""
+        <style>
+            [data-testid="stSidebar"] {
+                display: none;
+            }
+            [data-testid="stSidebarCollapsedControl"] {
+                display: block;
+            }
+        </style>
+    """, unsafe_allow_html=True)
+    # Resetamos para que ela possa ser aberta manualmente depois
+    st.session_state.sidebar_fechada = False
 
 st.markdown("""
     <style>
@@ -194,8 +210,8 @@ with st.sidebar:
     
     if escolha_temp != st.session_state.escolha:
         st.session_state.escolha = escolha_temp
-        # ADEQUAÇÃO (1): Altera o estado para recolhido e força o rerun
-        st.session_state.sidebar_state = "collapsed"
+        # ADEQUAÇÃO (1): Ativa a flag de fechamento e recarrega
+        st.session_state.sidebar_fechada = True
         st.rerun()
     
     escolha = st.session_state.escolha
@@ -232,6 +248,3 @@ elif escolha == "📊 Admin":
 
 st.divider()
 st.caption(f"ORCAS v01 | Usuário: {st.session_state.usuario} | Projeto: {st.session_state.projeto_ativo}")
-
-# ADEQUAÇÃO (2): Reseta o estado para a próxima interação se o usuário reabrir manualmente
-st.session_state.sidebar_state = "collapsed"
