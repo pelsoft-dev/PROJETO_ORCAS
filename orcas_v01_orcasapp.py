@@ -34,27 +34,17 @@ st.set_page_config(
 def ir_para_o_topo():
     components.html("""<script>window.parent.document.getElementById('topo-ancora').scrollIntoView();</script>""", height=0)
 
-# CSS RIGOROSO PARA RECOLHIMENTO AUTOMÁTICO SEM MATAR O BOTÃO >>
-# Esta lógica verifica se houve uma mudança de estado e instrui o navegador a fechar a barra lateral nativamente.
-if 'menu_mudou' not in st.session_state:
-    st.session_state.menu_mudou = False
-
-if st.session_state.menu_mudou:
-    st.markdown("""
-        <style>
-            /* Instrução ao Navegador: Se o menu mudou, recolha a sidebar nativa */
-            section[data-testid="stSidebar"] {
-                transition: margin-left 0.3s ease;
-                margin-left: -21rem !important;
-            }
-            /* Garante que o botão >> fique visível para reabrir */
-            button[kind="headerNoContext"] {
-                display: flex !important;
-                visibility: visible !important;
-            }
-        </style>
-    """, unsafe_allow_html=True)
-    st.session_state.menu_mudou = False
+# FUNÇÃO PARA RECOLHER O MENU VIA JAVASCRIPT SEGURO
+def recolher_menu_via_clique():
+    components.html(
+        """
+        <script>
+            var fechar = window.parent.document.querySelector('button[aria-label="Close sidebar"]');
+            if (fechar) { fechar.click(); }
+        </script>
+        """,
+        height=0,
+    )
 
 st.markdown("""
     <style>
@@ -64,18 +54,30 @@ st.markdown("""
     .stAppDeployButton {display:none !important;}
     [data-testid="stStatusWidget"] {display:none !important;}
     
-    /* ADEQUAÇÃO (1): Cabeçalho e Botões >> e << */
+    /* ADEQUAÇÃO (1): Posicionamento do Botão >> (Abrir Menu) */
+    /* Movemos o botão para baixo (top) e para a direita (left) para não sumir no celular */
+    [data-testid="stSidebarCollapsedControl"] {
+        top: 10px !important;
+        left: 10px !important;
+        background-color: rgba(30, 58, 138, 0.1) !important;
+        border-radius: 0 10px 10px 0 !important;
+        width: 50px !important;
+        height: 50px !important;
+        display: flex !important;
+        justify-content: center !important;
+        align-items: center !important;
+        z-index: 999999 !important;
+    }
+
+    /* Garante que o ícone dentro do botão esteja visível e azul ORCAS */
+    [data-testid="stSidebarCollapsedControl"] button svg {
+        fill: #1E3A8A !important;
+        width: 30px !important;
+        height: 30px !important;
+    }
+
     [data-testid="stHeader"] {
         background-color: rgba(0,0,0,0) !important;
-    }
-    [data-testid="stHeader"] a, 
-    [data-testid="stHeader"] div:contains("Fork"),
-    [data-testid="stHeader"] svg {
-        display: none !important;
-    }
-    [data-testid="stHeader"] button {
-        display: flex !important;
-        visibility: visible !important;
     }
 
     /* Remove badges flutuantes do canto inferior direito */
@@ -87,22 +89,18 @@ st.markdown("""
         visibility: hidden !important;
     }
 
-    /* ADEQUAÇÃO (2): Ajuste de altura para TÍTULOS e conteúdo */
+    /* ADEQUAÇÃO (2): Ajuste de altura para conteúdo */
     .block-container {
-        padding-top: 3.0rem !important;
+        padding-top: 3.5rem !important;
         margin-top: -1.5rem !important;
     }
 
-    /* ADEQUAÇÃO (3): FORÇA COMPACTAÇÃO RIGOROSA - SEM QUEBRA DE LINHA */
-    [data-testid="stTable"] td, 
-    [data-testid="stTable"] th,
-    [data-testid="stDataFrame"] td,
-    [data-testid="stDataFrame"] th,
-    table td, table th,
-    .stTable td, .stTable th {
+    /* ADEQUAÇÃO (3): FORÇA COMPACTAÇÃO RIGOROSA */
+    [data-testid="stTable"] td, [data-testid="stTable"] th,
+    [data-testid="stDataFrame"] td, [data-testid="stDataFrame"] th,
+    table td, table th {
         white-space: nowrap !important;
         word-break: keep-all !important;
-        vertical-align: middle !important;
     }
     
     [data-testid="stTable"], [data-testid="stDataFrame"] {
@@ -120,7 +118,6 @@ st.markdown("""
         white-space: normal !important; 
         word-wrap: break-word !important; 
         display: block !important;
-        overflow: visible !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -147,8 +144,7 @@ if not st.session_state.logado:
         with aba[0]:
             em = st.text_input("E-mail Cadastrado")
             se = st.text_input("Senha de Acesso", type="password")
-            col_btn_l1, col_btn_l2 = st.columns(2)
-            if col_btn_l1.button("Entrar no Sistema"):
+            if st.button("Entrar no Sistema"):
                 senha_hash = hashlib.sha256(str.encode(se)).hexdigest()
                 res = supabase.table("usuarios").select("id, vencimento, zap_ativo").eq("email", em).eq("senha", senha_hash).execute()
                 if res.data: 
@@ -162,8 +158,6 @@ if not st.session_state.logado:
                     st.rerun()
                 else:
                     st.error("E-mail ou senha incorretos.")
-            if col_btn_l2.button("Esqueci minha Senha"):
-                st.info("Entre em contato com o suporte administrativo.")
     st.stop()
 
 # --- 5. ESTADO E DADOS ---
@@ -182,10 +176,7 @@ if 'projeto_ativo' not in st.session_state:
 if 'escolha' not in st.session_state:
     st.session_state.escolha = "🏠 Dashboard" if st.session_state.projeto_ativo else "⚙️ Gestão"
 
-s_db = 0.0
-d_ini_db = None 
-d_fim_db = None 
-
+s_db, d_ini_db, d_fim_db = 0.0, None, None
 if st.session_state.projeto_ativo:
     cfg_req = supabase.table("config_projetos").select("*").eq("projeto_id", st.session_state.projeto_ativo).eq("usuario_id", ID_USUARIO_LOGADO).execute()
     if cfg_req.data:
@@ -204,7 +195,6 @@ with st.sidebar:
         st.markdown(f'<div class="project-tag-sidebar">Plano Ativo: {st.session_state.projeto_ativo}</div>', unsafe_allow_html=True)
     
     st.divider()
-    
     menu_opcoes = ["🏠 Dashboard", "📑 Lançamentos", "📅 Projetar", "✅ Conciliação", "⚙️ Gestão", "📊 Admin"]
     idx_inicial = menu_opcoes.index(st.session_state.escolha) if st.session_state.escolha in menu_opcoes else 4
     
@@ -212,10 +202,8 @@ with st.sidebar:
     
     if escolha_temp != st.session_state.escolha:
         st.session_state.escolha = escolha_temp
-        st.session_state.menu_mudou = True # Ativa a transição de CSS para recolher
+        recolher_menu_via_clique() # Dispara o fechamento nativo
         st.rerun()
-    
-    escolha = st.session_state.escolha
     
     st.divider()
     if st.button("Sair do Sistema"):
@@ -225,7 +213,6 @@ with st.sidebar:
 # --- 7. CARREGAMENTO DO DATAFRAME ---
 res_l = supabase.table("lancamentos").select("*").eq("projeto_id", st.session_state.projeto_ativo).eq("usuario_id", ID_USUARIO_LOGADO).order("data").execute()
 df = pd.DataFrame(res_l.data)
-
 if not df.empty:
     df.columns = [c.lower() for c in df.columns]
 else:
@@ -234,17 +221,17 @@ else:
 # --- 8. ROTEAMENTO ---
 st.markdown("<div id='topo-ancora'></div>", unsafe_allow_html=True)
 
-if escolha == "🏠 Dashboard":
+if st.session_state.escolha == "🏠 Dashboard":
     dash.exibir_dashboard(df, supabase, ID_USUARIO_LOGADO, s_db)
-elif escolha == "📑 Lançamentos":
+elif st.session_state.escolha == "📑 Lançamentos":
     lanc.exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db, format_moeda, ir_para_o_topo)
-elif escolha == "📅 Projetar":
+elif st.session_state.escolha == "📅 Projetar":
     proj.exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda)
-elif escolha == "✅ Conciliação":
+elif st.session_state.escolha == "✅ Conciliação":
     conc.exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moeda)
-elif escolha == "⚙️ Gestão":
+elif st.session_state.escolha == "⚙️ Gestão":
     gestao.exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, format_moeda, parse_moeda, security)
-elif escolha == "📊 Admin":
+elif st.session_state.escolha == "📊 Admin":
     adm.exibir_admin(df, supabase, ir_para_o_topo)
 
 st.divider()
