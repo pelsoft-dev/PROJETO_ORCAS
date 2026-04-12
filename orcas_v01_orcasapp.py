@@ -6,6 +6,7 @@ import hashlib
 import plotly.graph_objects as go
 import streamlit.components.v1 as components
 from supabase import Client
+from streamlit_js_eval import streamlit_js_eval
 
 # --- 1. IMPORTAÇÃO DOS MÓDULOS EXTERNOS ---
 import orcas_v01_gestao as gestao
@@ -25,10 +26,6 @@ except Exception as e:
 
 # --- 3. CONFIGURAÇÃO E ESTILO ---
 
-# Estado para controlar se devemos recolher o menu
-if 'recolher_menu' not in st.session_state:
-    st.session_state.recolher_menu = False
-
 st.set_page_config(
     page_title="ORCAS - Gestão Financeira", 
     page_icon="🐋", 
@@ -39,26 +36,6 @@ st.set_page_config(
 def ir_para_o_topo():
     components.html("""<script>window.parent.document.getElementById('topo-ancora').scrollIntoView();</script>""", height=0)
 
-# CSS DINÂMICO: Recolhe a barra sem "matar" o botão >>
-if st.session_state.recolher_menu:
-    st.markdown("""
-        <style>
-            /* Força a barra lateral a encolher mas mantém o controle ativo */
-            [data-testid="stSidebar"] {
-                min-width: 0px !important;
-                width: 0px !important;
-                margin-left: -500px !important;
-            }
-            /* Garante que o botão >> apareça no topo esquerdo */
-            [data-testid="stSidebarCollapsedControl"] {
-                display: flex !important;
-                visibility: visible !important;
-                left: 0 !important;
-            }
-        </style>
-    """, unsafe_allow_html=True)
-    st.session_state.recolher_menu = False
-
 st.markdown("""
     <style>
     /* Oculta menus nativos e footer */
@@ -67,7 +44,7 @@ st.markdown("""
     .stAppDeployButton {display:none !important;}
     [data-testid="stStatusWidget"] {display:none !important;}
     
-    /* Cabeçalho e Botões >> e << */
+    /* Cabeçalho */
     [data-testid="stHeader"] {
         background-color: rgba(0,0,0,0) !important;
     }
@@ -183,7 +160,9 @@ with st.sidebar:
     
     if escolha_temp != st.session_state.escolha:
         st.session_state.escolha = escolha_temp
-        st.session_state.recolher_menu = True 
+        # O PULO DO GATO: Simula o clique no botão nativo de fechar "<<"
+        # Isso garante que o botão ">>" continue existindo e funcionando normalmente
+        streamlit_js_eval(js_expressions="window.parent.document.querySelector('button[aria-label=\"Close sidebar\"]').click()")
         st.rerun()
     
     st.divider()
