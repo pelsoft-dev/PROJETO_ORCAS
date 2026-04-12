@@ -24,20 +24,27 @@ except Exception as e:
     st.stop()
 
 # --- 3. CONFIGURAÇÃO E ESTILO ---
-
-# Lógica para definir o estado da sidebar (Expandida no login/erro, recolhida na navegação)
-if 'sidebar_state' not in st.session_state:
-    st.session_state.sidebar_state = "expanded"
-
 st.set_page_config(
     page_title="ORCAS - Gestão Financeira", 
     page_icon="🐋", 
     layout="wide", 
-    initial_sidebar_state=st.session_state.sidebar_state
+    initial_sidebar_state="expanded"
 )
 
 def ir_para_o_topo():
     components.html("""<script>window.parent.document.getElementById('topo-ancora').scrollIntoView();</script>""", height=0)
+
+# FUNÇÃO RIGOROSA PARA RECOLHER O MENU USANDO O BOTÃO NATIVO
+def recolher_menu_nativo():
+    components.html(
+        """
+        <script>
+            var fechar = window.parent.document.querySelector('button[aria-label="Close sidebar"]');
+            if (fechar) { fechar.click(); }
+        </script>
+        """,
+        height=0,
+    )
 
 st.markdown("""
     <style>
@@ -195,7 +202,7 @@ with st.sidebar:
     
     if escolha_temp != st.session_state.escolha:
         st.session_state.escolha = escolha_temp
-        st.session_state.sidebar_state = "collapsed" # Altera para recolhido após a escolha
+        recolher_menu_nativo() # Única alteração: dispara o clique no botão nativo
         st.rerun()
     
     escolha = st.session_state.escolha
@@ -203,7 +210,6 @@ with st.sidebar:
     st.divider()
     if st.button("Sair do Sistema"):
         st.session_state.clear()
-        st.session_state.sidebar_state = "expanded"
         st.rerun()
 
 # --- 7. CARREGAMENTO DO DATAFRAME ---
