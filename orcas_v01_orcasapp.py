@@ -72,7 +72,6 @@ st.markdown("""
     }
 
     /* ADEQUAÇÃO (3): FORÇA COMPACTAÇÃO RIGOROSA - SEM QUEBRA DE LINHA */
-    /* Aplica-se a tabelas estáticas, dataframes e tabelas de exibição */
     [data-testid="stTable"] td, 
     [data-testid="stTable"] th,
     [data-testid="stDataFrame"] td,
@@ -84,7 +83,6 @@ st.markdown("""
         vertical-align: middle !important;
     }
     
-    /* Adiciona barra de rolagem horizontal se necessário para evitar quebra */
     [data-testid="stTable"], [data-testid="stDataFrame"] {
         overflow-x: auto !important;
     }
@@ -192,12 +190,11 @@ with st.sidebar:
     
     if escolha_temp != st.session_state.escolha:
         st.session_state.escolha = escolha_temp
-        # ADEQUAÇÃO (1): Recolhe o menu lateral ao trocar de opção
+        # ADEQUAÇÃO: JS para fechar a sidebar buscando o botão específico do Streamlit
         components.html(
             """
             <script>
-                var windowParent = window.parent;
-                var buttons = windowParent.document.querySelectorAll('button');
+                var buttons = window.parent.document.getElementsByTagName('button');
                 for (var i = 0; i < buttons.length; i++) {
                     if (buttons[i].getAttribute('aria-label') === 'Close sidebar') {
                         buttons[i].click();
@@ -205,7 +202,7 @@ with st.sidebar:
                 }
             </script>
             """,
-            height=0
+            height=0,
         )
         st.rerun()
     
