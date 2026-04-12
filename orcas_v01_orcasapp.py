@@ -34,7 +34,7 @@ st.set_page_config(
 def ir_para_o_topo():
     components.html("""<script>window.parent.document.getElementById('topo-ancora').scrollIntoView();</script>""", height=0)
 
-# FUNÇÃO PARA RECOLHER O MENU VIA JAVASCRIPT SEGURO
+# FUNÇÃO PARA RECOLHER O MENU VIA CLIQUE NO BOTÃO NATIVO
 def recolher_menu_via_clique():
     components.html(
         """
@@ -54,33 +54,32 @@ st.markdown("""
     .stAppDeployButton {display:none !important;}
     [data-testid="stStatusWidget"] {display:none !important;}
     
-    /* ADEQUAÇÃO (1): Posicionamento do Botão >> (Abrir Menu) */
-    /* Movemos o botão para baixo (top) e para a direita (left) para não sumir no celular */
+    /* SOLUÇÃO DEFINITIVA PARA O BOTÃO >> (ABRIR MENU NO CELULAR) */
+    /* Empurramos ele para baixo da barra do GitHub/Fork e damos destaque */
     [data-testid="stSidebarCollapsedControl"] {
-        top: 10px !important;
-        left: 10px !important;
-        background-color: rgba(30, 58, 138, 0.1) !important;
-        border-radius: 0 10px 10px 0 !important;
-        width: 50px !important;
-        height: 50px !important;
+        top: 60px !important; 
+        left: 20px !important;
+        background-color: #1E3A8A !important; /* Azul ORCAS */
+        border-radius: 10px !important;
+        width: 45px !important;
+        height: 45px !important;
         display: flex !important;
-        justify-content: center !important;
-        align-items: center !important;
-        z-index: 999999 !important;
+        z-index: 9999999 !important; /* Força ficar na frente de tudo */
+        box-shadow: 2px 2px 10px rgba(0,0,0,0.3) !important;
     }
 
-    /* Garante que o ícone dentro do botão esteja visível e azul ORCAS */
+    /* Força o ícone >> a ser branco para contrastar */
     [data-testid="stSidebarCollapsedControl"] button svg {
-        fill: #1E3A8A !important;
-        width: 30px !important;
-        height: 30px !important;
+        fill: white !important;
+        width: 25px !important;
+        height: 25px !important;
     }
 
     [data-testid="stHeader"] {
         background-color: rgba(0,0,0,0) !important;
     }
 
-    /* Remove badges flutuantes do canto inferior direito */
+    /* Remove badges flutuantes */
     [data-testid="stDecoration"],
     .viewerBadge_container__1QSob,
     .viewerBadge_link__1S137,
@@ -89,13 +88,13 @@ st.markdown("""
         visibility: hidden !important;
     }
 
-    /* ADEQUAÇÃO (2): Ajuste de altura para conteúdo */
+    /* Ajuste de altura para conteúdo */
     .block-container {
-        padding-top: 3.5rem !important;
+        padding-top: 4.0rem !important;
         margin-top: -1.5rem !important;
     }
 
-    /* ADEQUAÇÃO (3): FORÇA COMPACTAÇÃO RIGOROSA */
+    /* FORÇA COMPACTAÇÃO RIGOROSA - SEM QUEBRA DE LINHA */
     [data-testid="stTable"] td, [data-testid="stTable"] th,
     [data-testid="stDataFrame"] td, [data-testid="stDataFrame"] th,
     table td, table th {
@@ -202,7 +201,7 @@ with st.sidebar:
     
     if escolha_temp != st.session_state.escolha:
         st.session_state.escolha = escolha_temp
-        recolher_menu_via_clique() # Dispara o fechamento nativo
+        recolher_menu_via_clique() 
         st.rerun()
     
     st.divider()
@@ -210,7 +209,7 @@ with st.sidebar:
         st.session_state.clear()
         st.rerun()
 
-# --- 7. CARREGAMENTO DO DATAFRAME ---
+# --- 7. CARREGAMENTO DOS DADOS ---
 res_l = supabase.table("lancamentos").select("*").eq("projeto_id", st.session_state.projeto_ativo).eq("usuario_id", ID_USUARIO_LOGADO).order("data").execute()
 df = pd.DataFrame(res_l.data)
 if not df.empty:
