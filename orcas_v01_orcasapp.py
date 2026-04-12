@@ -34,8 +34,8 @@ st.set_page_config(
 def ir_para_o_topo():
     components.html("""<script>window.parent.document.getElementById('topo-ancora').scrollIntoView();</script>""", height=0)
 
-# FUNÇÃO PARA RECOLHER O MENU VIA CLIQUE NO BOTÃO NATIVO
-def recolher_menu_via_clique():
+# FUNÇÃO PARA RECOLHER O MENU
+def recolher_menu():
     components.html(
         """
         <script>
@@ -54,32 +54,17 @@ st.markdown("""
     .stAppDeployButton {display:none !important;}
     [data-testid="stStatusWidget"] {display:none !important;}
     
-    /* SOLUÇÃO DEFINITIVA PARA O BOTÃO >> (ABRIR MENU NO CELULAR) */
-    /* Empurramos ele para baixo da barra do GitHub/Fork e damos destaque */
+    /* ESCONDE O BOTÃO NATIVO QUE ESTÁ CONFLITANDO COM O FORK DO GITHUB */
     [data-testid="stSidebarCollapsedControl"] {
-        top: 60px !important; 
-        left: 20px !important;
-        background-color: #1E3A8A !important; /* Azul ORCAS */
-        border-radius: 10px !important;
-        width: 45px !important;
-        height: 45px !important;
-        display: flex !important;
-        z-index: 9999999 !important; /* Força ficar na frente de tudo */
-        box-shadow: 2px 2px 10px rgba(0,0,0,0.3) !important;
-    }
-
-    /* Força o ícone >> a ser branco para contrastar */
-    [data-testid="stSidebarCollapsedControl"] button svg {
-        fill: white !important;
-        width: 25px !important;
-        height: 25px !important;
+        display: none !important;
+        visibility: hidden !important;
     }
 
     [data-testid="stHeader"] {
         background-color: rgba(0,0,0,0) !important;
     }
 
-    /* Remove badges flutuantes */
+    /* Remove badges flutuantes do canto inferior */
     [data-testid="stDecoration"],
     .viewerBadge_container__1QSob,
     .viewerBadge_link__1S137,
@@ -88,13 +73,13 @@ st.markdown("""
         visibility: hidden !important;
     }
 
-    /* Ajuste de altura para conteúdo */
+    /* Ajuste de altura para conteúdo principal */
     .block-container {
-        padding-top: 4.0rem !important;
+        padding-top: 4.5rem !important;
         margin-top: -1.5rem !important;
     }
 
-    /* FORÇA COMPACTAÇÃO RIGOROSA - SEM QUEBRA DE LINHA */
+    /* FORÇA COMPACTAÇÃO DE TABELAS */
     [data-testid="stTable"] td, [data-testid="stTable"] th,
     [data-testid="stDataFrame"] td, [data-testid="stDataFrame"] th,
     table td, table th {
@@ -106,20 +91,58 @@ st.markdown("""
         overflow-x: auto !important;
     }
 
-    /* Estilos customizados ORCAS */
+    /* Estilos Visuais ORCAS */
     .logo-sidebar { font-size: 2.2rem !important; font-weight: bold; color: #1E3A8A; font-family: 'Arial Black', sans-serif; margin-bottom: 20px; }
     .user-email { font-size: 0.85rem; color: #64748b; margin-bottom: 2px; }
     .venc-text { font-size: 0.8rem; color: #e11d48; font-weight: bold; margin-bottom: 10px; }
     .titulo-tela { font-size: 1.6rem; font-weight: bold; color: #1E3A8A; border-bottom: 2px solid #E5E7EB; margin-bottom: 15px; padding-bottom: 5px; }
     .project-tag-sidebar { color: #1E3A8A; font-weight: bold; font-size: 0.9rem; margin-bottom: 15px; padding: 8px; border-left: 5px solid #1E3A8A; background: #F3F4F6; border-radius: 4px; }
-    
-    .info-pagamento, .stAlert p { 
-        white-space: normal !important; 
-        word-wrap: break-word !important; 
-        display: block !important;
-    }
     </style>
 """, unsafe_allow_html=True)
+
+# --- BOTÃO FLUTUANTE CUSTOMIZADO (SUBSTITUTO DO NATIVO) ---
+# Ele é injetado fora da linha de conflito do GitHub (top: 65px)
+components.html(
+    """
+    <div id="btn-orcas-open" style="
+        position: fixed;
+        top: 65px;
+        left: 15px;
+        z-index: 999999;
+        background-color: #1E3A8A;
+        color: white;
+        padding: 8px 12px;
+        border-radius: 6px;
+        cursor: pointer;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        font-size: 13px;
+        font-weight: bold;
+        box-shadow: 0px 4px 6px rgba(0,0,0,0.2);
+        display: none;
+    "> >> MENU </div>
+
+    <script>
+        var btn = document.getElementById('btn-orcas-open');
+        
+        // Função para simular o clique no botão de abrir original (que está escondido)
+        btn.onclick = function() {
+            var abrir = window.parent.document.querySelector('button[aria-label="Open sidebar"]');
+            if (abrir) { abrir.click(); }
+        };
+        
+        // Lógica para mostrar o botão apenas quando o menu estiver fechado
+        function monitorSidebar() {
+            var sidebar = window.parent.document.querySelector('section[data-testid="stSidebar"]');
+            if (sidebar) {
+                var isExpanded = sidebar.getAttribute('aria-expanded') === 'true';
+                btn.style.display = isExpanded ? 'none' : 'block';
+            }
+        }
+        setInterval(monitorSidebar, 400);
+    </script>
+    """,
+    height=120,
+)
 
 def format_moeda(v):
     return f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
@@ -201,7 +224,7 @@ with st.sidebar:
     
     if escolha_temp != st.session_state.escolha:
         st.session_state.escolha = escolha_temp
-        recolher_menu_via_clique() 
+        recolher_menu() 
         st.rerun()
     
     st.divider()
@@ -209,7 +232,7 @@ with st.sidebar:
         st.session_state.clear()
         st.rerun()
 
-# --- 7. CARREGAMENTO DOS DADOS ---
+# --- 7. CARREGAMENTO ---
 res_l = supabase.table("lancamentos").select("*").eq("projeto_id", st.session_state.projeto_ativo).eq("usuario_id", ID_USUARIO_LOGADO).order("data").execute()
 df = pd.DataFrame(res_l.data)
 if not df.empty:
