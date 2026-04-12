@@ -38,20 +38,27 @@ def ir_para_o_topo():
 if 'sidebar_fechada' not in st.session_state:
     st.session_state.sidebar_fechada = False
 
-# ADEQUAÇÃO (1): Injeção de CSS que esconde a sidebar se sidebar_fechada for True
-# Esta é a técnica de "Canvas" para Web: se a variável for True, o CSS mata a visibilidade
+# ADEQUAÇÃO (1): Injeção de CSS que recolhe a sidebar mas mantém o botão ">>"
 if st.session_state.sidebar_fechada:
     st.markdown("""
         <style>
+            /* Empurra a sidebar para fora mas não a deleta */
             [data-testid="stSidebar"] {
-                display: none;
+                margin-left: -21rem;
+                transition: margin-left 0.3s ease;
             }
+            /* Garante que o botão de abrir (>>) continue visível e clicável */
             [data-testid="stSidebarCollapsedControl"] {
-                display: block;
+                display: flex !important;
+                visibility: visible !important;
+                left: 10px !important;
+                background-color: #1E3A8A !important; /* Azul para destacar no celular */
+                color: white !important;
+                border-radius: 5px;
             }
         </style>
     """, unsafe_allow_html=True)
-    # Resetamos para que ela possa ser aberta manualmente depois
+    # Resetamos para que ela possa voltar ao normal se o usuário clicar no >>
     st.session_state.sidebar_fechada = False
 
 st.markdown("""
@@ -206,11 +213,12 @@ with st.sidebar:
     menu_opcoes = ["🏠 Dashboard", "📑 Lançamentos", "📅 Projetar", "✅ Conciliação", "⚙️ Gestão", "📊 Admin"]
     idx_inicial = menu_opcoes.index(st.session_state.escolha) if st.session_state.escolha in menu_opcoes else 4
     
+    # Captura a mudança de rádio
     escolha_temp = st.radio("Menu de Navegação", menu_opcoes, index=idx_inicial)
     
     if escolha_temp != st.session_state.escolha:
         st.session_state.escolha = escolha_temp
-        # ADEQUAÇÃO (1): Ativa a flag de fechamento e recarrega
+        # ADEQUAÇÃO (1): Ativa a flag de fechamento
         st.session_state.sidebar_fechada = True
         st.rerun()
     
