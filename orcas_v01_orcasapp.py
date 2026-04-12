@@ -26,7 +26,7 @@ except Exception as e:
 
 # --- 3. CONFIGURAÇÃO E ESTILO ---
 
-# INOVAÇÃO: Controle de estado da Sidebar via Session State
+# Controle de estado da Sidebar via Session State
 if 'estado_sidebar' not in st.session_state:
     st.session_state.estado_sidebar = "expanded"
 
@@ -160,12 +160,12 @@ with st.sidebar:
     menu_opcoes = ["🏠 Dashboard", "📑 Lançamentos", "📅 Projetar", "✅ Conciliação", "⚙️ Gestão", "📊 Admin"]
     idx_inicial = menu_opcoes.index(st.session_state.escolha) if st.session_state.escolha in menu_opcoes else 4
     
-    # IMPORTANTE: No momento em que o rádio muda, setamos o estado como recolhido
+    # Captura da escolha
     escolha_temp = st.radio("Menu de Navegação", menu_opcoes, index=idx_inicial)
     
     if escolha_temp != st.session_state.escolha:
         st.session_state.escolha = escolha_temp
-        # Comando definitivo via JS Eval para clicar no botão de fechar nativo
+        # AÇÃO DIRETA: Tentativa de fechar antes do rerun
         streamlit_js_eval(js_expressions="window.parent.document.querySelector('button[aria-label=\"Close sidebar\"]').click()")
         st.rerun()
     
@@ -185,6 +185,11 @@ else:
 
 # --- 8. ROTEAMENTO ---
 st.markdown("<div id='topo-ancora'></div>", unsafe_allow_html=True)
+
+# LÓGICA DE SEGURANÇA: Se trocou de menu, força o fechamento via JS novamente aqui no corpo principal
+if st.session_state.get('escolha_mudou', False):
+    streamlit_js_eval(js_expressions="window.parent.document.querySelector('button[aria-label=\"Close sidebar\"]').click()")
+    st.session_state.escolha_mudou = False
 
 if st.session_state.escolha == "🏠 Dashboard":
     dash.exibir_dashboard(df, supabase, ID_USUARIO_LOGADO, s_db)
