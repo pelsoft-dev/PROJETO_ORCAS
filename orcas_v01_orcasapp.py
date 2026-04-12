@@ -34,15 +34,14 @@ st.set_page_config(
 def ir_para_o_topo():
     components.html("""<script>window.parent.document.getElementById('topo-ancora').scrollIntoView();</script>""", height=0)
 
+# ADEQUAÇÃO (1): Injeção de CSS e JS para fechar o menu lateral
 st.markdown("""
     <style>
-    /* Oculta menus nativos e footer */
     #MainMenu {visibility: hidden;} 
     footer {visibility: hidden;}
     .stAppDeployButton {display:none !important;}
     [data-testid="stStatusWidget"] {display:none !important;}
     
-    /* ADEQUAÇÃO (1): Cabeçalho e Botões >> e << */
     [data-testid="stHeader"] {
         background-color: rgba(0,0,0,0) !important;
     }
@@ -56,7 +55,6 @@ st.markdown("""
         visibility: visible !important;
     }
 
-    /* Remove badges flutuantes do canto inferior direito */
     [data-testid="stDecoration"],
     .viewerBadge_container__1QSob,
     .viewerBadge_link__1S137,
@@ -65,13 +63,11 @@ st.markdown("""
         visibility: hidden !important;
     }
 
-    /* ADEQUAÇÃO (2): Ajuste de altura para TÍTULOS e conteúdo */
     .block-container {
         padding-top: 3.0rem !important;
         margin-top: -1.5rem !important;
     }
 
-    /* ADEQUAÇÃO (3): FORÇA COMPACTAÇÃO RIGOROSA - SEM QUEBRA DE LINHA */
     [data-testid="stTable"] td, 
     [data-testid="stTable"] th,
     [data-testid="stDataFrame"] td,
@@ -87,7 +83,6 @@ st.markdown("""
         overflow-x: auto !important;
     }
 
-    /* Estilos customizados ORCAS */
     .logo-sidebar { font-size: 2.2rem !important; font-weight: bold; color: #1E3A8A; font-family: 'Arial Black', sans-serif; margin-bottom: 20px; }
     .user-email { font-size: 0.85rem; color: #64748b; margin-bottom: 2px; }
     .venc-text { font-size: 0.8rem; color: #e11d48; font-weight: bold; margin-bottom: 10px; }
@@ -101,6 +96,17 @@ st.markdown("""
         overflow: visible !important;
     }
     </style>
+
+    <script>
+    // Função para fechar a sidebar via DOM do pai
+    const fecharMenu = () => {
+        const principal = window.parent.document;
+        const botaoFechar = principal.querySelector('button[aria-label="Close sidebar"]');
+        if (botaoFechar) {
+            botaoFechar.click();
+        }
+    };
+    </script>
 """, unsafe_allow_html=True)
 
 def format_moeda(v):
@@ -186,21 +192,23 @@ with st.sidebar:
     menu_opcoes = ["🏠 Dashboard", "📑 Lançamentos", "📅 Projetar", "✅ Conciliação", "⚙️ Gestão", "📊 Admin"]
     idx_inicial = menu_opcoes.index(st.session_state.escolha) if st.session_state.escolha in menu_opcoes else 4
     
+    # Captura a mudança de rádio
     escolha_temp = st.radio("Menu de Navegação", menu_opcoes, index=idx_inicial)
     
     if escolha_temp != st.session_state.escolha:
         st.session_state.escolha = escolha_temp
-        # ADEQUAÇÃO: JS otimizado para fechar a sidebar em dispositivos móveis e desktop
+        # ADEQUAÇÃO (1): Chama o script de fechamento e recarrega
         components.html(
             """
             <script>
-                var buttons = window.parent.document.querySelectorAll('button[aria-label="Close sidebar"]');
-                if (buttons.length > 0) {
-                    buttons[0].click();
+                var principal = window.parent.document;
+                var botaoFechar = principal.querySelector('button[aria-label="Close sidebar"]');
+                if (botaoFechar) {
+                    botaoFechar.click();
                 }
             </script>
             """,
-            height=0,
+            height=0
         )
         st.rerun()
     
