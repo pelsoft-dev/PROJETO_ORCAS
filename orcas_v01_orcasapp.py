@@ -24,42 +24,20 @@ except Exception as e:
     st.stop()
 
 # --- 3. CONFIGURAÇÃO E ESTILO ---
+
+# INOVAÇÃO: Controle de estado da Sidebar via Session State
+if 'estado_sidebar' not in st.session_state:
+    st.session_state.estado_sidebar = "expanded"
+
 st.set_page_config(
     page_title="ORCAS - Gestão Financeira", 
     page_icon="🐋", 
     layout="wide", 
-    initial_sidebar_state="expanded"
+    initial_sidebar_state=st.session_state.estado_sidebar
 )
 
 def ir_para_o_topo():
     components.html("""<script>window.parent.document.getElementById('topo-ancora').scrollIntoView();</script>""", height=0)
-
-# Controle de fechamento via Session State
-if 'sidebar_fechada' not in st.session_state:
-    st.session_state.sidebar_fechada = False
-
-# ADEQUAÇÃO (1): Injeção de CSS que recolhe a sidebar mas mantém o botão ">>"
-if st.session_state.sidebar_fechada:
-    st.markdown("""
-        <style>
-            /* Empurra a sidebar para fora mas não a deleta */
-            [data-testid="stSidebar"] {
-                margin-left: -21rem;
-                transition: margin-left 0.3s ease;
-            }
-            /* Garante que o botão de abrir (>>) continue visível e clicável */
-            [data-testid="stSidebarCollapsedControl"] {
-                display: flex !important;
-                visibility: visible !important;
-                left: 10px !important;
-                background-color: #1E3A8A !important; /* Azul para destacar no celular */
-                color: white !important;
-                border-radius: 5px;
-            }
-        </style>
-    """, unsafe_allow_html=True)
-    # Resetamos para que ela possa voltar ao normal se o usuário clicar no >>
-    st.session_state.sidebar_fechada = False
 
 st.markdown("""
     <style>
@@ -73,16 +51,7 @@ st.markdown("""
     [data-testid="stHeader"] {
         background-color: rgba(0,0,0,0) !important;
     }
-    [data-testid="stHeader"] a, 
-    [data-testid="stHeader"] div:contains("Fork"),
-    [data-testid="stHeader"] svg {
-        display: none !important;
-    }
-    [data-testid="stHeader"] button {
-        display: flex !important;
-        visibility: visible !important;
-    }
-
+    
     /* Remove badges flutuantes do canto inferior direito */
     [data-testid="stDecoration"],
     .viewerBadge_container__1QSob,
@@ -92,26 +61,10 @@ st.markdown("""
         visibility: hidden !important;
     }
 
-    /* Ajuste de altura para TÍTULOS e conteúdo */
+    /* Ajuste de altura para conteúdo */
     .block-container {
         padding-top: 3.0rem !important;
         margin-top: -1.5rem !important;
-    }
-
-    /* FORÇA COMPACTAÇÃO RIGOROSA - SEM QUEBRA DE LINHA */
-    [data-testid="stTable"] td, 
-    [data-testid="stTable"] th,
-    [data-testid="stDataFrame"] td,
-    [data-testid="stDataFrame"] th,
-    table td, table th,
-    .stTable td, .stTable th {
-        white-space: nowrap !important;
-        word-break: keep-all !important;
-        vertical-align: middle !important;
-    }
-    
-    [data-testid="stTable"], [data-testid="stDataFrame"] {
-        overflow-x: auto !important;
     }
 
     /* Estilos customizados ORCAS */
@@ -120,13 +73,6 @@ st.markdown("""
     .venc-text { font-size: 0.8rem; color: #e11d48; font-weight: bold; margin-bottom: 10px; }
     .titulo-tela { font-size: 1.6rem; font-weight: bold; color: #1E3A8A; border-bottom: 2px solid #E5E7EB; margin-bottom: 15px; padding-bottom: 5px; }
     .project-tag-sidebar { color: #1E3A8A; font-weight: bold; font-size: 0.9rem; margin-bottom: 15px; padding: 8px; border-left: 5px solid #1E3A8A; background: #F3F4F6; border-radius: 4px; }
-    
-    .info-pagamento, .stAlert p { 
-        white-space: normal !important; 
-        word-wrap: break-word !important; 
-        display: block !important;
-        overflow: visible !important;
-    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -213,16 +159,14 @@ with st.sidebar:
     menu_opcoes = ["🏠 Dashboard", "📑 Lançamentos", "📅 Projetar", "✅ Conciliação", "⚙️ Gestão", "📊 Admin"]
     idx_inicial = menu_opcoes.index(st.session_state.escolha) if st.session_state.escolha in menu_opcoes else 4
     
-    # Captura a mudança de rádio
+    # IMPORTANTE: No momento em que o rádio muda, setamos o estado como recolhido
     escolha_temp = st.radio("Menu de Navegação", menu_opcoes, index=idx_inicial)
     
     if escolha_temp != st.session_state.escolha:
         st.session_state.escolha = escolha_temp
-        # ADEQUAÇÃO (1): Ativa a flag de fechamento
-        st.session_state.sidebar_fechada = True
+        # Aqui está o segredo: mudamos para "collapsed" antes do rerun
+        st.session_state.estado_sidebar = "collapsed"
         st.rerun()
-    
-    escolha = st.session_state.escolha
     
     st.divider()
     if st.button("Sair do Sistema"):
@@ -241,17 +185,20 @@ else:
 # --- 8. ROTEAMENTO ---
 st.markdown("<div id='topo-ancora'></div>", unsafe_allow_html=True)
 
-if escolha == "🏠 Dashboard":
+# LÓGICA PARA VOLTAR A SIDEBAR AO NORMAL NA PRÓXIMA INTERAÇÃO SE O USUÁRIO ABRIR
+st.session_state.estado_sidebar = "collapsed"
+
+if st.session_state.escolha == "🏠 Dashboard":
     dash.exibir_dashboard(df, supabase, ID_USUARIO_LOGADO, s_db)
-elif escolha == "📑 Lançamentos":
+elif st.session_state.escolha == "📑 Lançamentos":
     lanc.exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db, format_moeda, ir_para_o_topo)
-elif escolha == "📅 Projetar":
+elif st.session_state.escolha == "📅 Projetar":
     proj.exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda)
-elif escolha == "✅ Conciliação":
+elif st.session_state.escolha == "✅ Conciliação":
     conc.exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moeda)
-elif escolha == "⚙️ Gestão":
+elif st.session_state.escolha == "⚙️ Gestão":
     gestao.exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, format_moeda, parse_moeda, security)
-elif escolha == "📊 Admin":
+elif st.session_state.escolha == "📊 Admin":
     adm.exibir_admin(df, supabase, ir_para_o_topo)
 
 st.divider()
