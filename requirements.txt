@@ -4,3 +4,4 @@ pandas
 plotly
 supabase
 python-dateutil
+streamlit-js-eval
