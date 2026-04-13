@@ -1,5 +1,6 @@
 import streamlit as st
 from datetime import datetime, timedelta, timezone
+import re
 
 def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
     st.markdown(f'<div class="titulo-tela">Projetar: {st.session_state.projeto_ativo}</div>', unsafe_allow_html=True)
@@ -98,6 +99,23 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
             gerados = 0
             d_map = {"Segunda":0,"Terça":1,"Quarta":2,"Quinta":3,"Sexta":4,"Sábado":5,"Domingo":6}
             
+            # --- LÓGICA DE INCREMENTO DO COMPLEMENTO ---
+            comp_base = comp_txt.strip() if comp_txt else ""
+            num_atual = None
+            sufixo = ""
+            zeros = 0
+            
+            if comp_base:
+                match_de = re.search(r'(\d+)(\s+de\s+.*)', comp_base, re.IGNORECASE)
+                if match_de:
+                    num_str = match_de.group(1)
+                    num_atual = int(num_str)
+                    zeros = len(num_str)
+                    sufixo = match_de.group(2)
+                elif comp_base.isdigit():
+                    num_atual = int(comp_base)
+                    zeros = len(comp_base)
+
             # O limite é a data Fim (f_p)
             limite_loop = f_p if n_ocorrencias == 0 else i_p + timedelta(days=3650)
 
@@ -119,11 +137,21 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
                         if permitir_parcial:
                             dt_f = dt_f.replace(day=1)
                         elif fds != "Manter" and dt_f.weekday() >= 5: 
-                            dt_f += timedelta(days=(2 if dt_f.weekday()==5 else 1) if fds=="Posterga" else -1)
+                            if fds == "Posterga":
+                                dt_f += timedelta(days=(2 if dt_f.weekday()==5 else 1))
+                            elif fds == "Antecipa":
+                                # Ajuste: Se domingo (6), volta 2 dias para sexta. Se sábado (5), volta 1 dia para sexta.
+                                dt_f -= timedelta(days=(1 if dt_f.weekday()==5 else 2))
                         
                         # TRAVA 3: Valida novamente após ajuste de FDS
                         if i_p <= dt_f <= f_p:
-                            nome_final = f"{desc} {comp_txt}".strip() if comp_txt else desc
+                            # Gera o texto do complemento para este item
+                            comp_gerado = comp_txt
+                            if num_atual is not None:
+                                comp_gerado = f"{str(num_atual + gerados).zfill(zeros)}{sufixo}"
+
+                            nome_final = f"{desc} {comp_gerado}".strip() if comp_gerado else desc
+                            
                             lista_bulk.append({
                                 "projeto_id": st.session_state.projeto_ativo, 
                                 "usuario_id": uid_local, 
@@ -136,7 +164,7 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
                                 "status": 'Planejado', 
                                 "permite_parcial": bool(permitir_parcial),
                                 "usar_media": bool(usar_corrc and c_base == "Média dos Realizados"),
-                                "complemento_texto": comp_txt if comp_txt else None,
+                                "complemento_texto": comp_gerado if comp_gerado else None,
                                 "correcao_freq": c_quando if usar_corrc else None,
                                 "correcao_valor": float(v_pct) if c_base == "Percentual Fixo (%)" else 0.0,
                                 "regra_parcial": str(p_depois)
@@ -177,7 +205,6 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
             else:
                 res_exc = query.gte("data", i_p.strftime('%Y-%m-%d')).lte("data", f_p.strftime('%Y-%m-%d')).execute()
             
-            # ACERTO DA MENSAGEM: Retornando a contagem de registros excluídos
             qtd_excluidos = len(res_exc.data) if hasattr(res_exc, 'data') else 0
             st.session_state['msg_sucesso'] = f"Sucesso! {qtd_excluidos} Lançamentos Excluídos."
             st.session_state.confirmar_exclusao_ativa = False
