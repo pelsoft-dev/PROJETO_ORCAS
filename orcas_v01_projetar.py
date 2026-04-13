@@ -89,7 +89,7 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
             if permitir_parcial and d_m == "" and d_e is None and d_s == "":
                 d_m_final = "1"
 
-            # CORREÇÃO DEFINITIVA: O loop começa rigorosamente na data i_p (Início do Projetar)
+            # TRAVA 1: O loop começa exatamente na data de Início (i_p)
             curr = i_p
             uid_local = st.session_state.get('CHAVE_MESTRA_UUID')
             v_calc = parse_moeda(v_t)
@@ -98,6 +98,7 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
             gerados = 0
             d_map = {"Segunda":0,"Terça":1,"Quarta":2,"Quinta":3,"Sexta":4,"Sábado":5,"Domingo":6}
             
+            # O limite é a data Fim (f_p)
             limite_loop = f_p if n_ocorrencias == 0 else i_p + timedelta(days=3650)
 
             while curr <= limite_loop:
@@ -110,19 +111,18 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
                 else:
                     match_dm = (d_m_final == "" or d_m_final == "*" or str(curr.day) == d_m_final)
 
-                # Verifica regras de recorrência
                 if (d_e is None or curr == d_e) and match_dm and (d_s == "" or curr.weekday() == d_map[d_s]):
                     
-                    # TRAVA RIGOROSA: Ignora qualquer data curr que seja menor que i_p
-                    if curr >= i_p:
+                    # TRAVA 2: Só processa se curr estiver estritamente dentro do intervalo i_p e f_p
+                    if i_p <= curr <= f_p:
                         dt_f = curr
                         if permitir_parcial:
                             dt_f = dt_f.replace(day=1)
                         elif fds != "Manter" and dt_f.weekday() >= 5: 
                             dt_f += timedelta(days=(2 if dt_f.weekday()==5 else 1) if fds=="Posterga" else -1)
                         
-                        # Segunda trava após o ajuste de fim de semana (FDS)
-                        if dt_f >= i_p:
+                        # TRAVA 3: Valida novamente após ajuste de FDS
+                        if i_p <= dt_f <= f_p:
                             nome_final = f"{desc} {comp_txt}".strip() if comp_txt else desc
                             lista_bulk.append({
                                 "projeto_id": st.session_state.projeto_ativo, 
@@ -156,7 +156,7 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
                 except Exception as e:
                     st.error(f"Erro no Supabase: {e}")
             else:
-                st.warning("Nenhum lançamento gerado. Verifique se a data de Início coincide com a recorrência.")
+                st.warning("Nenhum lançamento gerado. As datas da regra caem fora do intervalo Início/Até.")
 
     if btn_col2.button("Excluir", use_container_width=True):
         if not desc or desc.strip() == "": 
