@@ -10,6 +10,11 @@ def exibir_admin(df, supabase, ir_para_o_topo):
     # Criamos uma cópia para o editor
     df_admin = df.copy()
 
+    # --- NOVO: OPÇÃO DE ORDENAÇÃO MANUAL ---
+    colunas_ordem = ["data", "descricao", "valor_plan", "status", "tipo"]
+    ordem_selecionada = st.selectbox("Ordenar visualização por:", colunas_ordem, index=0)
+    df_admin = df_admin.sort_values(by=ordem_selecionada, ascending=True)
+
     # Adicionamos a coluna de seleção para permitir a exclusão
     df_admin.insert(0, 'Selecionar', False)
 
@@ -19,7 +24,7 @@ def exibir_admin(df, supabase, ir_para_o_topo):
 
     st.warning("⚠️ Cuidado: Alterações aqui impactam diretamente o banco de dados.")
 
-    # Exibe o editor de dados (num_rows dynamic permite flexibilidade, embora o foco seja update)
+    # Exibe o editor de dados
     df_editado = st.data_editor(
         df_admin, 
         num_rows="dynamic", 
@@ -37,17 +42,15 @@ def exibir_admin(df, supabase, ir_para_o_topo):
                 for i, row in df_editado.iterrows():
                     id_orig = row['id']
                     
-                    # Dicionário de atualização conforme estrutura do banco
                     dados_update = {
                         "descricao": row['descricao'],
                         "valor_plan": row['valor_plan'],
                         "valor_real": row['valor_real'],
                         "tipo": row['tipo'],
                         "status": row['status'],
-                        "data": str(row['data']) # Retorna como string formatada para o Supabase
+                        "data": str(row['data'])
                     }
                     
-                    # Executa o update no Supabase usando a PK 'id'
                     supabase.table("lancamentos").update(dados_update).eq("id", id_orig).execute()
                 
                 st.success("Todas as alterações foram salvas com sucesso!")
@@ -64,7 +67,6 @@ def exibir_admin(df, supabase, ir_para_o_topo):
                 if not linhas_para_excluir.empty:
                     ids_para_excluir = linhas_para_excluir['id'].tolist()
                     
-                    # Executa a exclusão no banco em lote
                     for id_excluir in ids_para_excluir:
                         supabase.table("lancamentos").delete().eq("id", id_excluir).execute()
                     
