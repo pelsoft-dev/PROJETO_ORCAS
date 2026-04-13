@@ -177,7 +177,9 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
             else:
                 res_exc = query.gte("data", i_p.strftime('%Y-%m-%d')).lte("data", f_p.strftime('%Y-%m-%d')).execute()
             
-            st.session_state['msg_sucesso'] = f"Sucesso! Exclusão concluída."
+            # ACERTO DA MENSAGEM: Retornando a contagem de registros excluídos
+            qtd_excluidos = len(res_exc.data) if hasattr(res_exc, 'data') else 0
+            st.session_state['msg_sucesso'] = f"Sucesso! {qtd_excluidos} Lançamentos Excluídos."
             st.session_state.confirmar_exclusao_ativa = False
             st.rerun()
         if exc_c2.button("NÃO", key="btn_conf_nao"):
