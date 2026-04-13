@@ -89,7 +89,7 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
             if permitir_parcial and d_m == "" and d_e is None and d_s == "":
                 d_m_final = "1"
 
-            # AJUSTE RIGOROSO: O loop de varredura começa exatamente na data Início definida na tela Projetar (i_p)
+            # CORREÇÃO DEFINITIVA: O loop começa rigorosamente na data i_p (Início do Projetar)
             curr = i_p
             uid_local = st.session_state.get('CHAVE_MESTRA_UUID')
             v_calc = parse_moeda(v_t)
@@ -110,10 +110,10 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
                 else:
                     match_dm = (d_m_final == "" or d_m_final == "*" or str(curr.day) == d_m_final)
 
-                # Verifica se a data atual (curr) coincide com as regras de recorrência
+                # Verifica regras de recorrência
                 if (d_e is None or curr == d_e) and match_dm and (d_s == "" or curr.weekday() == d_map[d_s]):
-                    # AJUSTE RIGOROSO: Lançamentos só são permitidos se curr for MAIOR OU IGUAL à data de início do Projetar (i_p)
-                    # Isso impede que o sistema projete em dias retroativos ao que está na tela
+                    
+                    # TRAVA RIGOROSA: Ignora qualquer data curr que seja menor que i_p
                     if curr >= i_p:
                         dt_f = curr
                         if permitir_parcial:
@@ -121,8 +121,8 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
                         elif fds != "Manter" and dt_f.weekday() >= 5: 
                             dt_f += timedelta(days=(2 if dt_f.weekday()==5 else 1) if fds=="Posterga" else -1)
                         
-                        # Verifica novamente se após o ajuste de FDS a data continua respeitando o Início e o Fim
-                        if i_p <= dt_f <= f_p or (n_ocorrencias > 0 and dt_f >= i_p):
+                        # Segunda trava após o ajuste de fim de semana (FDS)
+                        if dt_f >= i_p:
                             nome_final = f"{desc} {comp_txt}".strip() if comp_txt else desc
                             lista_bulk.append({
                                 "projeto_id": st.session_state.projeto_ativo, 
@@ -156,7 +156,7 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
                 except Exception as e:
                     st.error(f"Erro no Supabase: {e}")
             else:
-                st.warning("Nenhum lançamento gerado. Verifique as datas de Início e o Dia selecionado.")
+                st.warning("Nenhum lançamento gerado. Verifique se a data de Início coincide com a recorrência.")
 
     if btn_col2.button("Excluir", use_container_width=True):
         if not desc or desc.strip() == "": 
