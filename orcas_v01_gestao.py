@@ -24,7 +24,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
     if plano_sel != "" and plano_sel != st.session_state.get('projeto_ativo'):
         st.session_state.projeto_ativo = plano_sel
         st.session_state.escolha = "⚙️ Gestão" 
-        # Limpar datas temporárias para carregar do banco no próximo ciclo
         if 'tmp_fim_plano' in st.session_state: del st.session_state.tmp_fim_plano
         st.rerun()
 
@@ -36,7 +35,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
     if nome_plano_input and nome_plano_input.strip() != "":
         col_l2_1, col_l2_2 = st.columns(2)
         
-        # (1) Lógica de Início e Término
         data_inicio_padrao = d_ini_db if d_ini_db else hoje.replace(day=1)
         if not d_fim_db:
             data_fim_padrao = (data_inicio_padrao + relativedelta(months=23)).replace(day=1) + relativedelta(months=1, days=-1)
@@ -50,7 +48,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         
         col_fim, col_btn_per = col_l2_2.columns(2)
         
-        # Cálculo da duração para o Slider baseado na data que está na tela
         diff_edit = relativedelta(st.session_state.tmp_fim_plano, d_ini_g)
         meses_atuais = (diff_edit.years * 12) + diff_edit.months + 1
         if meses_atuais not in [24, 36, 48, 60]:
@@ -62,8 +59,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 options=[24, 36, 48, 60],
                 value=meses_atuais
             )
-            
-            # Recalcula a data de término sempre que o slider mudar
             nova_data_fim = (d_ini_g + relativedelta(months=periodo_slider - 1))
             nova_data_fim = (nova_data_fim.replace(day=1) + relativedelta(months=1, days=-1))
             st.session_state.tmp_fim_plano = nova_data_fim
@@ -79,35 +74,31 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
 
         col_l4_1, col_l4_2 = st.columns(2)
         
-        # Checkbox do Zap e Email do plano atual conforme anexo
-        res_cfg_plano = supabase.table("config_projetos").select("zap_ativo, email_ativo").eq("projeto_id", nome_plano_input).eq("usuario_id", uid_gestao).execute()
-        zap_plano_db = res_cfg_plano.data[0]['zap_ativo'] if res_cfg_plano.data else 0
+        # Leitura segura para evitar erro de coluna inexistente antes do ALTER TABLE
+        res_cfg_plano = supabase.table("config_projetos").select("*").eq("projeto_id", nome_plano_input).eq("usuario_id", uid_gestao).execute()
+        zap_plano_db = res_cfg_plano.data[0].get('zap_ativo', 0) if res_cfg_plano.data else 0
         email_plano_db = res_cfg_plano.data[0].get('email_ativo', 0) if res_cfg_plano.data else 0
         
         with col_l4_1:
-            st.write("") # Espaçador
+            st.write("") 
             st.write("") 
             ativar_zap_atual = st.checkbox("Adicionar o Relatório Diário ORCAS via Whatsapp", value=(zap_plano_db == 1))
             ativar_email_atual = st.checkbox("Adicionar o Relatório Diário ORCAS via E-mail", value=(email_plano_db == 1))
         
-        # --- LÓGICA DE CONSOLIDAÇÃO LENDO TODOS OS PLANOS DO BANCO ---
-        res_all = supabase.table("config_projetos").select("projeto_id, data_ini, data_fim, zap_ativo, email_ativo").eq("usuario_id", uid_gestao).execute()
+        res_all = supabase.table("config_projetos").select("*").eq("usuario_id", uid_gestao).execute()
         dados_db = res_all.data if res_all.data else []
         
         planos_consolidar = {}
         relatorios_consolidar = {}
         
-        # Carrega o que já existe no banco
         for p in dados_db:
             d1 = datetime.strptime(p['data_ini'], '%Y-%m-%d').date()
             d2 = datetime.strptime(p['data_fim'], '%Y-%m-%d').date()
             duracao = (d2.year - d1.year) * 12 + (d2.month - d1.month) + 1
             planos_consolidar[p['projeto_id']] = duracao
-            # Se qualquer um estiver ativo, conta como 1 relatório cobrado
             rel_ativo = 1 if (p.get('zap_ativo', 0) == 1 or p.get('email_ativo', 0) == 1) else 0
             relatorios_consolidar[p['projeto_id']] = rel_ativo
 
-        # Sobrescreve com o que está na tela (antes de salvar) para refletir a mudança imediata no quadro azul
         planos_consolidar[nome_plano_input] = meses_total_edit
         relatorios_consolidar[nome_plano_input] = 1 if (ativar_zap_atual or ativar_email_atual) else 0
 
@@ -131,12 +122,13 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         v_6meses = (v_mensal_total * 6) * 0.95
         v_12meses = (v_mensal_total * 12) * 0.89 
 
+        # TÍTULO ALTERADO CONFORME SOLICITADO
         resumo_html = f"""
         <div style="background-color: #87CEFA; padding: 15px; border-radius: 5px; color: black; font-family: sans-serif; border: 1px solid #1E90FF;">
             <div style="font-weight: bold; font-size: 16px; margin-bottom: 10px;">Valor da Assinatura Mensal: R$ {format_moeda(v_mensal_total)}</div>
             <div style="margin-left: 20px; font-size: 14px;">
                 Assinatura do Orcas Baby: <span style="float: right;">19,90</span><br>
-                {qtd_relatorios_totais} Relatório(s) Diário(s) via Whatsapp: <span style="float: right;">{format_moeda(custo_relatorio_total)}</span><br>
+                {qtd_relatorios_totais} Relatório(s) Diário(s) via Whatsapp / E-mail: <span style="float: right;">{format_moeda(custo_relatorio_total)}</span><br>
                 Usuário com {qtd_total_planos} Planos: <span style="float: right;">{format_moeda(add_planos_extra)}</span><br>
                 {c24} Plano(s) com 24 meses: <span style="float: right;">0,00</span><br>
                 {c36} Plano(s) com 36 meses: <span style="float: right;">{format_moeda(v_p36)}</span><br>
@@ -170,7 +162,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             
             supabase.table("config_projetos").upsert(dados_p).execute()
             
-            # Limpar temporários para forçar recarga correta
             if 'tmp_fim_plano' in st.session_state: del st.session_state.tmp_fim_plano
             st.session_state.projeto_ativo = nome_plano_input
             st.session_state.msg_sucesso = "Configurações salvas com sucesso!"
