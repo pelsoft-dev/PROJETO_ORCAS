@@ -78,17 +78,24 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         col_l3_2.text_input("Período do Plano:", value=f"{meses_total_edit} meses", disabled=True)
 
         col_l4_1, col_l4_2 = st.columns(2)
-        # Checkbox do Zap do plano atual
-        res_zap_plano = supabase.table("config_projetos").select("zap_ativo").eq("projeto_id", nome_plano_input).eq("usuario_id", uid_gestao).execute()
-        zap_plano_db = res_zap_plano.data[0]['zap_ativo'] if res_zap_plano.data else 0
-        ativar_zap_atual = col_l4_1.checkbox("Adicionar o Resumo diário via WHATSAPP", value=(zap_plano_db == 1))
+        
+        # Checkbox do Zap e Email do plano atual conforme anexo
+        res_cfg_plano = supabase.table("config_projetos").select("zap_ativo, email_ativo").eq("projeto_id", nome_plano_input).eq("usuario_id", uid_gestao).execute()
+        zap_plano_db = res_cfg_plano.data[0]['zap_ativo'] if res_cfg_plano.data else 0
+        email_plano_db = res_cfg_plano.data[0].get('email_ativo', 0) if res_cfg_plano.data else 0
+        
+        with col_l4_1:
+            st.write("") # Espaçador
+            st.write("") 
+            ativar_zap_atual = st.checkbox("Adicionar o Relatório Diário ORCAS via Whatsapp", value=(zap_plano_db == 1))
+            ativar_email_atual = st.checkbox("Adicionar o Relatório Diário ORCAS via E-mail", value=(email_plano_db == 1))
         
         # --- LÓGICA DE CONSOLIDAÇÃO LENDO TODOS OS PLANOS DO BANCO ---
-        res_all = supabase.table("config_projetos").select("projeto_id, data_ini, data_fim, zap_ativo").eq("usuario_id", uid_gestao).execute()
+        res_all = supabase.table("config_projetos").select("projeto_id, data_ini, data_fim, zap_ativo, email_ativo").eq("usuario_id", uid_gestao).execute()
         dados_db = res_all.data if res_all.data else []
         
         planos_consolidar = {}
-        zaps_consolidar = {}
+        relatorios_consolidar = {}
         
         # Carrega o que já existe no banco
         for p in dados_db:
@@ -96,14 +103,16 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             d2 = datetime.strptime(p['data_fim'], '%Y-%m-%d').date()
             duracao = (d2.year - d1.year) * 12 + (d2.month - d1.month) + 1
             planos_consolidar[p['projeto_id']] = duracao
-            zaps_consolidar[p['projeto_id']] = p.get('zap_ativo', 0)
+            # Se qualquer um estiver ativo, conta como 1 relatório cobrado
+            rel_ativo = 1 if (p.get('zap_ativo', 0) == 1 or p.get('email_ativo', 0) == 1) else 0
+            relatorios_consolidar[p['projeto_id']] = rel_ativo
 
         # Sobrescreve com o que está na tela (antes de salvar) para refletir a mudança imediata no quadro azul
         planos_consolidar[nome_plano_input] = meses_total_edit
-        zaps_consolidar[nome_plano_input] = 1 if ativar_zap_atual else 0
+        relatorios_consolidar[nome_plano_input] = 1 if (ativar_zap_atual or ativar_email_atual) else 0
 
         qtd_total_planos = len(planos_consolidar)
-        qtd_zap_totais = sum(zaps_consolidar.values())
+        qtd_relatorios_totais = sum(relatorios_consolidar.values())
         
         c24 = sum(1 for m in planos_consolidar.values() if m <= 24)
         c36 = sum(1 for m in planos_consolidar.values() if m == 36)
@@ -111,14 +120,14 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         c60 = sum(1 for m in planos_consolidar.values() if m >= 60)
         
         base_baby = 19.90 
-        custo_zap_total = qtd_zap_totais * 9.85
+        custo_relatorio_total = qtd_relatorios_totais * 9.85
         add_planos_extra = (qtd_total_planos - 2) * 12.80 if qtd_total_planos > 2 else 0.00
         
         v_p36 = c36 * 6.40
         v_p48 = c48 * 12.80
         v_p60 = c60 * 19.20
         
-        v_mensal_total = base_baby + custo_zap_total + add_planos_extra + v_p36 + v_p48 + v_p60
+        v_mensal_total = base_baby + custo_relatorio_total + add_planos_extra + v_p36 + v_p48 + v_p60
         v_6meses = (v_mensal_total * 6) * 0.95
         v_12meses = (v_mensal_total * 12) * 0.89 
 
@@ -127,7 +136,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             <div style="font-weight: bold; font-size: 16px; margin-bottom: 10px;">Valor da Assinatura Mensal: R$ {format_moeda(v_mensal_total)}</div>
             <div style="margin-left: 20px; font-size: 14px;">
                 Assinatura do Orcas Baby: <span style="float: right;">19,90</span><br>
-                {qtd_zap_totais} Relatório(s) Diário(s) via Whatsapp: <span style="float: right;">{format_moeda(custo_zap_total)}</span><br>
+                {qtd_relatorios_totais} Relatório(s) Diário(s) via Whatsapp: <span style="float: right;">{format_moeda(custo_relatorio_total)}</span><br>
                 Usuário com {qtd_total_planos} Planos: <span style="float: right;">{format_moeda(add_planos_extra)}</span><br>
                 {c24} Plano(s) com 24 meses: <span style="float: right;">0,00</span><br>
                 {c36} Plano(s) com 36 meses: <span style="float: right;">{format_moeda(v_p36)}</span><br>
@@ -153,7 +162,8 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 "saldo_inicial": parse_moeda(saldo_input),
                 "data_ini": d_ini_g.strftime('%Y-%m-%d'), 
                 "data_fim": st.session_state.tmp_fim_plano.strftime('%Y-%m-%d'),
-                "zap_ativo": 1 if ativar_zap_atual else 0
+                "zap_ativo": 1 if ativar_zap_atual else 0,
+                "email_ativo": 1 if ativar_email_atual else 0
             }
             res_p = supabase.table("config_projetos").select("id").eq("projeto_id", nome_plano_input).eq("usuario_id", uid_gestao).execute()
             if res_p.data: dados_p["id"] = res_p.data[0]["id"]
