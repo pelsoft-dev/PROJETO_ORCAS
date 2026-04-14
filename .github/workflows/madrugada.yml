@@ -11,14 +11,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+      
       - name: Configurar Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
+          
       - name: Instalar Bibliotecas
-        run: pip install supabase
+        run: pip install supabase fpdf requests
+        
       - name: Rodar Script
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          # Segredos para o envio de E-mail via SMTP
+          SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          # Segredos para o WhatsApp (deixe cadastrado para quando habilitar)
+          EVOLUTION_API_URL: ${{ secrets.EVOLUTION_API_URL }}
+          EVOLUTION_API_KEY: ${{ secrets.EVOLUTION_API_KEY }}
         run: python orcas_v01_batch01_3am.py
