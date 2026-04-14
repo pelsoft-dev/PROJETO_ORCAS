@@ -1,5 +1,10 @@
 import os
 import requests
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
+from email import encoders
 from supabase import create_client
 from datetime import datetime, timedelta, timezone
 from fpdf import FPDF
@@ -9,6 +14,12 @@ URL = os.environ.get("SUPABASE_URL")
 KEY = os.environ.get("SUPABASE_KEY")
 EVOLUTION_API_URL = os.environ.get("EVOLUTION_API_URL") # Ex: https://sua-api.com
 EVOLUTION_API_KEY = os.environ.get("EVOLUTION_API_KEY")
+
+# Configurações de E-mail (Devem estar no GitHub Secrets)
+SMTP_SERVER = os.environ.get("SMTP_SERVER")
+SMTP_PORT = os.environ.get("SMTP_PORT")
+SMTP_USER = os.environ.get("SMTP_USER")
+SMTP_PASS = os.environ.get("SMTP_PASS")
 
 def gerar_pdf_relatorio(usuario_nome, data_ref, lancamentos):
     pdf = FPDF()
@@ -55,8 +66,6 @@ def enviar_whatsapp_evolution(numero, caminho_arquivo):
     url = f"{EVOLUTION_API_URL}/message/sendMedia/instancia_orcas"
     headers = {"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
     
-    # Nota: Em ambiente real, o arquivo deve ser convertido para Base64 ou enviado via URL pública.
-    # Para este exemplo, assumimos o envio via payload padrão da API.
     with open(caminho_arquivo, "rb") as f:
         import base64
         encoded_pdf = base64.b64encode(f.read()).decode('utf-8')
@@ -74,6 +83,34 @@ def enviar_whatsapp_evolution(numero, caminho_arquivo):
     except:
         print(f"Erro ao enviar WhatsApp para {numero}")
 
+def enviar_email_orcas(email_destino, caminho_arquivo, usuario_nome):
+    if not SMTP_SERVER or not SMTP_USER or not SMTP_PASS:
+        return
+
+    msg = MIMEMultipart()
+    msg['From'] = f"ORCAS <{SMTP_USER}>"
+    msg['To'] = email_destino
+    msg['Subject'] = f"Relatório Diário ORCAS - {usuario_nome}"
+
+    corpo = f"Olá {usuario_nome},\n\nSegue em anexo o seu Relatório Diário ORCAS preparado nesta madrugada."
+    msg.attach(MIMEText(corpo, 'plain'))
+
+    with open(caminho_arquivo, "rb") as attachment:
+        part = MIMEBase('application', 'octet-stream')
+        part.set_payload(attachment.read())
+        encoders.encode_base64(part)
+        part.add_header('Content-Disposition', f"attachment; filename=Relatorio_Orcas.pdf")
+        msg.attach(part)
+
+    try:
+        server = smtplib.SMTP(SMTP_SERVER, int(SMTP_PORT))
+        server.starttls()
+        server.login(SMTP_USER, SMTP_PASS)
+        server.send_message(msg)
+        server.quit()
+    except Exception as e:
+        print(f"Erro ao enviar E-mail para {email_destino}: {e}")
+
 def job_madrugada():
     if not URL or not KEY:
         print("ERRO: VARIÁVEIS DE AMBIENTE (SUPABASE) NÃO ENCONTRADAS.")
@@ -81,7 +118,6 @@ def job_madrugada():
 
     supabase = create_client(URL, KEY)
     
-    # Configuração de fuso horário (Jundiaí/Brasília)
     fuso_br = timezone(timedelta(hours=-3))
     agora = datetime.now(fuso_br)
     hoje = agora.date()
@@ -124,7 +160,7 @@ def job_madrugada():
                             .execute()
                         print(f"MÉDIA HISTÓRICA ATUALIZADA: {desc} -> R$ {media_total:.2f}")
 
-        # --- 2. PROCESSAR RESÍDUOS (Regras de Virada/Vencimento) ---
+        # --- 2. PROCESSAR RESÍDUOS ---
         residuos = supabase.table("lancamentos")\
             .select("*")\
             .eq("data", ontem.strftime('%Y-%m-%d'))\
@@ -171,27 +207,38 @@ def job_madrugada():
                         print(f"RESÍDUO COPIADO (Criação): {item['descricao']} (R$ {sobra:.2f} criado para hoje)")
 
         # --- 3. GERAÇÃO E ENVIO DE RELATÓRIO PDF ---
-        # Busca usuários que possuem plano habilitado (ex: campo 'plano_pdf' no perfil)
-        usuarios_premium = supabase.table("perfis").select("id, nome, telefone").eq("plano_pdf", True).execute()
+        # Busca configurações de projetos/planos para saber quem deve receber
+        config_envios = supabase.table("config_projetos").select("usuario_id, projeto_id, zap_ativo, email_ativo").execute()
 
-        if usuarios_premium.data:
-            for user in usuarios_premium.data:
-                # Coleta lançamentos do dia de ontem para o relatório
-                dados_rel = supabase.table("lancamentos")\
-                    .select("descricao, tipo, valor_plan, valor_real")\
-                    .eq("usuario_id", user['id'])\
-                    .eq("data", ontem.strftime('%Y-%m-%d'))\
-                    .execute()
+        if config_envios.data:
+            for cfg in config_envios.data:
+                # Coleta dados do perfil para e-mail e telefone
+                user_perfil = supabase.table("perfis").select("nome, email, telefone").eq("id", cfg['usuario_id']).execute()
+                
+                if user_perfil.data:
+                    perfil = user_perfil.data[0]
+                    dados_rel = supabase.table("lancamentos")\
+                        .select("descricao, tipo, valor_plan, valor_real")\
+                        .eq("usuario_id", cfg['usuario_id'])\
+                        .eq("projeto_id", cfg['projeto_id'])\
+                        .eq("data", ontem.strftime('%Y-%m-%d'))\
+                        .execute()
 
-                if dados_rel.data:
-                    pdf_path = gerar_pdf_relatorio(user['nome'], ontem, dados_rel.data)
-                    if user['telefone']:
-                        enviar_whatsapp_evolution(user['telefone'], pdf_path)
-                    
-                    # Remove o arquivo local após o envio para não ocupar espaço
-                    if os.path.exists(pdf_path):
-                        os.remove(pdf_path)
-                    print(f"RELATÓRIO ENVIADO: {user['nome']}")
+                    if dados_rel.data:
+                        pdf_path = gerar_pdf_relatorio(perfil['nome'], ontem, dados_rel.data)
+                        
+                        # Lógica de Envio por E-mail
+                        if cfg.get('email_ativo') == 1 and perfil.get('email'):
+                            enviar_email_orcas(perfil['email'], pdf_path, perfil['nome'])
+                            print(f"RELATÓRIO E-MAIL ENVIADO: {perfil['nome']}")
+
+                        # Lógica de Envio por WhatsApp (COMENTADO conforme solicitação)
+                        # if cfg.get('zap_ativo') == 1 and perfil.get('telefone'):
+                        #     enviar_whatsapp_evolution(perfil['telefone'], pdf_path)
+                        #     print(f"RELATÓRIO WHATSAPP ENVIADO: {perfil['nome']}")
+                        
+                        if os.path.exists(pdf_path):
+                            os.remove(pdf_path)
 
     except Exception as e:
         print(f"ERRO DURANTE A EXECUÇÃO: {e}")
