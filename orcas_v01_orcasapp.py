@@ -173,34 +173,46 @@ if not st.session_state.logado:
                 new_nome = st.text_input("Nome Completo")
                 new_email = st.text_input("E-mail")
                 new_celular = st.text_input("Celular (com DDD)")
-                if st.button("Enviar Código de Verificação"):
+                
+                # Interface conforme anexo
+                if st.button("Enviar Código para Celular"):
                     if new_email and new_celular:
-                        # Gera código e salva dados temporários
                         codigo = str(random.randint(100000, 999999))
                         st.session_state.codigo_verificacao = codigo
                         st.session_state.temp_user_data = {"nome": new_nome, "email": new_email, "celular": new_celular}
-                        st.session_state.etapa_auth = "validar_codigo"
-                        # Simulação de envio (Aqui entraria a Evolution API futuramente)
                         st.info(f"Código enviado para o celular {new_celular}") 
+                    else:
+                        st.error("Preencha E-mail e Celular para receber o código.")
+                
+                cod_input = st.text_input("Digite o código recebido no celular", key="new_acc_code")
+                
+                if st.button("Validar Código"):
+                    if cod_input == st.session_state.get('codigo_verificacao'):
+                        st.session_state.etapa_auth = "definir_senha"
                         st.rerun()
                     else:
-                        st.error("Por favor, preencha todos os campos.")
+                        st.error("Código inválido.")
 
-        elif st.session_state.etapa_auth == "validar_codigo" or st.session_state.etapa_auth == "esqueci_senha":
+                if st.button("Voltar", key="btn_voltar_new"):
+                    st.session_state.etapa_auth = "login"
+                    st.rerun()
+
+        elif st.session_state.etapa_auth == "esqueci_senha":
             st.subheader("Verificação de Segurança")
-            if st.session_state.etapa_auth == "esqueci_senha":
-                em_recupera = st.text_input("Digite o E-mail da conta")
-                if st.button("Enviar Código para Celular"):
-                    res = supabase.table("usuarios").select("celular").eq("email", em_recupera).execute()
-                    if res.data:
-                        codigo = str(random.randint(100000, 999999))
-                        st.session_state.codigo_verificacao = codigo
-                        st.session_state.temp_email = em_recupera
-                        st.info(f"Código enviado para o celular cadastrado.")
-                    else:
-                        st.error("E-mail não encontrado.")
+            em_recupera = st.text_input("Digite o E-mail da conta")
+            
+            if st.button("Enviar Código para Celular"):
+                res = supabase.table("usuarios").select("celular").eq("email", em_recupera).execute()
+                if res.data:
+                    codigo = str(random.randint(100000, 999999))
+                    st.session_state.codigo_verificacao = codigo
+                    st.session_state.temp_email = em_recupera
+                    st.info(f"Código enviado para o celular cadastrado.")
+                else:
+                    st.error("E-mail não encontrado.")
 
-            cod_input = st.text_input("Digite o código recebido no celular")
+            cod_input = st.text_input("Digite o código recebido no celular", key="forgot_code")
+            
             if st.button("Validar Código"):
                 if cod_input == st.session_state.get('codigo_verificacao'):
                     st.session_state.etapa_auth = "definir_senha"
@@ -208,7 +220,7 @@ if not st.session_state.logado:
                 else:
                     st.error("Código inválido.")
             
-            if st.button("Voltar"):
+            if st.button("Voltar", key="btn_voltar_forgot"):
                 st.session_state.etapa_auth = "login"
                 st.rerun()
 
