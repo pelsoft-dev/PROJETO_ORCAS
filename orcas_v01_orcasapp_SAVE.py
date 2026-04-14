@@ -6,7 +6,6 @@ import hashlib
 import plotly.graph_objects as go
 import streamlit.components.v1 as components
 from supabase import Client
-import random
 
 # --- 1. IMPORTAÇÃO DOS MÓDULOS EXTERNOS ---
 import orcas_v01_gestao as gestao
@@ -135,118 +134,29 @@ def parse_moeda(t):
 # --- 4. LOGIN ---
 if 'logado' not in st.session_state:
     st.session_state.logado = False
-if 'etapa_auth' not in st.session_state:
-    st.session_state.etapa_auth = "login"
 
 if not st.session_state.logado:
     st.markdown("<h1 style='text-align: center; margin-top: 50px;'>🐋 ORCAS</h1>", unsafe_allow_html=True)
     c1, c2, c3 = st.columns([1,2,1])
-    
     with c2:
-        if st.session_state.etapa_auth == "login":
-            aba = st.tabs(["Acessar Conta", "Criar Nova Conta"])
-            
-            with aba[0]:
-                em = st.text_input("E-mail Cadastrado")
-                se = st.text_input("Senha de Acesso", type="password")
-                col_b1, col_b2 = st.columns(2)
-                if col_b1.button("Entrar no Sistema"):
-                    senha_hash = hashlib.sha256(str.encode(se)).hexdigest()
-                    res = supabase.table("usuarios").select("id, vencimento, zap_ativo").eq("email", em).eq("senha", senha_hash).execute()
-                    if res.data: 
-                        user_data = res.data[0]
-                        st.session_state.logado = True
-                        st.session_state.CHAVE_MESTRA_UUID = str(user_data['id'])
-                        st.session_state.usuario = em
-                        st.session_state.vencimento = str(user_data['vencimento'])
-                        st.session_state.zap_ativo = user_data.get('zap_ativo', 0)
-                        st.session_state.projeto_ativo = None
-                        st.rerun()
-                    else:
-                        st.error("E-mail ou senha incorretos.")
-                
-                if col_b2.button("Esqueci minha Senha"):
-                    st.session_state.etapa_auth = "esqueci_senha"
-                    st.rerun()
-
-            with aba[1]:
-                new_nome = st.text_input("Nome Completo")
-                new_email = st.text_input("E-mail")
-                new_celular = st.text_input("Celular (com DDD)")
-                if st.button("Enviar Código de Verificação"):
-                    if new_email and new_celular:
-                        # Gera código e salva dados temporários
-                        codigo = str(random.randint(100000, 999999))
-                        st.session_state.codigo_verificacao = codigo
-                        st.session_state.temp_user_data = {"nome": new_nome, "email": new_email, "celular": new_celular}
-                        st.session_state.etapa_auth = "validar_codigo"
-                        # Simulação de envio (Aqui entraria a Evolution API futuramente)
-                        st.info(f"Código enviado para o celular {new_celular}") 
-                        st.rerun()
-                    else:
-                        st.error("Por favor, preencha todos os campos.")
-
-        elif st.session_state.etapa_auth == "validar_codigo" or st.session_state.etapa_auth == "esqueci_senha":
-            st.subheader("Verificação de Segurança")
-            if st.session_state.etapa_auth == "esqueci_senha":
-                em_recupera = st.text_input("Digite o E-mail da conta")
-                if st.button("Enviar Código para Celular"):
-                    res = supabase.table("usuarios").select("celular").eq("email", em_recupera).execute()
-                    if res.data:
-                        codigo = str(random.randint(100000, 999999))
-                        st.session_state.codigo_verificacao = codigo
-                        st.session_state.temp_email = em_recupera
-                        st.info(f"Código enviado para o celular cadastrado.")
-                    else:
-                        st.error("E-mail não encontrado.")
-
-            cod_input = st.text_input("Digite o código recebido no celular")
-            if st.button("Validar Código"):
-                if cod_input == st.session_state.get('codigo_verificacao'):
-                    st.session_state.etapa_auth = "definir_senha"
-                    st.rerun()
-                else:
-                    st.error("Código inválido.")
-            
-            if st.button("Voltar"):
-                st.session_state.etapa_auth = "login"
-                st.rerun()
-
-        elif st.session_state.etapa_auth == "definir_senha":
-            st.subheader("Definir Nova Senha")
-            nova_se = st.text_input("Nova Senha", type="password")
-            conf_se = st.text_input("Confirme a Nova Senha", type="password")
-            
-            if st.button("Finalizar e Entrar"):
-                if nova_se == conf_se and len(nova_se) > 0:
-                    senha_hash = hashlib.sha256(str.encode(nova_se)).hexdigest()
-                    
-                    if "temp_user_data" in st.session_state:
-                        # Cadastro de novo usuário
-                        d = st.session_state.temp_user_data
-                        venc_inicial = (datetime.now() + timedelta(days=7)).date().strftime('%Y-%m-%d')
-                        res = supabase.table("usuarios").insert({
-                            "nome": d['nome'], "email": d['email'], "celular": d['celular'], 
-                            "senha": senha_hash, "vencimento": venc_inicial
-                        }).execute()
-                        user_id = res.data[0]['id']
-                        user_email = d['email']
-                        user_venc = venc_inicial
-                    else:
-                        # Recuperação de senha
-                        user_email = st.session_state.temp_email
-                        res = supabase.table("usuarios").update({"senha": senha_hash}).eq("email", user_email).execute()
-                        user_id = res.data[0]['id']
-                        user_venc = res.data[0]['vencimento']
-
+        aba = st.tabs(["Acessar Conta", "Criar Nova Conta"])
+        with aba[0]:
+            em = st.text_input("E-mail Cadastrado")
+            se = st.text_input("Senha de Acesso", type="password")
+            if st.button("Entrar no Sistema"):
+                senha_hash = hashlib.sha256(str.encode(se)).hexdigest()
+                res = supabase.table("usuarios").select("id, vencimento, zap_ativo").eq("email", em).eq("senha", senha_hash).execute()
+                if res.data: 
+                    user_data = res.data[0]
                     st.session_state.logado = True
-                    st.session_state.CHAVE_MESTRA_UUID = str(user_id)
-                    st.session_state.usuario = user_email
-                    st.session_state.vencimento = str(user_venc)
+                    st.session_state.CHAVE_MESTRA_UUID = str(user_data['id'])
+                    st.session_state.usuario = em
+                    st.session_state.vencimento = str(user_data['vencimento'])
+                    st.session_state.zap_ativo = user_data.get('zap_ativo', 0)
                     st.session_state.projeto_ativo = None
                     st.rerun()
                 else:
-                    st.error("As senhas não coincidem ou estão vazias.")
+                    st.error("E-mail ou senha incorretos.")
     st.stop()
 
 # --- 5. ESTADO E DADOS ---
