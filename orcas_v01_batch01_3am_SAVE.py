@@ -1,78 +1,10 @@
 import os
-import requests
 from supabase import create_client
 from datetime import datetime, timedelta, timezone
-from fpdf import FPDF
 
 # Configurações de Ambiente
 URL = os.environ.get("SUPABASE_URL")
 KEY = os.environ.get("SUPABASE_KEY")
-EVOLUTION_API_URL = os.environ.get("EVOLUTION_API_URL") # Ex: https://sua-api.com
-EVOLUTION_API_KEY = os.environ.get("EVOLUTION_API_KEY")
-
-def gerar_pdf_relatorio(usuario_nome, data_ref, lancamentos):
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", "B", 16)
-    pdf.cell(190, 10, "RELATÓRIO DIÁRIO ORCAS", ln=True, align="C")
-    pdf.set_font("Arial", "", 12)
-    pdf.cell(190, 10, f"Usuário: {usuario_nome} | Data: {data_ref.strftime('%d/%m/%Y')}", ln=True, align="C")
-    pdf.ln(10)
-
-    # Cabeçalho Tabela
-    pdf.set_font("Arial", "B", 10)
-    pdf.cell(80, 8, "Descrição", 1)
-    pdf.cell(30, 8, "Tipo", 1)
-    pdf.cell(40, 8, "Planejado", 1)
-    pdf.cell(40, 8, "Realizado", 1, ln=True)
-
-    pdf.set_font("Arial", "", 10)
-    total_p = 0
-    total_r = 0
-
-    for item in lancamentos:
-        pdf.cell(80, 8, str(item['descricao'])[:40], 1)
-        pdf.cell(30, 8, str(item['tipo']), 1)
-        pdf.cell(40, 8, f"R$ {item['valor_plan']:.2f}", 1)
-        pdf.cell(40, 8, f"R$ {item['valor_real']:.2f}", 1, ln=True)
-        total_p += item['valor_plan']
-        total_r += item['valor_real']
-
-    pdf.ln(5)
-    pdf.set_font("Arial", "B", 10)
-    pdf.cell(110, 8, "TOTAIS DO PERÍODO", 1)
-    pdf.cell(40, 8, f"R$ {total_p:.2f}", 1)
-    pdf.cell(40, 8, f"R$ {total_r:.2f}", 1, ln=True)
-
-    filename = f"relatorio_{usuario_nome}_{data_ref.strftime('%Y%m%d')}.pdf"
-    pdf.output(filename)
-    return filename
-
-def enviar_whatsapp_evolution(numero, caminho_arquivo):
-    if not EVOLUTION_API_URL or not EVOLUTION_API_KEY:
-        return
-    
-    url = f"{EVOLUTION_API_URL}/message/sendMedia/instancia_orcas"
-    headers = {"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
-    
-    # Nota: Em ambiente real, o arquivo deve ser convertido para Base64 ou enviado via URL pública.
-    # Para este exemplo, assumimos o envio via payload padrão da API.
-    with open(caminho_arquivo, "rb") as f:
-        import base64
-        encoded_pdf = base64.b64encode(f.read()).decode('utf-8')
-
-    payload = {
-        "number": numero,
-        "media": f"data:application/pdf;base64,{encoded_pdf}",
-        "mediatype": "document",
-        "caption": "📊 Seu relatório diário ORCAS está pronto!",
-        "fileName": "Relatorio_Orcas.pdf"
-    }
-    
-    try:
-        requests.post(url, json=payload, headers=headers)
-    except:
-        print(f"Erro ao enviar WhatsApp para {numero}")
 
 def job_madrugada():
     if not URL or not KEY:
@@ -91,6 +23,7 @@ def job_madrugada():
 
     try:
         # --- 1. PROCESSAR MÉDIA HISTÓRICA TOTAL ---
+        # Busca todos os lançamentos de hoje para frente que usam média
         proximos = supabase.table("lancamentos")\
             .select("id, descricao, usuario_id")\
             .eq("usar_media", True)\
@@ -98,9 +31,11 @@ def job_madrugada():
             .execute()
 
         if proximos.data:
+            # Identifica combinações únicas de Descrição + Usuário para não repetir cálculo
             descricoes_unicas = set((x['descricao'], x['usuario_id']) for x in proximos.data)
 
             for desc, user_id in descricoes_unicas:
+                # Busca TODO o histórico de realizados desta descrição para este usuário
                 historico = supabase.table("lancamentos")\
                     .select("valor_real")\
                     .eq("descricao", desc)\
@@ -114,6 +49,7 @@ def job_madrugada():
                     if valores:
                         media_total = sum(valores) / len(valores)
                         
+                        # Atualiza todos os planos futuros com a nova média
                         supabase.table("lancamentos")\
                             .update({"valor_plan": round(float(media_total), 2)})\
                             .eq("descricao", desc)\
@@ -125,6 +61,7 @@ def job_madrugada():
                         print(f"MÉDIA HISTÓRICA ATUALIZADA: {desc} -> R$ {media_total:.2f}")
 
         # --- 2. PROCESSAR RESÍDUOS (Regras de Virada/Vencimento) ---
+        # Busca lançamentos de ontem que não foram totalmente realizados
         residuos = supabase.table("lancamentos")\
             .select("*")\
             .eq("data", ontem.strftime('%Y-%m-%d'))\
@@ -140,6 +77,7 @@ def job_madrugada():
             if sobra > 0:
                 regra = item['regra_parcial']
                 
+                # Localiza se existe o mesmo lançamento no futuro para aplicar a sobra
                 proximo = supabase.table("lancamentos")\
                     .select("id, valor_plan")\
                     .eq("descricao", item['descricao'])\
@@ -149,6 +87,7 @@ def job_madrugada():
                     .limit(1)\
                     .execute()
 
+                # REGRA: ADICIONAR (Soma a sobra ao valor já planejado do mês seguinte)
                 if "Adicione a diferença" in regra:
                     if proximo.data:
                         novo_v = float(proximo.data[0]['valor_plan']) + sobra
@@ -156,12 +95,15 @@ def job_madrugada():
                             .update({"valor_plan": round(novo_v, 2)}).eq("id", proximo.data[0]['id']).execute()
                         print(f"RESÍDUO ADICIONADO: {item['descricao']} (+ R$ {sobra:.2f})")
 
+                # REGRA: COPIAR (Substitui o valor do próximo ou cria um novo se não existir)
                 elif "Copia a diferença" in regra:
                     if proximo.data:
+                        # Substituição inteligente (ideal para orçamentos de projetos/reformas)
                         supabase.table("lancamentos")\
                             .update({"valor_plan": round(sobra, 2)}).eq("id", proximo.data[0]['id']).execute()
                         print(f"RESÍDUO COPIADO (Substituição): {item['descricao']} (R$ {sobra:.2f} transferido)")
                     else:
+                        # Criação (se não houver plano futuro, ele cria para hoje)
                         novo_item = item.copy()
                         novo_item.pop('id', None)
                         novo_item['data'] = hoje.strftime('%Y-%m-%d')
@@ -169,29 +111,6 @@ def job_madrugada():
                         novo_item['valor_real'] = 0.0
                         supabase.table("lancamentos").insert(novo_item).execute()
                         print(f"RESÍDUO COPIADO (Criação): {item['descricao']} (R$ {sobra:.2f} criado para hoje)")
-
-        # --- 3. GERAÇÃO E ENVIO DE RELATÓRIO PDF ---
-        # Busca usuários que possuem plano habilitado (ex: campo 'plano_pdf' no perfil)
-        usuarios_premium = supabase.table("perfis").select("id, nome, telefone").eq("plano_pdf", True).execute()
-
-        if usuarios_premium.data:
-            for user in usuarios_premium.data:
-                # Coleta lançamentos do dia de ontem para o relatório
-                dados_rel = supabase.table("lancamentos")\
-                    .select("descricao, tipo, valor_plan, valor_real")\
-                    .eq("usuario_id", user['id'])\
-                    .eq("data", ontem.strftime('%Y-%m-%d'))\
-                    .execute()
-
-                if dados_rel.data:
-                    pdf_path = gerar_pdf_relatorio(user['nome'], ontem, dados_rel.data)
-                    if user['telefone']:
-                        enviar_whatsapp_evolution(user['telefone'], pdf_path)
-                    
-                    # Remove o arquivo local após o envio para não ocupar espaço
-                    if os.path.exists(pdf_path):
-                        os.remove(pdf_path)
-                    print(f"RELATÓRIO ENVIADO: {user['nome']}")
 
     except Exception as e:
         print(f"ERRO DURANTE A EXECUÇÃO: {e}")
