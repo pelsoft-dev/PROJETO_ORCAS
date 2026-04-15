@@ -24,20 +24,22 @@ SMTP_PASS = os.environ.get("SMTP_PASS")
 def gerar_pdf_relatorio(usuario_nome, data_ref, lancamentos):
     pdf = FPDF()
     pdf.add_page()
-    pdf.set_font("Arial", "B", 16)
-    pdf.cell(190, 10, "RELATÓRIO DIÁRIO ORCAS", ln=True, align="C")
-    pdf.set_font("Arial", "", 12)
-    pdf.cell(190, 10, f"Usuário: {usuario_nome} | Data: {data_ref.strftime('%d/%m/%Y')}", ln=True, align="C")
+    # Trocamos Arial por Helvetica (padrão PDF) para evitar o Warning
+    pdf.set_font("Helvetica", "B", 16) 
+    pdf.cell(190, 10, "RELATÓRIO DIÁRIO ORCAS", new_x="LMARGIN", new_y="NEXT", align="C")
+    
+    pdf.set_font("Helvetica", "", 12)
+    pdf.cell(190, 10, f"Usuário: {usuario_nome} | Data: {data_ref.strftime('%d/%m/%Y')}", new_x="LMARGIN", new_y="NEXT", align="C")
     pdf.ln(10)
 
     # Cabeçalho Tabela
-    pdf.set_font("Arial", "B", 10)
+    pdf.set_font("Helvetica", "B", 10)
     pdf.cell(80, 8, "Descrição", 1)
     pdf.cell(30, 8, "Tipo", 1)
     pdf.cell(40, 8, "Planejado", 1)
-    pdf.cell(40, 8, "Realizado", 1, ln=True)
+    pdf.cell(40, 8, "Realizado", 1, new_x="LMARGIN", new_y="NEXT")
 
-    pdf.set_font("Arial", "", 10)
+    pdf.set_font("Helvetica", "", 10)
     total_p = 0
     total_r = 0
 
@@ -45,15 +47,15 @@ def gerar_pdf_relatorio(usuario_nome, data_ref, lancamentos):
         pdf.cell(80, 8, str(item['descricao'])[:40], 1)
         pdf.cell(30, 8, str(item['tipo']), 1)
         pdf.cell(40, 8, f"R$ {item['valor_plan']:.2f}", 1)
-        pdf.cell(40, 8, f"R$ {item['valor_real']:.2f}", 1, ln=True)
+        pdf.cell(40, 8, f"R$ {item['valor_real']:.2f}", 1, new_x="LMARGIN", new_y="NEXT")
         total_p += item['valor_plan']
         total_r += item['valor_real']
 
     pdf.ln(5)
-    pdf.set_font("Arial", "B", 10)
+    pdf.set_font("Helvetica", "B", 10)
     pdf.cell(110, 8, "TOTAIS DO PERÍODO", 1)
     pdf.cell(40, 8, f"R$ {total_p:.2f}", 1)
-    pdf.cell(40, 8, f"R$ {total_r:.2f}", 1, ln=True)
+    pdf.cell(40, 8, f"R$ {total_r:.2f}", 1, new_x="LMARGIN", new_y="NEXT")
 
     filename = f"relatorio_{usuario_nome}_{data_ref.strftime('%Y%m%d')}.pdf"
     pdf.output(filename)
@@ -86,7 +88,9 @@ def gerar_pdf_relatorio(usuario_nome, data_ref, lancamentos):
 #        print(f"Erro ao enviar WhatsApp para {numero}: {e}")
 
 def enviar_email_orcas(email_destino, caminho_arquivo, usuario_nome):
+    print(f"DEBUG: Tentando enviar e-mail para {email_destino}...") 
     if not SMTP_SERVER or not SMTP_USER or not SMTP_PASS:
+        print("ERRO: Credenciais de SMTP não encontradas no GitHub Secrets!")
         return
 
     msg = MIMEMultipart()
