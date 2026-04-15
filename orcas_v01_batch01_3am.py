@@ -103,7 +103,7 @@ def enviar_email_orcas(email_destino, caminho_arquivo, usuario_nome):
         msg.attach(part)
 
     try:
-        server = smtplib.SMTP(SMTP_SERVER, int(SMTP_PORT))
+        server = smtplib.SMTP(SMTP_SERVER, int(SMTP_PORT or 587))
         server.starttls()
         server.login(SMTP_USER, SMTP_PASS)
         server.send_message(msg)
