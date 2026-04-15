@@ -123,7 +123,8 @@ def job_madrugada():
     fuso_br = timezone(timedelta(hours=-3))
     agora = datetime.now(fuso_br)
     hoje = agora.date()
-    ontem = hoje - timedelta(days=1)
+#    ontem = hoje - timedelta(days=1)
+    ontem = hoje
     
     print(f"--- INICIANDO ROTINA ORCAS (BATCH 3AM): {hoje.strftime('%d/%m/%Y')} ---")
 
