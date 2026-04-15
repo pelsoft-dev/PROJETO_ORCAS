@@ -12,8 +12,8 @@ from fpdf import FPDF
 # Configurações de Ambiente
 URL = os.environ.get("SUPABASE_URL")
 KEY = os.environ.get("SUPABASE_KEY")
-EVOLUTION_API_URL = os.environ.get("EVOLUTION_API_URL") # Ex: https://sua-api.com
-EVOLUTION_API_KEY = os.environ.get("EVOLUTION_API_KEY")
+#EVOLUTION_API_URL = os.environ.get("EVOLUTION_API_URL") # Ex: https://sua-api.com
+#EVOLUTION_API_KEY = os.environ.get("EVOLUTION_API_KEY")
 
 # Configurações de E-mail (Devem estar no GitHub Secrets)
 SMTP_SERVER = os.environ.get("SMTP_SERVER")
@@ -59,29 +59,31 @@ def gerar_pdf_relatorio(usuario_nome, data_ref, lancamentos):
     pdf.output(filename)
     return filename
 
-def enviar_whatsapp_evolution(numero, caminho_arquivo):
-    if not EVOLUTION_API_URL or not EVOLUTION_API_KEY:
-        return
-    
-    url = f"{EVOLUTION_API_URL}/message/sendMedia/instancia_orcas"
-    headers = {"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
-    
-    with open(caminho_arquivo, "rb") as f:
-        import base64
-        encoded_pdf = base64.b64encode(f.read()).decode('utf-8')
-
-    payload = {
-        "number": numero,
-        "media": f"data:application/pdf;base64,{encoded_pdf}",
-        "mediatype": "document",
-        "caption": "📊 Seu relatório diário ORCAS está pronto!",
-        "fileName": "Relatorio_Orcas.pdf"
-    }
-    
-    try:
-        requests.post(url, json=payload, headers=headers)
-    except:
-        print(f"Erro ao enviar WhatsApp para {numero}")
+# =================================================================
+# TITULO: LOGICA DE ENVIO PARA WHATSAPP (EVOLUTION API)
+# ESTE CODIGO ESTA PRONTO PARA USO, MAS COMENTADO POR SEGURANÇA
+# =================================================================
+#def enviar_whatsapp_evolution(numero, caminho_arquivo):
+#    if not EVOLUTION_API_URL or not EVOLUTION_API_KEY:
+#        return
+#    
+#    url = f"{EVOLUTION_API_URL}/message/sendMedia/instancia_orcas"
+#    headers = {"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
+#    
+#    try:
+#        with open(caminho_arquivo, "rb") as f:
+#            import base64
+#            encoded_pdf = base64.b64encode(f.read()).decode('utf-8')
+#
+#        payload = {
+#            "number": numero,
+#            "media": f"data:application/pdf;base64,{encoded_pdf}",
+#            "mediatype": "document",
+#            "caption": "📊 Seu relatório diário ORCAS está pronto!",
+#            "fileName": "Relatorio_Orcas.pdf"
+#        requests.post(url, json=payload, headers=headers)
+#    except Exception as e:
+#        print(f"Erro ao enviar WhatsApp para {numero}: {e}")
 
 def enviar_email_orcas(email_destino, caminho_arquivo, usuario_nome):
     if not SMTP_SERVER or not SMTP_USER or not SMTP_PASS:
@@ -211,12 +213,11 @@ def job_madrugada():
 
         if config_envios.data:
             for cfg in config_envios.data:
-                # ACERTO: Selecionando 'nome' e 'email' da tabela 'usuarios' (coluna 'telefone' removida para evitar erros)
-                res_user = supabase.table("usuarios").select("nome, email").eq("id", cfg['usuario_id']).execute()
+                # ACERTO: Selecionando colunas atualizadas da tabela 'usuarios'
+                res_user = supabase.table("usuarios").select("nome, email, celular").eq("id", cfg['usuario_id']).execute()
                 
                 if res_user.data:
                     perfil = res_user.data[0]
-                    # Garante um nome para o PDF mesmo se o campo estiver vazio
                     nome_usuario = perfil.get('nome') if perfil.get('nome') else "Usuario"
                     
                     dados_rel = supabase.table("lancamentos")\
@@ -229,13 +230,15 @@ def job_madrugada():
                     if dados_rel.data:
                         pdf_path = gerar_pdf_relatorio(nome_usuario, ontem, dados_rel.data)
                         
+                        # ENVIO DE EMAIL
                         if cfg.get('email_ativo') == 1 and perfil.get('email'):
                             enviar_email_orcas(perfil['email'], pdf_path, nome_usuario)
                             print(f"RELATÓRIO E-MAIL ENVIADO: {nome_usuario}")
 
-                        # if cfg.get('zap_ativo') == 1:
-                        #     # Lógica de WhatsApp comentada conforme original
-                        #     pass
+                        # ENVIO DE WHATSAPP (LOGICA COMENTADA PARA EVITAR ERROS SEM API CONTRATADA)
+                        # if cfg.get('zap_ativo') == 1 and perfil.get('celular'):
+                        #     enviar_whatsapp_evolution(perfil['celular'], pdf_path)
+                        #     print(f"RELATÓRIO WHATSAPP PREPARADO: {nome_usuario}")
                         
                         if os.path.exists(pdf_path):
                             os.remove(pdf_path)
