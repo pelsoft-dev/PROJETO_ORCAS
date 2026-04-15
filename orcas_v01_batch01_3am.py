@@ -211,11 +211,14 @@ def job_madrugada():
 
         if config_envios.data:
             for cfg in config_envios.data:
-                # ALTERADO: Mudança de 'perfis' para 'usuarios'
-                res_user = supabase.table("usuarios").select("nome, email, telefone").eq("id", cfg['usuario_id']).execute()
+                # ACERTO: Selecionando 'nome' e 'email' da tabela 'usuarios' (coluna 'telefone' removida para evitar erros)
+                res_user = supabase.table("usuarios").select("nome, email").eq("id", cfg['usuario_id']).execute()
                 
                 if res_user.data:
                     perfil = res_user.data[0]
+                    # Garante um nome para o PDF mesmo se o campo estiver vazio
+                    nome_usuario = perfil.get('nome') if perfil.get('nome') else "Usuario"
+                    
                     dados_rel = supabase.table("lancamentos")\
                         .select("descricao, tipo, valor_plan, valor_real")\
                         .eq("usuario_id", cfg['usuario_id'])\
@@ -224,15 +227,15 @@ def job_madrugada():
                         .execute()
 
                     if dados_rel.data:
-                        pdf_path = gerar_pdf_relatorio(perfil['nome'], ontem, dados_rel.data)
+                        pdf_path = gerar_pdf_relatorio(nome_usuario, ontem, dados_rel.data)
                         
                         if cfg.get('email_ativo') == 1 and perfil.get('email'):
-                            enviar_email_orcas(perfil['email'], pdf_path, perfil['nome'])
-                            print(f"RELATÓRIO E-MAIL ENVIADO: {perfil['nome']}")
+                            enviar_email_orcas(perfil['email'], pdf_path, nome_usuario)
+                            print(f"RELATÓRIO E-MAIL ENVIADO: {nome_usuario}")
 
-                        # if cfg.get('zap_ativo') == 1 and perfil.get('telefone'):
-                        #     enviar_whatsapp_evolution(perfil['telefone'], pdf_path)
-                        #     print(f"RELATÓRIO WHATSAPP ENVIADO: {perfil['nome']}")
+                        # if cfg.get('zap_ativo') == 1:
+                        #     # Lógica de WhatsApp comentada conforme original
+                        #     pass
                         
                         if os.path.exists(pdf_path):
                             os.remove(pdf_path)

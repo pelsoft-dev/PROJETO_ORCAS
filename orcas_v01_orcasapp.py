@@ -152,7 +152,8 @@ if not st.session_state.logado:
                 col_b1, col_b2 = st.columns(2)
                 if col_b1.button("Entrar no Sistema"):
                     senha_hash = hashlib.sha256(str.encode(se)).hexdigest()
-                    res = supabase.table("usuarios").select("id, vencimento, zap_ativo").eq("email", em).eq("senha", senha_hash).execute()
+                    # ACERTO: Incluído o campo 'nome' e 'celular' na seleção para garantir a sessão completa
+                    res = supabase.table("usuarios").select("id, nome, email, celular, vencimento, zap_ativo").eq("email", em).eq("senha", senha_hash).execute()
                     if res.data: 
                         user_data = res.data[0]
                         st.session_state.logado = True
@@ -234,7 +235,7 @@ if not st.session_state.logado:
                     senha_hash = hashlib.sha256(str.encode(nova_se)).hexdigest()
                     
                     if "temp_user_data" in st.session_state:
-                        # Cadastro de novo usuário
+                        # ACERTO: Gravação rigorosa dos campos 'nome' e 'celular' na tabela usuarios
                         d = st.session_state.temp_user_data
                         venc_inicial = (datetime.now() + timedelta(days=7)).date().strftime('%Y-%m-%d')
                         res = supabase.table("usuarios").insert({
