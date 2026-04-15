@@ -21,43 +21,63 @@ SMTP_PORT = os.environ.get("SMTP_PORT")
 SMTP_USER = os.environ.get("SMTP_USER")
 SMTP_PASS = os.environ.get("SMTP_PASS")
 
-def gerar_pdf_relatorio(usuario_nome, data_ref, lancamentos):
+def gerar_pdf_relatorio(usuario_nome, data_hoje, agenda_hoje, resumo_ontem, analise_macro):
     pdf = FPDF()
     pdf.add_page()
     # Trocamos Arial por Helvetica (padrão PDF) para evitar o Warning
-    pdf.set_font("Helvetica", "B", 16) 
-    pdf.cell(190, 10, "RELATÓRIO DIÁRIO ORCAS", new_x="LMARGIN", new_y="NEXT", align="C")
-    
-    pdf.set_font("Helvetica", "", 12)
-    pdf.cell(190, 10, f"Usuário: {usuario_nome} | Data: {data_ref.strftime('%d/%m/%Y')}", new_x="LMARGIN", new_y="NEXT", align="C")
-    pdf.ln(10)
-
-    # Cabeçalho Tabela
-    pdf.set_font("Helvetica", "B", 10)
-    pdf.cell(80, 8, "Descrição", 1)
-    pdf.cell(30, 8, "Tipo", 1)
-    pdf.cell(40, 8, "Planejado", 1)
-    pdf.cell(40, 8, "Realizado", 1, new_x="LMARGIN", new_y="NEXT")
-
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.cell(190, 10, "RELATÓRIO ESTRATEGISTA ORCAS", new_x="LMARGIN", new_y="NEXT", align="C")
+   
     pdf.set_font("Helvetica", "", 10)
-    total_p = 0
-    total_r = 0
-
-    for item in lancamentos:
-        pdf.cell(80, 8, str(item['descricao'])[:40], 1)
-        pdf.cell(30, 8, str(item['tipo']), 1)
-        pdf.cell(40, 8, f"R$ {item['valor_plan']:.2f}", 1)
-        pdf.cell(40, 8, f"R$ {item['valor_real']:.2f}", 1, new_x="LMARGIN", new_y="NEXT")
-        total_p += item['valor_plan']
-        total_r += item['valor_real']
-
+    pdf.cell(190, 10, f"Usuário: {usuario_nome} | Data de Referência: {data_hoje.strftime('%d/%m/%Y')}", new_x="LMARGIN", new_y="NEXT", align="C")
     pdf.ln(5)
-    pdf.set_font("Helvetica", "B", 10)
-    pdf.cell(110, 8, "TOTAIS DO PERÍODO", 1)
-    pdf.cell(40, 8, f"R$ {total_p:.2f}", 1)
-    pdf.cell(40, 8, f"R$ {total_r:.2f}", 1, new_x="LMARGIN", new_y="NEXT")
 
-    filename = f"relatorio_{usuario_nome}_{data_ref.strftime('%Y%m%d')}.pdf"
+    # 1. VISÃO MACRO DO PLANO (Início ao Fim)
+    pdf.set_fill_color(240, 240, 240)
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.cell(190, 8, " 1. SAÚDE GERAL DO PLANO (VISÃO ACUMULADA)", 0, new_x="LMARGIN", new_y="NEXT", fill=True)
+    pdf.set_font("Helvetica", "", 10)
+    
+    aderencia = (analise_macro['realizado'] / analise_macro['planejado'] * 100) if analise_macro['planejado'] > 0 else 0
+    pdf.cell(95, 8, f"Total Planejado no Plano: R$ {analise_macro['planejado']:.2f}")
+    pdf.cell(95, 8, f"Total Realizado até agora: R$ {analise_macro['realizado']:.2f}", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.cell(190, 8, f"Índice de Aderência ao Orçamento: {aderencia:.1f}%", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(2)
+
+    # 2. FECHAMENTO DE ONTEM
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.cell(190, 8, " 2. FECHAMENTO DO DIA ANTERIOR", 0, new_x="LMARGIN", new_y="NEXT", fill=True)
+    pdf.set_font("Helvetica", "", 10)
+    pdf.cell(190, 8, f"Ontem ({resumo_ontem['data']}): Planejado R$ {resumo_ontem['total_p']:.2f} | Realizado R$ {resumo_ontem['total_r']:.2f}", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(2)
+
+    # 3. AGENDA DE HOJE
+    pdf.set_fill_color(230, 240, 255)
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.cell(190, 8, " 3. AGENDA FINANCEIRA DE HOJE", 0, new_x="LMARGIN", new_y="NEXT", fill=True)
+    
+    # Cabeçalho Tabela
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.cell(90, 7, "Descrição", 1)
+    pdf.cell(30, 7, "Tipo", 1)
+    pdf.cell(35, 7, "Valor Previsto", 1)
+    pdf.cell(35, 7, "Status", 1, new_x="LMARGIN", new_y="NEXT")
+
+    pdf.set_font("Helvetica", "", 9)
+    total_hoje = 0
+    for item in agenda_hoje[:18]: # Limite para não estourar a página
+        pdf.cell(90, 7, str(item['descricao'])[:45], 1)
+        pdf.cell(30, 7, str(item['tipo']), 1)
+        pdf.cell(35, 7, f"R$ {item['valor_plan']:.2f}", 1)
+        pdf.cell(35, 7, "Pendente", 1, new_x="LMARGIN", new_y="NEXT")
+        total_hoje += item['valor_plan']
+
+    pdf.ln(2)
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.cell(190, 8, f"TOTAL PARA HOJE: R$ {total_hoje:.2f}", 0, new_x="LMARGIN", new_y="NEXT", align="R")
+
+    filename = f"relatorio_{usuario_nome}_{data_hoje.strftime('%Y%m%d')}.pdf"
     pdf.output(filename)
     return filename
 
@@ -83,12 +103,13 @@ def gerar_pdf_relatorio(usuario_nome, data_ref, lancamentos):
 #            "mediatype": "document",
 #            "caption": "📊 Seu relatório diário ORCAS está pronto!",
 #            "fileName": "Relatorio_Orcas.pdf"
+#        }
 #        requests.post(url, json=payload, headers=headers)
 #    except Exception as e:
 #        print(f"Erro ao enviar WhatsApp para {numero}: {e}")
 
 def enviar_email_orcas(email_destino, caminho_arquivo, usuario_nome):
-    print(f"DEBUG: Tentando enviar e-mail para {email_destino}...") 
+    print(f"DEBUG: Tentando enviar e-mail para {email_destino}...")
     if not SMTP_SERVER or not SMTP_USER or not SMTP_PASS:
         print("ERRO: Credenciais de SMTP não encontradas no GitHub Secrets!")
         return
@@ -96,9 +117,9 @@ def enviar_email_orcas(email_destino, caminho_arquivo, usuario_nome):
     msg = MIMEMultipart()
     msg['From'] = f"ORCAS <{SMTP_USER}>"
     msg['To'] = email_destino
-    msg['Subject'] = f"Relatório Diário ORCAS - {usuario_nome}"
+    msg['Subject'] = f"Relatório Estrategista ORCAS - {usuario_nome}"
 
-    corpo = f"Olá {usuario_nome},\n\nSegue em anexo o seu Relatório Diário ORCAS preparado nesta madrugada."
+    corpo = f"Olá {usuario_nome},\n\nSegue em anexo o seu Relatório Estrategista ORCAS (Uma Página) com visão macro do plano e agenda de hoje."
     msg.attach(MIMEText(corpo, 'plain'))
 
     with open(caminho_arquivo, "rb") as attachment:
@@ -127,8 +148,7 @@ def job_madrugada():
     fuso_br = timezone(timedelta(hours=-3))
     agora = datetime.now(fuso_br)
     hoje = agora.date()
-#    ontem = hoje - timedelta(days=1)
-    ontem = hoje
+    ontem = hoje - timedelta(days=1)
     
     print(f"--- INICIANDO ROTINA ORCAS (BATCH 3AM): {hoje.strftime('%d/%m/%Y')} ---")
 
@@ -218,33 +238,45 @@ def job_madrugada():
 
         if config_envios.data:
             for cfg in config_envios.data:
-                # ACERTO: Selecionando colunas atualizadas da tabela 'usuarios'
                 res_user = supabase.table("usuarios").select("nome, email, celular").eq("id", cfg['usuario_id']).execute()
                 
                 if res_user.data:
                     perfil = res_user.data[0]
                     nome_usuario = perfil.get('nome') if perfil.get('nome') else "Usuario"
                     
-                    dados_rel = supabase.table("lancamentos")\
-                        .select("descricao, tipo, valor_plan, valor_real")\
+                    # BUSCA MACRO (24 Meses)
+                    macro_data = supabase.table("lancamentos").select("valor_plan, valor_real")\
+                        .eq("usuario_id", cfg['usuario_id']).eq("projeto_id", cfg['projeto_id']).execute()
+                    
+                    total_plan = sum([x['valor_plan'] for x in macro_data.data if x['valor_plan']])
+                    total_real = sum([x['valor_real'] for x in macro_data.data if x['valor_real']])
+                    
+                    analise_macro = {"planejado": total_plan, "realizado": total_real}
+
+                    # BUSCA ONTEM (Fechamento)
+                    dados_ontem = supabase.table("lancamentos").select("valor_plan, valor_real")\
+                        .eq("usuario_id", cfg['usuario_id']).eq("data", ontem.strftime('%Y-%m-%d')).execute()
+                    resumo_ontem = {
+                        "data": ontem.strftime('%d/%m/%Y'),
+                        "total_p": sum([x['valor_plan'] for x in dados_ontem.data]),
+                        "total_r": sum([x['valor_real'] for x in dados_ontem.data])
+                    }
+
+                    # BUSCA HOJE (Agenda)
+                    dados_hoje = supabase.table("lancamentos")\
+                        .select("descricao, tipo, valor_plan")\
                         .eq("usuario_id", cfg['usuario_id'])\
                         .eq("projeto_id", cfg['projeto_id'])\
-                        .eq("data", ontem.strftime('%Y-%m-%d'))\
+                        .eq("data", hoje.strftime('%Y-%m-%d'))\
                         .execute()
 
-                    if dados_rel.data:
-                        pdf_path = gerar_pdf_relatorio(nome_usuario, ontem, dados_rel.data)
+                    if dados_hoje.data:
+                        pdf_path = gerar_pdf_relatorio(nome_usuario, hoje, dados_hoje.data, resumo_ontem, analise_macro)
                         
-                        # ENVIO DE EMAIL
                         if cfg.get('email_ativo') == 1 and perfil.get('email'):
                             enviar_email_orcas(perfil['email'], pdf_path, nome_usuario)
                             print(f"RELATÓRIO E-MAIL ENVIADO: {nome_usuario}")
 
-                        # ENVIO DE WHATSAPP (LOGICA COMENTADA PARA EVITAR ERROS SEM API CONTRATADA)
-                        # if cfg.get('zap_ativo') == 1 and perfil.get('celular'):
-                        #     enviar_whatsapp_evolution(perfil['celular'], pdf_path)
-                        #     print(f"RELATÓRIO WHATSAPP PREPARADO: {nome_usuario}")
-                        
                         if os.path.exists(pdf_path):
                             os.remove(pdf_path)
 
