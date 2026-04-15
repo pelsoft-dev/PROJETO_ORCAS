@@ -21,12 +21,17 @@ SMTP_PORT = os.environ.get("SMTP_PORT")
 SMTP_USER = os.environ.get("SMTP_USER")
 SMTP_PASS = os.environ.get("SMTP_PASS")
 
+def fmt_br(valor):
+    """Formata valor para padrão brasileiro: 1.250,55"""
+    return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
 def gerar_pdf_relatorio(usuario_nome, data_hoje, agenda_hoje, resumo_ontem, analise_macro):
     pdf = FPDF()
     pdf.add_page()
     # Trocamos Arial por Helvetica (padrão PDF) para evitar o Warning
     pdf.set_font("Helvetica", "B", 16)
-    pdf.cell(190, 10, "RELATÓRIO ESTRATEGISTA ORCAS", new_x="LMARGIN", new_y="NEXT", align="C")
+    # Título com mascote estilizado
+    pdf.cell(190, 10, "ORCAS DAILY REPORT  (B)", new_x="LMARGIN", new_y="NEXT", align="C")
    
     pdf.set_font("Helvetica", "", 10)
     pdf.cell(190, 10, f"Usuário: {usuario_nome} | Data de Referência: {data_hoje.strftime('%d/%m/%Y')}", new_x="LMARGIN", new_y="NEXT", align="C")
@@ -39,8 +44,8 @@ def gerar_pdf_relatorio(usuario_nome, data_hoje, agenda_hoje, resumo_ontem, anal
     pdf.set_font("Helvetica", "", 10)
     
     aderencia = (analise_macro['realizado'] / analise_macro['planejado'] * 100) if analise_macro['planejado'] > 0 else 0
-    pdf.cell(95, 8, f"Total Planejado no Plano: R$ {analise_macro['planejado']:.2f}")
-    pdf.cell(95, 8, f"Total Realizado até agora: R$ {analise_macro['realizado']:.2f}", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(95, 8, f"Total Planejado no Plano: R$ {fmt_br(analise_macro['planejado'])}")
+    pdf.cell(95, 8, f"Total Realizado até agora: R$ {fmt_br(analise_macro['realizado'])}", new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Helvetica", "B", 10)
     pdf.cell(190, 8, f"Índice de Aderência ao Orçamento: {aderencia:.1f}%", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(2)
@@ -49,13 +54,13 @@ def gerar_pdf_relatorio(usuario_nome, data_hoje, agenda_hoje, resumo_ontem, anal
     pdf.set_font("Helvetica", "B", 11)
     pdf.cell(190, 8, " 2. FECHAMENTO DO DIA ANTERIOR", 0, new_x="LMARGIN", new_y="NEXT", fill=True)
     pdf.set_font("Helvetica", "", 10)
-    pdf.cell(190, 8, f"Ontem ({resumo_ontem['data']}): Planejado R$ {resumo_ontem['total_p']:.2f} | Realizado R$ {resumo_ontem['total_r']:.2f}", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(190, 8, f"Ontem ({resumo_ontem['data']}): Planejado R$ {fmt_br(resumo_ontem['total_p'])} | Realizado R$ {fmt_br(resumo_ontem['total_r'])}", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(2)
 
     # 3. AGENDA DE HOJE
     pdf.set_fill_color(230, 240, 255)
     pdf.set_font("Helvetica", "B", 11)
-    pdf.cell(190, 8, " 3. AGENDA FINANCEIRA DE HOJE", 0, new_x="LMARGIN", new_y="NEXT", fill=True)
+    pdf.cell(190, 8, f" 3. AGENDA FINANCEIRA DE HOJE ({data_hoje.strftime('%d/%m/%Y')})", 0, new_x="LMARGIN", new_y="NEXT", fill=True)
     
     # Cabeçalho Tabela
     pdf.set_font("Helvetica", "B", 9)
@@ -69,13 +74,13 @@ def gerar_pdf_relatorio(usuario_nome, data_hoje, agenda_hoje, resumo_ontem, anal
     for item in agenda_hoje[:18]: # Limite para não estourar a página
         pdf.cell(90, 7, str(item['descricao'])[:45], 1)
         pdf.cell(30, 7, str(item['tipo']), 1)
-        pdf.cell(35, 7, f"R$ {item['valor_plan']:.2f}", 1)
+        pdf.cell(35, 7, f"R$ {fmt_br(item['valor_plan'])}", 1)
         pdf.cell(35, 7, "Pendente", 1, new_x="LMARGIN", new_y="NEXT")
         total_hoje += item['valor_plan']
 
     pdf.ln(2)
     pdf.set_font("Helvetica", "B", 10)
-    pdf.cell(190, 8, f"TOTAL PARA HOJE: R$ {total_hoje:.2f}", 0, new_x="LMARGIN", new_y="NEXT", align="R")
+    pdf.cell(190, 8, f"TOTAL PARA HOJE: R$ {fmt_br(total_hoje)}", 0, new_x="LMARGIN", new_y="NEXT", align="R")
 
     filename = f"relatorio_{usuario_nome}_{data_hoje.strftime('%Y%m%d')}.pdf"
     pdf.output(filename)
