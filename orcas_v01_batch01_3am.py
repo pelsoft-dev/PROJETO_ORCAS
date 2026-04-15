@@ -103,7 +103,7 @@ def enviar_email_orcas(email_destino, caminho_arquivo, usuario_nome):
         msg.attach(part)
 
     try:
-        server = smtplib.SMTP(SMTP_SERVER, int(SMTP_PORT or 587))
+        server = smtplib.SMTP(SMTP_SERVER, int(SMTP_PORT))
         server.starttls()
         server.login(SMTP_USER, SMTP_PASS)
         server.send_message(msg)
@@ -207,16 +207,15 @@ def job_madrugada():
                         print(f"RESÍDUO COPIADO (Criação): {item['descricao']} (R$ {sobra:.2f} criado para hoje)")
 
         # --- 3. GERAÇÃO E ENVIO DE RELATÓRIO PDF ---
-        # Busca configurações de projetos/planos para saber quem deve receber
         config_envios = supabase.table("config_projetos").select("usuario_id, projeto_id, zap_ativo, email_ativo").execute()
 
         if config_envios.data:
             for cfg in config_envios.data:
-                # Coleta dados do perfil para e-mail e telefone
-                user_perfil = supabase.table("perfis").select("nome, email, telefone").eq("id", cfg['usuario_id']).execute()
+                # ALTERADO: Mudança de 'perfis' para 'usuarios'
+                res_user = supabase.table("usuarios").select("nome, email, telefone").eq("id", cfg['usuario_id']).execute()
                 
-                if user_perfil.data:
-                    perfil = user_perfil.data[0]
+                if res_user.data:
+                    perfil = res_user.data[0]
                     dados_rel = supabase.table("lancamentos")\
                         .select("descricao, tipo, valor_plan, valor_real")\
                         .eq("usuario_id", cfg['usuario_id'])\
@@ -227,12 +226,10 @@ def job_madrugada():
                     if dados_rel.data:
                         pdf_path = gerar_pdf_relatorio(perfil['nome'], ontem, dados_rel.data)
                         
-                        # Lógica de Envio por E-mail
                         if cfg.get('email_ativo') == 1 and perfil.get('email'):
                             enviar_email_orcas(perfil['email'], pdf_path, perfil['nome'])
                             print(f"RELATÓRIO E-MAIL ENVIADO: {perfil['nome']}")
 
-                        # Lógica de Envio por WhatsApp (COMENTADO conforme solicitação)
                         # if cfg.get('zap_ativo') == 1 and perfil.get('telefone'):
                         #     enviar_whatsapp_evolution(perfil['telefone'], pdf_path)
                         #     print(f"RELATÓRIO WHATSAPP ENVIADO: {perfil['nome']}")
