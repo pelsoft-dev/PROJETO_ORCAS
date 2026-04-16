@@ -38,12 +38,12 @@ def gerar_pdf_relatorio(usuario_nome, data_hoje, agenda_hoje, resumo_ontem, anal
     pdf.cell(190, 10, f"Usuário: {usuario_nome} | Data de Referência: {data_hoje.strftime('%d/%m/%Y')}", new_x="LMARGIN", new_y="NEXT", align="C")
     pdf.ln(5)
 
-    # 1. VISÃO MACRO DO PLANO (Início ao Fim)
+    # 1. VISÃO MACRO DO PLANO (Tabela conforme anexo)
     pdf.set_fill_color(240, 240, 240)
     pdf.set_font("Helvetica", "B", 11)
     pdf.cell(190, 8, " 1. SAÚDE GERAL DO PLANO (VISÃO ACUMULADA)", 0, new_x="LMARGIN", new_y="NEXT", fill=True)
     
-    # Cabeçalho da Tabela Macro (Conforme anexo solicitado)
+    # Cabeçalho da Tabela Macro
     pdf.set_font("Helvetica", "B", 8)
     pdf.cell(70, 10, "Período de Referência", 1, align="C")
     pdf.cell(60, 5, "Entradas", 1, align="C")
@@ -74,10 +74,10 @@ def gerar_pdf_relatorio(usuario_nome, data_hoje, agenda_hoje, resumo_ontem, anal
         pdf.cell(30, 6, fmt_br(d['s_r']), 1, new_x="LMARGIN", new_y="NEXT", align="R")
 
     pdf.set_font("Helvetica", "I", 7)
-    pdf.cell(190, 5, "OBS. O Início/Fim do Mês/Ano estão condicionados ao Início/Fim dos Planos ativos.", 0, new_x="LMARGIN", new_y="NEXT", align="R")
+    pdf.cell(190, 5, "OBS. O Início/Fim do Mês/Ano estão condicionados ao Início/Fim dos Planos.", 0, new_x="LMARGIN", new_y="NEXT", align="R")
     
     pdf.set_font("Helvetica", "B", 10)
-    # Índice de Aderência: Mede a eficiência do gasto (Realizado vs Planejado)
+    # Índice de Aderência: Focado em Saídas Acumuladas (Realizado vs Planejado)
     aderencia = (analise_macro['plano_hoje']['s_r'] / analise_macro['plano_hoje']['s_p'] * 100) if analise_macro['plano_hoje']['s_p'] > 0 else 0
     pdf.cell(190, 8, f"Índice de Aderência ao Orçamento (Saídas Acumuladas): {aderencia:.1f}%", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(2)
@@ -98,7 +98,7 @@ def gerar_pdf_relatorio(usuario_nome, data_hoje, agenda_hoje, resumo_ontem, anal
     
     pdf.set_font("Helvetica", "", 8)
     if not gastos_excedidos:
-        pdf.cell(190, 6, "Nenhum gasto acima do planejado identificado neste período.", 1, new_x="LMARGIN", new_y="NEXT", align="C")
+        pdf.cell(190, 6, "Nenhum gasto acima do planejado identificado.", 1, new_x="LMARGIN", new_y="NEXT", align="C")
     else:
         for g in gastos_excedidos:
             pdf.cell(80, 6, str(g['descricao'])[:40], 1)
@@ -113,7 +113,6 @@ def gerar_pdf_relatorio(usuario_nome, data_hoje, agenda_hoje, resumo_ontem, anal
     pdf.set_font("Helvetica", "B", 11)
     pdf.cell(190, 8, f" 3. AGENDA FINANCEIRA DE HOJE ({data_hoje.strftime('%d/%m/%Y')})", 0, new_x="LMARGIN", new_y="NEXT", fill=True)
     
-    # Cabeçalho Tabela
     pdf.set_font("Helvetica", "B", 9)
     pdf.cell(90, 7, "Descrição", 1)
     pdf.cell(30, 7, "Tipo", 1)
@@ -302,8 +301,8 @@ def job_madrugada():
                     perfil = res_user.data[0]
                     nome_usuario = perfil.get('nome') if perfil.get('nome') else "Usuario"
                     
-                    # BUSCA TODOS OS DADOS DO PROJETO PARA CÁLCULOS MACRO
-                    all_data = supabase.table("lancamentos").select("tipo, valor_plan, valor_real, data, parcial_real, permite_parciais, descricao")\
+                    # BUSCA TODOS OS DADOS PARA CALCULOS MACRO E ALERTAS
+                    all_data = supabase.table("lancamentos").select("tipo, valor_plan, valor_real, data, parcial_real, permite_parcial, descricao")\
                         .eq("usuario_id", cfg['usuario_id']).eq("projeto_id", cfg['projeto_id']).execute()
                     
                     if not all_data.data: continue
@@ -329,13 +328,13 @@ def job_madrugada():
                         "ano_total": calc_periodo(primeiro_dia_ano, primeiro_dia_ano.replace(month=12, day=31))
                     }
 
-                    # LOGICA DE GASTOS EXCEDIDOS NO MÊS (SAÍDA REALIZADO > PLANEJADO)
+                    # LOGICA DE GASTOS EXCEDIDOS NO MÊS (SOMA DE PARCIAIS)
                     gastos_excedidos = []
                     mes_data = [x for x in all_data.data if x['data'] >= primeiro_dia_mes.strftime('%Y-%m-%d') and x['data'] <= hoje.strftime('%Y-%m-%d') and x['tipo'] == 'Saída']
                     
-                    # Filtra registros base que possuem o checkbox "permite parciais"
-                    for item in [x for x in mes_data if x.get('permite_parciais')]:
-                        # Soma parciais de TODOS os registros com a mesma descrição no período
+                    # Identifica itens base (que tem o valor planejado e permitem parcial)
+                    for item in [x for x in mes_data if x.get('permite_parcial')]:
+                        # Soma parciais de todos os registros com mesma descrição no mês
                         tot_parcial = sum([p['parcial_real'] or 0 for p in mes_data if p['descricao'] == item['descricao']])
                         if tot_parcial > (item['valor_plan'] or 0):
                             gastos_excedidos.append({
@@ -345,8 +344,8 @@ def job_madrugada():
                                 'v_r': tot_parcial
                             })
                     
-                    # Itens normais (sem parciais)
-                    for item in [x for x in mes_data if not x.get('permite_parciais')]:
+                    # Itens simples (sem parciais)
+                    for item in [x for x in mes_data if not x.get('permite_parcial')]:
                         if (item['valor_real'] or 0) > (item['valor_plan'] or 0):
                             gastos_excedidos.append({
                                 'descricao': item['descricao'], 
