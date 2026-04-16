@@ -87,11 +87,15 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
             st.error("PARA INCLUIR OU EXCLUIR É OBRIGATÓRIO ENTRAR COM UMA DESCRIÇÃO")
         else:
             d_m_final = d_m
-            if permitir_parcial and d_m == "" and d_e is None and d_s == "":
+            if permitir_parcial:
                 d_m_final = "1"
 
-            # TRAVA 1: O loop começa exatamente na data de Início (i_p)
+            # TRAVA 1: O loop começa na data de Início (i_p).
+            # Se for parcial, forçamos o início do loop para o dia 01 do mês de i_p para não pular o mês atual.
             curr = i_p
+            if permitir_parcial:
+                curr = curr.replace(day=1)
+
             uid_local = st.session_state.get('CHAVE_MESTRA_UUID')
             v_calc = parse_moeda(v_t)
             v_pct = parse_moeda(c_val_fixo) / 100
@@ -131,8 +135,19 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
 
                 if (d_e is None or curr == d_e) and match_dm and (d_s == "" or curr.weekday() == d_map[d_s]):
                     
-                    # TRAVA 2: Só processa se curr estiver estritamente dentro do intervalo i_p e f_p
-                    if i_p <= curr <= f_p:
+                    # TRAVA 2: Só processa se curr estiver estritamente dentro do intervalo de validade
+                    # Para parciais, validamos apenas se o mês/ano de curr é >= ao mês/ano de i_p
+                    processar = False
+                    if permitir_parcial:
+                        # Se permitir parcial, o dia de curr é sempre 1. Validamos se esse dia 1 está no período.
+                        dt_ref_parcial = curr.replace(day=1)
+                        if i_p.replace(day=1) <= dt_ref_parcial <= f_p:
+                            processar = True
+                    else:
+                        if i_p <= curr <= f_p:
+                            processar = True
+
+                    if processar:
                         dt_f = curr
                         if permitir_parcial:
                             dt_f = dt_f.replace(day=1)
@@ -143,8 +158,8 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
                                 # Ajuste: Se domingo (6), volta 2 dias para sexta. Se sábado (5), volta 1 dia para sexta.
                                 dt_f -= timedelta(days=(1 if dt_f.weekday()==5 else 2))
                         
-                        # TRAVA 3: Valida novamente após ajuste de FDS
-                        if i_p <= dt_f <= f_p:
+                        # TRAVA 3: Valida novamente após ajuste de FDS (apenas para não parciais)
+                        if permitir_parcial or (i_p <= dt_f <= f_p):
                             # Gera o texto do complemento para este item
                             comp_gerado = comp_txt
                             if num_atual is not None:
