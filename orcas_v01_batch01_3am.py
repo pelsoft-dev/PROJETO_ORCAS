@@ -23,9 +23,10 @@ SMTP_PASS = os.environ.get("SMTP_PASS")
 
 def fmt_br(valor):
     """Formata valor para padrão brasileiro: 1.250,55"""
+    if valor is None: return "0,00"
     return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-def gerar_pdf_relatorio(usuario_nome, data_hoje, agenda_hoje, resumo_ontem, analise_macro):
+def gerar_pdf_relatorio(usuario_nome, data_hoje, agenda_hoje, resumo_ontem, analise_macro, gastos_excedidos):
     pdf = FPDF()
     pdf.add_page()
     # Trocamos Arial por Helvetica (padrão PDF) para evitar o Warning
@@ -41,21 +42,71 @@ def gerar_pdf_relatorio(usuario_nome, data_hoje, agenda_hoje, resumo_ontem, anal
     pdf.set_fill_color(240, 240, 240)
     pdf.set_font("Helvetica", "B", 11)
     pdf.cell(190, 8, " 1. SAÚDE GERAL DO PLANO (VISÃO ACUMULADA)", 0, new_x="LMARGIN", new_y="NEXT", fill=True)
-    pdf.set_font("Helvetica", "", 10)
     
-    aderencia = (analise_macro['realizado'] / analise_macro['planejado'] * 100) if analise_macro['planejado'] > 0 else 0
-    pdf.cell(95, 8, f"Total Planejado no Plano: R$ {fmt_br(analise_macro['planejado'])}")
-    pdf.cell(95, 8, f"Total Realizado até agora: R$ {fmt_br(analise_macro['realizado'])}", new_x="LMARGIN", new_y="NEXT")
+    # Cabeçalho da Tabela Macro (Conforme anexo solicitado)
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.cell(70, 10, "Período de Referência", 1, align="C")
+    pdf.cell(60, 5, "Entradas", 1, align="C")
+    pdf.cell(60, 5, "Saídas", 1, new_x="LMARGIN", new_y="NEXT", align="C")
+    pdf.set_x(80)
+    pdf.cell(30, 5, "Planejadas", 1, align="C")
+    pdf.cell(30, 5, "Realizadas", 1, align="C")
+    pdf.cell(30, 5, "Planejadas", 1, align="C")
+    pdf.cell(30, 5, "Realizadas", 1, new_x="LMARGIN", new_y="NEXT", align="C")
+
+    # Linhas da Tabela Macro
+    pdf.set_font("Helvetica", "", 7)
+    periodos = [
+        ("Do Início do Plano até Hoje", "plano_hoje"),
+        ("Do Início do Plano até o Fim do Plano", "plano_total"),
+        ("Do Início do Mês até Hoje", "mes_hoje"),
+        ("Do Início do Mês até o Fim do Mês", "mes_total"),
+        ("Do Início do Ano até Hoje", "ano_hoje"),
+        ("Do Início do Ano até o Fim do Ano", "ano_total")
+    ]
+
+    for label, key in periodos:
+        d = analise_macro.get(key, {"e_p":0, "e_r":0, "s_p":0, "s_r":0})
+        pdf.cell(70, 6, label, 1)
+        pdf.cell(30, 6, fmt_br(d['e_p']), 1, align="R")
+        pdf.cell(30, 6, fmt_br(d['e_r']), 1, align="R")
+        pdf.cell(30, 6, fmt_br(d['s_p']), 1, align="R")
+        pdf.cell(30, 6, fmt_br(d['s_r']), 1, new_x="LMARGIN", new_y="NEXT", align="R")
+
+    pdf.set_font("Helvetica", "I", 7)
+    pdf.cell(190, 5, "OBS. O Início/Fim do Mês/Ano estão condicionados ao Início/Fim dos Planos ativos.", 0, new_x="LMARGIN", new_y="NEXT", align="R")
+    
     pdf.set_font("Helvetica", "B", 10)
-    pdf.cell(190, 8, f"Índice de Aderência ao Orçamento: {aderencia:.1f}%", new_x="LMARGIN", new_y="NEXT")
+    # Índice de Aderência: Mede a eficiência do gasto (Realizado vs Planejado)
+    aderencia = (analise_macro['plano_hoje']['s_r'] / analise_macro['plano_hoje']['s_p'] * 100) if analise_macro['plano_hoje']['s_p'] > 0 else 0
+    pdf.cell(190, 8, f"Índice de Aderência ao Orçamento (Saídas Acumuladas): {aderencia:.1f}%", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(2)
 
-    # 2. FECHAMENTO DE ONTEM
+    # 2. GASTOS ACIMA DO PLANEJADO (MÊS ATUAL)
+    meses_pt = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
+    mes_nome = meses_pt[data_hoje.month - 1]
     pdf.set_font("Helvetica", "B", 11)
-    pdf.cell(190, 8, " 2. FECHAMENTO DO DIA ANTERIOR", 0, new_x="LMARGIN", new_y="NEXT", fill=True)
-    pdf.set_font("Helvetica", "", 10)
-    pdf.cell(190, 8, f"Ontem ({resumo_ontem['data']}): Planejado R$ {fmt_br(resumo_ontem['total_p'])} | Realizado R$ {fmt_br(resumo_ontem['total_r'])}", new_x="LMARGIN", new_y="NEXT")
-    pdf.ln(2)
+    pdf.cell(190, 8, f" 2. ALERTAS: GASTOS ACIMA DO PLANEJADO EM {mes_nome.upper()}", 0, new_x="LMARGIN", new_y="NEXT", fill=True)
+    pdf.set_font("Helvetica", "", 9)
+    pdf.multi_cell(190, 5, f"Neste Mês de {mes_nome}, até o dia de hoje ({data_hoje.strftime('%d/%m/%Y')}) você teve os seguintes gastos acima do Planejado:")
+    
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.cell(80, 6, "Descrição", 1)
+    pdf.cell(30, 6, "Data Origem", 1)
+    pdf.cell(40, 6, "Valor Plan.", 1)
+    pdf.cell(40, 6, "Valor Real (Acum.)", 1, new_x="LMARGIN", new_y="NEXT")
+    
+    pdf.set_font("Helvetica", "", 8)
+    if not gastos_excedidos:
+        pdf.cell(190, 6, "Nenhum gasto acima do planejado identificado neste período.", 1, new_x="LMARGIN", new_y="NEXT", align="C")
+    else:
+        for g in gastos_excedidos:
+            pdf.cell(80, 6, str(g['descricao'])[:40], 1)
+            pdf.cell(30, 6, g['data'], 1)
+            pdf.cell(40, 6, fmt_br(g['v_p']), 1, align="R")
+            pdf.cell(40, 6, fmt_br(g['v_r']), 1, new_x="LMARGIN", new_y="NEXT", align="R")
+
+    pdf.ln(4)
 
     # 3. AGENDA DE HOJE
     pdf.set_fill_color(230, 240, 255)
@@ -71,18 +122,18 @@ def gerar_pdf_relatorio(usuario_nome, data_hoje, agenda_hoje, resumo_ontem, anal
 
     pdf.set_font("Helvetica", "", 9)
     total_hoje = 0
-    for item in agenda_hoje[:18]: # Limite para não estourar a página
+    for item in agenda_hoje[:15]:
         pdf.cell(90, 7, str(item['descricao'])[:45], 1)
         pdf.cell(30, 7, str(item['tipo']), 1)
-        pdf.cell(35, 7, f"R$ {fmt_br(item['valor_plan'])}", 1)
+        pdf.cell(35, 7, f"R$ {fmt_br(item['valor_plan'])}", 1, align="R")
         pdf.cell(35, 7, "Pendente", 1, new_x="LMARGIN", new_y="NEXT")
-        total_hoje += item['valor_plan']
+        total_hoje += (item['valor_plan'] or 0)
 
     pdf.ln(2)
     pdf.set_font("Helvetica", "B", 10)
     pdf.cell(190, 8, f"TOTAL PARA HOJE: R$ {fmt_br(total_hoje)}", 0, new_x="LMARGIN", new_y="NEXT", align="R")
 
-    filename = f"relatorio_{usuario_nome}_{data_hoje.strftime('%Y%m%d')}.pdf"
+    filename = f"ORCAS_DAILY_REPORT_{usuario_nome}_{data_hoje.strftime('%Y%m%d')}.pdf"
     pdf.output(filename)
     return filename
 
@@ -106,8 +157,8 @@ def gerar_pdf_relatorio(usuario_nome, data_hoje, agenda_hoje, resumo_ontem, anal
 #            "number": numero,
 #            "media": f"data:application/pdf;base64,{encoded_pdf}",
 #            "mediatype": "document",
-#            "caption": "📊 Seu relatório diário ORCAS está pronto!",
-#            "fileName": "Relatorio_Orcas.pdf"
+#            "caption": "📊 Seu ORCAS DAILY REPORT está pronto!",
+#            "fileName": "ORCAS_DAILY_REPORT.pdf"
 #        }
 #        requests.post(url, json=payload, headers=headers)
 #    except Exception as e:
@@ -122,16 +173,16 @@ def enviar_email_orcas(email_destino, caminho_arquivo, usuario_nome):
     msg = MIMEMultipart()
     msg['From'] = f"ORCAS <{SMTP_USER}>"
     msg['To'] = email_destino
-    msg['Subject'] = f"Relatório Estrategista ORCAS - {usuario_nome}"
+    msg['Subject'] = f"ORCAS DAILY REPORT - {usuario_nome}"
 
-    corpo = f"Olá {usuario_nome},\n\nSegue em anexo o seu Relatório Estrategista ORCAS (Uma Página) com visão macro do plano e agenda de hoje."
+    corpo = f"Olá {usuario_nome},\n\nSegue em anexo o seu ORCAS DAILY REPORT com a visão macro da sua saúde financeira e agenda de hoje."
     msg.attach(MIMEText(corpo, 'plain'))
 
     with open(caminho_arquivo, "rb") as attachment:
         part = MIMEBase('application', 'octet-stream')
         part.set_payload(attachment.read())
         encoders.encode_base64(part)
-        part.add_header('Content-Disposition', f"attachment; filename=Relatorio_Orcas.pdf")
+        part.add_header('Content-Disposition', f"attachment; filename=ORCAS_DAILY_REPORT.pdf")
         msg.attach(part)
 
     try:
@@ -154,6 +205,8 @@ def job_madrugada():
     agora = datetime.now(fuso_br)
     hoje = agora.date()
     ontem = hoje - timedelta(days=1)
+    primeiro_dia_mes = hoje.replace(day=1)
+    primeiro_dia_ano = hoje.replace(month=1, day=1)
     
     print(f"--- INICIANDO ROTINA ORCAS (BATCH 3AM): {hoje.strftime('%d/%m/%Y')} ---")
 
@@ -249,34 +302,72 @@ def job_madrugada():
                     perfil = res_user.data[0]
                     nome_usuario = perfil.get('nome') if perfil.get('nome') else "Usuario"
                     
-                    # BUSCA MACRO (24 Meses)
-                    macro_data = supabase.table("lancamentos").select("valor_plan, valor_real")\
+                    # BUSCA TODOS OS DADOS DO PROJETO PARA CÁLCULOS MACRO
+                    all_data = supabase.table("lancamentos").select("tipo, valor_plan, valor_real, data, parcial_real, permite_parciais, descricao")\
                         .eq("usuario_id", cfg['usuario_id']).eq("projeto_id", cfg['projeto_id']).execute()
                     
-                    total_plan = sum([x['valor_plan'] for x in macro_data.data if x['valor_plan']])
-                    total_real = sum([x['valor_real'] for x in macro_data.data if x['valor_real']])
+                    if not all_data.data: continue
+
+                    def calc_periodo(start_date=None, end_date=None):
+                        subset = all_data.data
+                        if start_date: subset = [x for x in subset if x['data'] >= start_date.strftime('%Y-%m-%d')]
+                        if end_date: subset = [x for x in subset if x['data'] <= end_date.strftime('%Y-%m-%d')]
+                        
+                        return {
+                            "e_p": sum([x['valor_plan'] or 0 for x in subset if x['tipo'] == 'Entrada']),
+                            "e_r": sum([x['valor_real'] or 0 for x in subset if x['tipo'] == 'Entrada']),
+                            "s_p": sum([x['valor_plan'] or 0 for x in subset if x['tipo'] == 'Saída']),
+                            "s_r": sum([x['valor_real'] or 0 for x in subset if x['tipo'] == 'Saída'])
+                        }
+
+                    analise_macro = {
+                        "plano_hoje": calc_periodo(None, hoje),
+                        "plano_total": calc_periodo(None, None),
+                        "mes_hoje": calc_periodo(primeiro_dia_mes, hoje),
+                        "mes_total": calc_periodo(primeiro_dia_mes, primeiro_dia_mes + timedelta(days=31)),
+                        "ano_hoje": calc_periodo(primeiro_dia_ano, hoje),
+                        "ano_total": calc_periodo(primeiro_dia_ano, primeiro_dia_ano.replace(month=12, day=31))
+                    }
+
+                    # LOGICA DE GASTOS EXCEDIDOS NO MÊS (SAÍDA REALIZADO > PLANEJADO)
+                    gastos_excedidos = []
+                    mes_data = [x for x in all_data.data if x['data'] >= primeiro_dia_mes.strftime('%Y-%m-%d') and x['data'] <= hoje.strftime('%Y-%m-%d') and x['tipo'] == 'Saída']
                     
-                    analise_macro = {"planejado": total_plan, "realizado": total_real}
+                    # Filtra registros base que possuem o checkbox "permite parciais"
+                    for item in [x for x in mes_data if x.get('permite_parciais')]:
+                        # Soma parciais de TODOS os registros com a mesma descrição no período
+                        tot_parcial = sum([p['parcial_real'] or 0 for p in mes_data if p['descricao'] == item['descricao']])
+                        if tot_parcial > (item['valor_plan'] or 0):
+                            gastos_excedidos.append({
+                                'descricao': item['descricao'], 
+                                'data': datetime.strptime(item['data'], '%Y-%m-%d').strftime('%d/%m/%Y'), 
+                                'v_p': item['valor_plan'], 
+                                'v_r': tot_parcial
+                            })
+                    
+                    # Itens normais (sem parciais)
+                    for item in [x for x in mes_data if not x.get('permite_parciais')]:
+                        if (item['valor_real'] or 0) > (item['valor_plan'] or 0):
+                            gastos_excedidos.append({
+                                'descricao': item['descricao'], 
+                                'data': datetime.strptime(item['data'], '%Y-%m-%d').strftime('%d/%m/%Y'), 
+                                'v_p': item['valor_plan'], 
+                                'v_r': item['valor_real']
+                            })
 
                     # BUSCA ONTEM (Fechamento)
-                    dados_ontem = supabase.table("lancamentos").select("valor_plan, valor_real")\
-                        .eq("usuario_id", cfg['usuario_id']).eq("data", ontem.strftime('%Y-%m-%d')).execute()
+                    dados_ontem = [x for x in all_data.data if x['data'] == ontem.strftime('%Y-%m-%d')]
                     resumo_ontem = {
                         "data": ontem.strftime('%d/%m/%Y'),
-                        "total_p": sum([x['valor_plan'] for x in dados_ontem.data]),
-                        "total_r": sum([x['valor_real'] for x in dados_ontem.data])
+                        "total_p": sum([x['valor_plan'] or 0 for x in dados_ontem]),
+                        "total_r": sum([x['valor_real'] or 0 for x in dados_ontem])
                     }
 
                     # BUSCA HOJE (Agenda)
-                    dados_hoje = supabase.table("lancamentos")\
-                        .select("descricao, tipo, valor_plan")\
-                        .eq("usuario_id", cfg['usuario_id'])\
-                        .eq("projeto_id", cfg['projeto_id'])\
-                        .eq("data", hoje.strftime('%Y-%m-%d'))\
-                        .execute()
+                    dados_hoje = [x for x in all_data.data if x['data'] == hoje.strftime('%Y-%m-%d')]
 
-                    if dados_hoje.data:
-                        pdf_path = gerar_pdf_relatorio(nome_usuario, hoje, dados_hoje.data, resumo_ontem, analise_macro)
+                    if dados_hoje:
+                        pdf_path = gerar_pdf_relatorio(nome_usuario, hoje, dados_hoje, resumo_ontem, analise_macro, gastos_excedidos)
                         
                         if cfg.get('email_ativo') == 1 and perfil.get('email'):
                             enviar_email_orcas(perfil['email'], pdf_path, nome_usuario)
