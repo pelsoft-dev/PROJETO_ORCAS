@@ -83,11 +83,8 @@ def gerar_pdf_relatorio(usuario_nome, data_hoje, agenda_hoje, resumo_ontem, anal
     pdf.ln(2)
 
     # 2. GASTOS ACIMA DO PLANEJADO (MÊS ATUAL E ANTERIOR)
-    meses_pt = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
-    mes_nome = meses_pt[data_hoje.month - 1]
     pdf.set_font("Helvetica", "B", 11)
     pdf.cell(190, 8, f" 2. ALERTAS: GASTOS ACIMA DO PLANEJADO (COMPARATIVO)", 0, new_x="LMARGIN", new_y="NEXT", fill=True)
-    pdf.set_font("Helvetica", "", 8)
     
     # Cabeçalho Alertas Modificado conforme Anexo 03
     pdf.set_font("Helvetica", "B", 7)
@@ -103,7 +100,7 @@ def gerar_pdf_relatorio(usuario_nome, data_hoje, agenda_hoje, resumo_ontem, anal
         pdf.cell(190, 6, "Nenhum gasto acima do planejado identificado.", 1, new_x="LMARGIN", new_y="NEXT", align="C")
     else:
         for g in gastos_excedidos:
-            pdf.set_text_color(200, 0, 0) # VERMELHO para estourados
+            pdf.set_text_color(200, 0, 0) # VERMELHO para estourados conforme solicitado
             pdf.cell(60, 6, str(g['descricao'])[:35], 1)
             pdf.cell(20, 6, g['data_ref'], 1, align="C")
             
@@ -148,33 +145,6 @@ def gerar_pdf_relatorio(usuario_nome, data_hoje, agenda_hoje, resumo_ontem, anal
     filename = f"ORCAS_DAILY_REPORT_{usuario_nome}_{data_hoje.strftime('%Y%m%d')}.pdf"
     pdf.output(filename)
     return filename
-
-# =================================================================
-# TITULO: LOGICA DE ENVIO PARA WHATSAPP (EVOLUTION API)
-# ESTE CODIGO ESTA PRONTO PARA USO, MAS COMENTADO POR SEGURANÇA
-# =================================================================
-#def enviar_whatsapp_evolution(numero, caminho_arquivo):
-#    if not EVOLUTION_API_URL or not EVOLUTION_API_KEY:
-#        return
-#    
-#    url = f"{EVOLUTION_API_URL}/message/sendMedia/instancia_orcas"
-#    headers = {"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
-#    
-#    try:
-#        with open(caminho_arquivo, "rb") as f:
-#            import base64
-#            encoded_pdf = base64.b64encode(f.read()).decode('utf-8')
-#
-#        payload = {
-#            "number": numero,
-#            "media": f"data:application/pdf;base64,{encoded_pdf}",
-#            "mediatype": "document",
-#            "caption": "📊 Seu ORCAS DAILY REPORT está pronto!",
-#            "fileName": "ORCAS_DAILY_REPORT.pdf"
-#        }
-#        requests.post(url, json=payload, headers=headers)
-#    except Exception as e:
-#        print(f"Erro ao enviar WhatsApp para {numero}: {e}")
 
 def enviar_email_orcas(email_destino, caminho_arquivo, usuario_nome):
     print(f"DEBUG: Tentando enviar e-mail para {email_destino}...")
@@ -318,11 +288,9 @@ def job_madrugada():
                     perfil = res_user.data[0]
                     nome_usuario = perfil.get('nome') if perfil.get('nome') else "Usuario"
                     
-                    # BUSCA TODOS OS DADOS PARA CALCULOS MACRO E ALERTAS
                     all_data = supabase.table("lancamentos").select("tipo, valor_plan, valor_real, data, parcial_real, parcial_data, permite_parcial, descricao")\
                         .eq("usuario_id", cfg['usuario_id']).eq("projeto_id", cfg['projeto_id']).execute()
                     
-                    # Se não houver dados, criamos uma lista vazia para permitir a geração do PDF
                     base_data = all_data.data if all_data.data else []
 
                     def calc_periodo(start_date=None, end_date=None):
@@ -349,30 +317,26 @@ def job_madrugada():
                     # --- NOVA LÓGICA DE ALERTAS (MES ATUAL vs ANTERIOR - ANEXO 03) ---
                     gastos_excedidos = []
                     
-                    # Dados Mês Atual e Anterior
                     mes_atual_data = [x for x in base_data if x['data'] >= primeiro_dia_mes.strftime('%Y-%m-%d') and x['data'] <= hoje.strftime('%Y-%m-%d') and x['tipo'] == 'Saída']
                     mes_ant_data = [x for x in base_data if x['data'] >= primeiro_dia_mes_anterior.strftime('%Y-%m-%d') and x['data'] <= ultimo_dia_mes_anterior.strftime('%Y-%m-%d') and x['tipo'] == 'Saída']
                     
-                    # Agrupar descrições únicas de ambos os períodos
                     todas_descricoes = set([x['descricao'] for x in mes_atual_data] + [x['descricao'] for x in mes_ant_data])
                     
                     for desc in todas_descricoes:
-                        # Cálculos Mês Atual
                         itens_atu = [x for x in mes_atual_data if x['descricao'] == desc]
-                        v_p_atu = sum([x['valor_plan'] or 0 for x in itens_atu if x.get('valor_plan')])
-                        # Lógica de Parciais p/ Realizado Atual
+                        v_p_atu = sum([x['valor_plan'] or 0 for x in itens_atu])
+                        # Soma parcial_real se permitir_parcial, senão valor_real
                         v_r_atu = sum([(x['parcial_real'] if x.get('permite_parcial') else x['valor_real']) or 0 for x in itens_atu])
                         
-                        # Data: Maior parcial_data ou data do item
-                        datas_atu = [x.get('parcial_data') or x['data'] for x in itens_atu if x.get('parcial_data') or x['data']]
-                        max_data = max(datas_atu) if datas_atu else hoje.strftime('%Y-%m-%d')
+                        # Data de Referência: Maior parcial_data dentre os itens da descrição
+                        datas_parciais = [x.get('parcial_data') for x in itens_atu if x.get('parcial_data')]
+                        max_data = max(datas_parciais) if datas_parciais else (itens_atu[0]['data'] if itens_atu else hoje.strftime('%Y-%m-%d'))
                         
-                        # Cálculos Mês Anterior
                         itens_ant = [x for x in mes_ant_data if x['descricao'] == desc]
-                        v_p_ant = sum([x['valor_plan'] or 0 for x in itens_ant if x.get('valor_plan')])
+                        v_p_ant = sum([x['valor_plan'] or 0 for x in itens_ant])
                         v_r_ant = sum([(x['parcial_real'] if x.get('permite_parcial') else x['valor_real']) or 0 for x in itens_ant])
                         
-                        # CRITÉRIO: REALIZADO > PLANEJADO em qualquer um dos meses
+                        # CRITÉRIO: REALIZADO > PLANEJADO em QUALQUER um dos meses (Ant ou Atual)
                         if (v_r_atu > v_p_atu and v_p_atu > 0) or (v_r_ant > v_p_ant and v_p_ant > 0):
                             gastos_excedidos.append({
                                 'descricao': desc,
@@ -383,7 +347,6 @@ def job_madrugada():
                                 'v_r_atu': v_r_atu
                             })
 
-                    # BUSCA ONTEM (Fechamento)
                     dados_ontem = [x for x in base_data if x['data'] == ontem.strftime('%Y-%m-%d')]
                     resumo_ontem = {
                         "data": ontem.strftime('%d/%m/%Y'),
@@ -391,17 +354,16 @@ def job_madrugada():
                         "total_r": sum([x['valor_real'] or 0 for x in dados_ontem])
                     }
 
-                    # BUSCA HOJE (Agenda)
                     dados_hoje = [x for x in base_data if x['data'] == hoje.strftime('%Y-%m-%d')]
 
-                    # GERA E ENVIA INDEPENDENTE DE TER LANÇAMENTOS (Conforme solicitado)
+                    # GERA E ENVIA SEMPRE QUE HABILITADO (Independente de ter lançamentos no dia)
                     pdf_path = gerar_pdf_relatorio(nome_usuario, hoje, dados_hoje, resumo_ontem, analise_macro, gastos_excedidos)
                     
-                    # ENVIO WHATSAPP (Se habilitado)
+                    # ENVIO WHATSAPP (Se habilitado e tiver celular)
                     # if cfg.get('zap_ativo') == 1 and perfil.get('celular'):
                     #     enviar_whatsapp_evolution(perfil['celular'], pdf_path)
 
-                    # ENVIO EMAIL (Se habilitado)
+                    # ENVIO EMAIL (Se habilitado e tiver e-mail)
                     if cfg.get('email_ativo') == 1 and perfil.get('email'):
                         enviar_email_orcas(perfil['email'], pdf_path, nome_usuario)
                         print(f"RELATÓRIO E-MAIL ENVIADO: {nome_usuario}")
