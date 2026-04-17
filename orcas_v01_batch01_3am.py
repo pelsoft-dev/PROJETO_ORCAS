@@ -12,8 +12,8 @@ from fpdf import FPDF
 # Configurações de Ambiente
 URL = os.environ.get("SUPABASE_URL")
 KEY = os.environ.get("SUPABASE_KEY")
-EVOLUTION_API_URL = os.environ.get("EVOLUTION_API_URL") # Ex: https://sua-api.com
-EVOLUTION_API_KEY = os.environ.get("EVOLUTION_API_KEY")
+#EVOLUTION_API_URL = os.environ.get("EVOLUTION_API_URL") # Ex: https://sua-api.com
+#EVOLUTION_API_KEY = os.environ.get("EVOLUTION_API_KEY")
 
 # Configurações de E-mail (Devem estar no GitHub Secrets)
 SMTP_SERVER = os.environ.get("SMTP_SERVER")
@@ -30,10 +30,10 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
     pdf = FPDF()
     pdf.add_page()
     
-    # 2) INCLUIR A FIGURA DA BALEIA QUE ESTÁ NO ANEXO01 NO TOPO, A ESQUERDA
-    # Assume-se que o arquivo da imagem esteja acessível como 'orca_mascote.png'
+    # --- INCLUIR A BALEIA (ANEXO01) NO TOPO A ESQUERDA ---
+    # Assume-se que o arquivo de imagem 'orca_mascote.png' esteja acessível
     try:
-        pdf.image("orca_mascote.png", x=10, y=8, w=25)
+        pdf.image("orca_mascote.png", x=10, y=8, w=22)
     except:
         pass
 
@@ -50,15 +50,15 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
     pdf.cell(190, 10, f"Usuário: {usuario_nome} | PLANO: {nome_plano} | Data: {data_hoje.strftime('%d/%m/%Y')}", new_x="LMARGIN", new_y="NEXT", align="C")
     pdf.ln(5)
 
-    # 1. SAÚDE GERAL DO PLANO (VISÃO ACUMULADA)
+    # 1. VISÃO MACRO DO PLANO (Tabela conforme anexo)
     pdf.set_fill_color(240, 240, 240)
     pdf.set_font("Helvetica", "B", 11)
     pdf.cell(190, 8, " 1. SAÚDE GERAL DO PLANO (VISÃO ACUMULADA)", 0, new_x="LMARGIN", new_y="NEXT", fill=True)
     
     # Cabeçalho da Tabela Macro
-    pdf.set_font("Helvetica", "B", 7)
+    pdf.set_font("Helvetica", "B", 8)
     pdf.cell(45, 10, "Período de Referência", 1, align="C")
-    pdf.cell(35, 10, "Datas (Início/Fim)", 1, align="C") # 6) Inclusão conforme ANEXO02
+    pdf.cell(35, 10, "Datas (Início/Fim)", 1, align="C") # 6) Inclusão da coluna de datas conforme ANEXO02
     pdf.cell(55, 5, "Entradas", 1, align="C")
     pdf.cell(55, 5, "Saídas", 1, new_x="LMARGIN", new_y="NEXT", align="C")
     pdf.set_x(90)
@@ -91,12 +91,11 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
     pdf.cell(190, 5, "OBS. O Início/Fim do Mês/Ano estão condicionados ao Início/Fim dos Planos.", 0, new_x="LMARGIN", new_y="NEXT", align="R")
     
     pdf.set_font("Helvetica", "B", 10)
-    # Índice de Aderência
     aderencia = (analise_macro['plano_hoje']['s_r'] / analise_macro['plano_hoje']['s_p'] * 100) if analise_macro['plano_hoje']['s_p'] > 0 else 0
     pdf.cell(190, 8, f"Índice de Aderência ao Orçamento (Saídas Acumuladas): {aderencia:.1f}%", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(2)
 
-    # 7) ITEM 2. ALERTAS (FORMATO ANEXO03)
+    # 7) --- ITEM 2. SUBSTITUIÇÃO EXATA PELO ANEXO02 ---
     pdf.set_font("Helvetica", "B", 11)
     pdf.cell(190, 8, " 2. ALERTAS: GASTOS ACIMA DO PLANEJADO (COMPARATIVO)", 0, new_x="LMARGIN", new_y="NEXT", fill=True)
     
@@ -204,7 +203,8 @@ def enviar_email_orcas(email_destino, caminho_arquivo, usuario_nome):
         msg.attach(part)
 
     try:
-        server = smtplib.SMTP(SMTP_SERVER, int(SMTP_PORT))
+        server = smtplib.SMTP(SMTP_SERVER, int(SMTP_PORT), timeout=30)
+        server.set_debuglevel(1)
         server.starttls()
         server.login(SMTP_USER, SMTP_PASS)
         server.send_message(msg)
@@ -371,27 +371,26 @@ def job_madrugada():
                             "ano_total": calc_periodo(primeiro_dia_ano, primeiro_dia_ano.replace(month=12, day=31))
                         }
 
-                        # 7) LÓGICA DE GASTOS EXCEDIDOS COMPARATIVO (Mês Anterior + Atual)
+                        # 7) LÓGICA DE GASTOS EXCEDIDOS COMPARATIVO
                         gastos_excedidos = []
-                        mes_atual_set = [x for x in all_data.data if x['data'] >= primeiro_dia_mes.strftime('%Y-%m-%d') and x['data'] <= hoje.strftime('%Y-%m-%d') and x['tipo'] == 'Saída']
-                        mes_ant_set = [x for x in all_data.data if x['data'] >= primeiro_dia_mes_ant.strftime('%Y-%m-%d') and x['data'] <= ultimo_dia_mes_ant.strftime('%Y-%m-%d') and x['tipo'] == 'Saída']
+                        mes_atual_data = [x for x in all_data.data if x['data'] >= primeiro_dia_mes.strftime('%Y-%m-%d') and x['data'] <= hoje.strftime('%Y-%m-%d') and x['tipo'] == 'Saída']
+                        mes_ant_data = [x for x in all_data.data if x['data'] >= primeiro_dia_mes_ant.strftime('%Y-%m-%d') and x['data'] <= ultimo_dia_mes_ant.strftime('%Y-%m-%d') and x['tipo'] == 'Saída']
                         
-                        descricoes = set([x['descricao'] for x in mes_atual_set] + [x['descricao'] for x in mes_ant_set])
+                        desc_todas = set([x['descricao'] for x in mes_atual_data] + [x['descricao'] for x in mes_ant_data])
                         
-                        for desc in descricoes:
-                            atu = [x for x in mes_atual_set if x['descricao'] == desc]
+                        for desc in desc_todas:
+                            atu = [x for x in mes_atual_data if x['descricao'] == desc]
                             v_p_atu = sum([x['valor_plan'] or 0 for x in atu])
                             v_r_atu = sum([(x['parcial_real'] if x.get('permite_parcial') else x['valor_real']) or 0 for x in atu])
                             
-                            ant = [x for x in mes_ant_set if x['descricao'] == desc]
+                            ant = [x for x in mes_ant_data if x['descricao'] == desc]
                             v_p_ant = sum([x['valor_plan'] or 0 for x in ant])
                             v_r_ant = sum([(x['parcial_real'] if x.get('permite_parcial') else x['valor_real']) or 0 for x in ant])
                             
-                            # Critério de exibição (Estourado ou existente nos dois meses para comparação)
                             if (v_r_atu > v_p_atu and v_p_atu > 0) or (v_r_ant > v_p_ant and v_p_ant > 0):
-                                d_parc = [x['parcial_data'] for x in atu if x.get('parcial_data')]
-                                if not d_parc: d_parc = [x['data'] for x in atu]
-                                maior_dt = max(d_parc) if d_parc else hoje.strftime('%Y-%m-%d')
+                                datas_parc = [x['parcial_data'] for x in atu if x.get('parcial_data')]
+                                if not datas_parc: datas_parc = [x['data'] for x in atu]
+                                maior_dt = max(datas_parc) if datas_parc else hoje.strftime('%Y-%m-%d')
                                 
                                 gastos_excedidos.append({
                                     'descricao': desc,
@@ -405,15 +404,15 @@ def job_madrugada():
                         resumo_ontem = {"data": ontem.strftime('%d/%m/%Y'), "total_p": sum([x['valor_plan'] or 0 for x in dados_ontem]), "total_r": sum([x['valor_real'] or 0 for x in dados_ontem])}
                         dados_hoje = [x for x in all_data.data if x['data'] == hoje.strftime('%Y-%m-%d')]
 
-                    # GERAR PDF
-                    pdf_path = gerar_pdf_relatorio(nome_usuario, nome_plano, hoje, dados_hoje, resumo_ontem, analise_macro, gastos_excedidos)
-                    
-                    if cfg.get('email_ativo') == 1 and perfil.get('email'):
-                        enviar_email_orcas(perfil['email'], pdf_path, nome_usuario)
-                        print(f"RELATÓRIO E-MAIL ENVIADO: {nome_usuario}")
+                        # GERAR PDF
+                        pdf_path = gerar_pdf_relatorio(nome_usuario, nome_plano, hoje, dados_hoje, resumo_ontem, analise_macro, gastos_excedidos)
+                        
+                        if cfg.get('email_ativo') == 1 and perfil.get('email'):
+                            enviar_email_orcas(perfil['email'], pdf_path, nome_usuario)
+                            print(f"RELATÓRIO E-MAIL ENVIADO: {nome_usuario}")
 
-                    if os.path.exists(pdf_path):
-                        os.remove(pdf_path)
+                        if os.path.exists(pdf_path):
+                            os.remove(pdf_path)
 
     except Exception as e:
         print(f"ERRO DURANTE A EXECUÇÃO: {e}")
