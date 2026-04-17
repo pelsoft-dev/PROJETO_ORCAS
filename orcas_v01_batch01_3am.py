@@ -42,13 +42,18 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
     pdf.add_page()
     
     # ---------------------------------------------------------
-    # MODIFICAÇÃO 01: INCLUIR A BALEIA NO TOPO A ESQUERDA
+    # MODIFICAÇÃO 01: INCLUIR A BALEIA COM CAMINHO ABSOLUTO
     # ---------------------------------------------------------
     try:
-        # Certifique-se que o arquivo orca_mascote.png está na raiz
-        pdf.image("orca_mascote.png", x=10, y=8, w=25)
+        # Resolve o erro [Errno 2] do GitHub Actions usando caminho absoluto
+        base_path = os.path.dirname(os.path.abspath(__file__))
+        image_path = os.path.join(base_path, "orca_mascote.png")
+        if os.path.exists(image_path):
+            pdf.image(image_path, x=10, y=8, w=25)
+        else:
+            print(f"Aviso: Arquivo {image_path} não encontrado no servidor.")
     except Exception as e:
-        print(f"Aviso: Imagem da orca não encontrada: {e}")
+        print(f"Aviso: Erro ao processar imagem: {e}")
 
     # Título Principal
     pdf.set_font("Helvetica", "B", 16)
@@ -96,13 +101,13 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
 
     pdf.ln(2)
     pdf.set_font("Helvetica", "B", 10)
-    s_p_acum = analise_macro['plano_hoje']['s_p']
+    s_p_acum = analise_macro.get('plano_hoje', {}).get('s_p', 0)
     aderencia = (analise_macro['plano_hoje']['s_r'] / s_p_acum * 100) if s_p_acum > 0 else 0
     pdf.cell(190, 8, f"Índice de Aderência ao Orçamento (Saídas Acumuladas): {aderencia:.1f}%", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(2)
 
     # --------------------------------------------------------------------------
-    # MODIFICAÇÃO 02: 2. ALERTAS (TABELA COMPARATIVA CONFORME SOLICITADO)
+    # MODIFICAÇÃO 02: 2. ALERTAS (TABELA COMPARATIVA REESTRUTURADA)
     # --------------------------------------------------------------------------
     pdf.set_font("Helvetica", "B", 11)
     pdf.cell(190, 8, " 2. ALERTAS: GASTOS ACIMA DO PLANEJADO (COMPARATIVO)", 0, new_x="LMARGIN", new_y="NEXT", fill=True)
@@ -113,7 +118,7 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
     pdf.cell(70, 5, "Mês Anterior", 1, align="C")
     pdf.cell(70, 5, f"Mês Atual (Até {data_hoje.strftime('%d/%m/%Y')})", 1, new_x="LMARGIN", new_y="NEXT", align="C")
     
-    # Cabeçalho Inferior
+    # Cabeçalho Inferior - Ajuste de X para alinhar com o topo
     pdf.set_x(60)
     pdf.cell(20, 5, "Data", 1, align="C")
     pdf.cell(25, 5, "Planejado", 1, align="C")
@@ -128,21 +133,22 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
     else:
         for g in gastos_excedidos:
             pdf.cell(50, 6, str(g['descricao'])[:30], 1)
-            # Mês Anterior
-            if g['v_r_ant'] > g['v_p_ant']: pdf.set_text_color(200, 0, 0)
+            # Mês Anterior - Alerta em Vermelho se Realizado > Planejado
+            if g.get('v_r_ant', 0) > g.get('v_p_ant', 0): pdf.set_text_color(200, 0, 0)
             pdf.cell(20, 6, g.get('dt_ant', '-'), 1, align="C")
-            pdf.cell(25, 6, fmt_br(g['v_p_ant']), 1, align="R")
-            pdf.cell(25, 6, fmt_br(g['v_r_ant']), 1, align="R")
+            pdf.cell(25, 6, fmt_br(g.get('v_p_ant', 0)), 1, align="R")
+            pdf.cell(25, 6, fmt_br(g.get('v_r_ant', 0)), 1, align="R")
             pdf.set_text_color(0, 0, 0)
-            # Mês Atual
-            if g['v_r_atu'] > g['v_p_atu']: pdf.set_text_color(200, 0, 0)
+            
+            # Mês Atual - Alerta em Vermelho se Realizado > Planejado
+            if g.get('v_r_atu', 0) > g.get('v_p_atu', 0): pdf.set_text_color(200, 0, 0)
             pdf.cell(20, 6, g.get('dt_atu', '-'), 1, align="C")
-            pdf.cell(25, 6, fmt_br(g['v_p_atu']), 1, align="R")
-            pdf.cell(25, 6, fmt_br(g['v_r_atu']), 1, new_x="LMARGIN", new_y="NEXT", align="R")
+            pdf.cell(25, 6, fmt_br(g.get('v_p_atu', 0)), 1, align="R")
+            pdf.cell(25, 6, fmt_br(g.get('v_r_atu', 0)), 1, new_x="LMARGIN", new_y="NEXT", align="R")
             pdf.set_text_color(0, 0, 0)
 
     pdf.ln(4)
-    # [A função continua na PARTE 2...]
+
     # 3. AGENDA DE HOJE
     pdf.set_fill_color(230, 240, 255)
     pdf.set_font("Helvetica", "B", 11)
