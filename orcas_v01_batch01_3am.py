@@ -31,10 +31,12 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
     pdf.add_page()
     
     # 2) INCLUIR A FIGURA DA BALEIA QUE ESTÁ NO ANEXO01 NO TOPO, A ESQUERDA
-    # Certifique-se de que o arquivo 'orca_mascote.png' está na raiz do seu repositório
-    if os.path.exists("orca_mascote.png"):
-        pdf.image("orca_mascote.png", x=10, y=8, w=22)
-    
+    # Assume-se que o arquivo da imagem esteja acessível como 'orca_mascote.png'
+    try:
+        pdf.image("orca_mascote.png", x=10, y=8, w=25)
+    except:
+        pass
+
     # Trocamos Arial por Helvetica (padrão PDF) para evitar o Warning
     pdf.set_font("Helvetica", "B", 16)
     
@@ -44,21 +46,19 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
     pdf.set_font("Helvetica", "", 10)
     
     # 4) TROCAR “DATA DE REFERÊNCIA” POR “DATA” NO SUB-TÍTULO
-    # 5) INCLUA NO SUB-TÍTULO, ENTRE O USUÁRIO E A DATA, O “PLANO: nome-do-plano”
-    subtitulo = f"Usuário: {usuario_nome} | PLANO: {nome_plano} | Data: {data_hoje.strftime('%d/%m/%Y')}"
-    pdf.cell(190, 10, subtitulo, new_x="LMARGIN", new_y="NEXT", align="C")
+    # 5) INCLUA NO SUB-TÍTULO O “PLANO: nome-do-plano”
+    pdf.cell(190, 10, f"Usuário: {usuario_nome} | PLANO: {nome_plano} | Data: {data_hoje.strftime('%d/%m/%Y')}", new_x="LMARGIN", new_y="NEXT", align="C")
     pdf.ln(5)
 
-    # 1. VISÃO MACRO DO PLANO (Tabela conforme anexo)
+    # 1. SAÚDE GERAL DO PLANO (VISÃO ACUMULADA)
     pdf.set_fill_color(240, 240, 240)
     pdf.set_font("Helvetica", "B", 11)
     pdf.cell(190, 8, " 1. SAÚDE GERAL DO PLANO (VISÃO ACUMULADA)", 0, new_x="LMARGIN", new_y="NEXT", fill=True)
     
     # Cabeçalho da Tabela Macro
-    # 6) NO ITEM “1. SAÚDE GERAL DO PLANO”, INCLUIR AS DATAS CONFORME O ANEXO02.
     pdf.set_font("Helvetica", "B", 7)
     pdf.cell(45, 10, "Período de Referência", 1, align="C")
-    pdf.cell(35, 10, "Datas (Início/Fim)", 1, align="C")
+    pdf.cell(35, 10, "Datas (Início/Fim)", 1, align="C") # 6) Inclusão conforme ANEXO02
     pdf.cell(55, 5, "Entradas", 1, align="C")
     pdf.cell(55, 5, "Saídas", 1, new_x="LMARGIN", new_y="NEXT", align="C")
     pdf.set_x(90)
@@ -70,12 +70,12 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
     # Linhas da Tabela Macro
     pdf.set_font("Helvetica", "", 7)
     periodos = [
-        ("Início do Plano até Hoje", "plano_hoje"),
-        ("Início do Plano até o Fim do Plano", "plano_total"),
-        ("Início do Mês até Hoje", "mes_hoje"),
-        ("Início do Mês até o Fim do Mês", "mes_total"),
-        ("Início do Ano até Hoje", "ano_hoje"),
-        ("Início do Ano até o Fim do Ano", "ano_total")
+        ("Do Início do Plano até Hoje", "plano_hoje"),
+        ("Do Início do Plano até o Fim do Plano", "plano_total"),
+        ("Do Início do Mês até Hoje", "mes_hoje"),
+        ("Do Início do Mês até o Fim do Mês", "mes_total"),
+        ("Do Início do Ano até Hoje", "ano_hoje"),
+        ("Do Início do Ano até o Fim do Ano", "ano_total")
     ]
 
     for label, key in periodos:
@@ -87,15 +87,16 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
         pdf.cell(27.5, 6, fmt_br(d['s_p']), 1, align="R")
         pdf.cell(27.5, 6, fmt_br(d['s_r']), 1, new_x="LMARGIN", new_y="NEXT", align="R")
 
-    pdf.ln(2)
+    pdf.set_font("Helvetica", "I", 7)
+    pdf.cell(190, 5, "OBS. O Início/Fim do Mês/Ano estão condicionados ao Início/Fim dos Planos.", 0, new_x="LMARGIN", new_y="NEXT", align="R")
+    
     pdf.set_font("Helvetica", "B", 10)
-    # Índice de Aderência: Focado em Saídas Acumuladas (Realizado vs Planejado)
+    # Índice de Aderência
     aderencia = (analise_macro['plano_hoje']['s_r'] / analise_macro['plano_hoje']['s_p'] * 100) if analise_macro['plano_hoje']['s_p'] > 0 else 0
     pdf.cell(190, 8, f"Índice de Aderência ao Orçamento (Saídas Acumuladas): {aderencia:.1f}%", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(2)
 
-    # 7) NO ITEM “2. ALERTAS: GASTOS ACIMA DO PLANEJADO (COMPARATIVO)” 
-    # MUDAR PARA O FORMATO EXATO DO MOSTRADO NO ANEXO03
+    # 7) ITEM 2. ALERTAS (FORMATO ANEXO03)
     pdf.set_font("Helvetica", "B", 11)
     pdf.cell(190, 8, " 2. ALERTAS: GASTOS ACIMA DO PLANEJADO (COMPARATIVO)", 0, new_x="LMARGIN", new_y="NEXT", fill=True)
     
@@ -112,7 +113,7 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
         pdf.cell(190, 6, "Nenhum gasto acima do planejado identificado.", 1, new_x="LMARGIN", new_y="NEXT", align="C")
     else:
         for g in gastos_excedidos:
-            pdf.set_text_color(200, 0, 0) # LISTADAS EM VERMELHO
+            pdf.set_text_color(200, 0, 0) # LISTADOS EM VERMELHO
             pdf.cell(60, 6, str(g['descricao'])[:35], 1)
             pdf.cell(20, 6, g['data_ref'], 1, align="C")
             pdf.cell(27, 6, fmt_br(g['v_p_ant']), 1, align="R")
@@ -154,6 +155,33 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
     pdf.output(filename)
     return filename
 
+# =================================================================
+# TITULO: LOGICA DE ENVIO PARA WHATSAPP (EVOLUTION API)
+# ESTE CODIGO ESTA PRONTO PARA USO, MAS COMENTADO POR SEGURANÇA
+# =================================================================
+#def enviar_whatsapp_evolution(numero, caminho_arquivo):
+#    if not EVOLUTION_API_URL or not EVOLUTION_API_KEY:
+#        return
+#    
+#    url = f"{EVOLUTION_API_URL}/message/sendMedia/instancia_orcas"
+#    headers = {"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
+#    
+#    try:
+#        with open(caminho_arquivo, "rb") as f:
+#            import base64
+#            encoded_pdf = base64.b64encode(f.read()).decode('utf-8')
+#
+#        payload = {
+#            "number": numero,
+#            "media": f"data:application/pdf;base64,{encoded_pdf}",
+#            "mediatype": "document",
+#            "caption": "📊 Seu ORCAS DAILY REPORT está pronto!",
+#            "fileName": "ORCAS_DAILY_REPORT.pdf"
+#        }
+#        requests.post(url, json=payload, headers=headers)
+#    except Exception as e:
+#        print(f"Erro ao enviar WhatsApp para {numero}: {e}")
+
 def enviar_email_orcas(email_destino, caminho_arquivo, usuario_nome):
     print(f"DEBUG: Tentando enviar e-mail para {email_destino}...")
     if not SMTP_SERVER or not SMTP_USER or not SMTP_PASS:
@@ -168,24 +196,21 @@ def enviar_email_orcas(email_destino, caminho_arquivo, usuario_nome):
     corpo = f"Olá {usuario_nome},\n\nSegue em anexo o seu ORCAS DAILY REPORT com a visão macro da sua saúde financeira e agenda de hoje."
     msg.attach(MIMEText(corpo, 'plain'))
 
-    try:
-        with open(caminho_arquivo, "rb") as attachment:
-            part = MIMEBase('application', 'octet-stream')
-            part.set_payload(attachment.read())
-            encoders.encode_base64(part)
-            part.add_header('Content-Disposition', f"attachment; filename=ORCAS_DAILY_REPORT.pdf")
-            msg.attach(part)
+    with open(caminho_arquivo, "rb") as attachment:
+        part = MIMEBase('application', 'octet-stream')
+        part.set_payload(attachment.read())
+        encoders.encode_base64(part)
+        part.add_header('Content-Disposition', f"attachment; filename=ORCAS_DAILY_REPORT.pdf")
+        msg.attach(part)
 
-        # Ajuste para não travar: Timeout de 30s e Debug Level
-        server = smtplib.SMTP(SMTP_SERVER, int(SMTP_PORT), timeout=30)
-        server.set_debuglevel(1) 
+    try:
+        server = smtplib.SMTP(SMTP_SERVER, int(SMTP_PORT))
         server.starttls()
         server.login(SMTP_USER, SMTP_PASS)
         server.send_message(msg)
         server.quit()
-        print(f"SUCESSO: E-mail enviado para {email_destino}")
     except Exception as e:
-        print(f"ERRO AO ENVIAR E-MAIL: {e}")
+        print(f"Erro ao enviar E-mail para {email_destino}: {e}")
 
 def job_madrugada():
     if not URL or not KEY:
@@ -201,7 +226,7 @@ def job_madrugada():
     primeiro_dia_mes = hoje.replace(day=1)
     primeiro_dia_ano = hoje.replace(month=1, day=1)
     
-    # Referências para Mês Anterior (Item 7)
+    # Datas para cálculo de mês anterior (Item 7)
     ultimo_dia_mes_ant = primeiro_dia_mes - timedelta(days=1)
     primeiro_dia_mes_ant = ultimo_dia_mes_ant.replace(day=1)
     
@@ -217,6 +242,7 @@ def job_madrugada():
 
         if proximos.data:
             descricoes_unicas = set((x['descricao'], x['usuario_id']) for x in proximos.data)
+
             for desc, user_id in descricoes_unicas:
                 historico = supabase.table("lancamentos")\
                     .select("valor_real")\
@@ -230,6 +256,7 @@ def job_madrugada():
                     valores = [h['valor_real'] for h in historico.data if h['valor_real'] > 0]
                     if valores:
                         media_total = sum(valores) / len(valores)
+                        
                         supabase.table("lancamentos")\
                             .update({"valor_plan": round(float(media_total), 2)})\
                             .eq("descricao", desc)\
@@ -238,6 +265,7 @@ def job_madrugada():
                             .eq("status", "Planejado")\
                             .gte("data", hoje.strftime('%Y-%m-%d'))\
                             .execute()
+                        print(f"MÉDIA HISTÓRICA ATUALIZADA: {desc} -> R$ {media_total:.2f}")
 
         # --- 2. PROCESSAR RESÍDUOS ---
         residuos = supabase.table("lancamentos")\
@@ -253,6 +281,8 @@ def job_madrugada():
             sobra = valor_p - valor_r
             
             if sobra > 0:
+                regra = item['regra_parcial']
+                
                 proximo = supabase.table("lancamentos")\
                     .select("id, valor_plan")\
                     .eq("descricao", item['descricao'])\
@@ -262,12 +292,18 @@ def job_madrugada():
                     .limit(1)\
                     .execute()
 
-                if "Adicione a diferença" in item['regra_parcial'] and proximo.data:
-                    novo_v = float(proximo.data[0]['valor_plan']) + sobra
-                    supabase.table("lancamentos").update({"valor_plan": round(novo_v, 2)}).eq("id", proximo.data[0]['id']).execute()
-                elif "Copia a diferença" in item['regra_parcial']:
+                if "Adicione a diferença" in regra:
                     if proximo.data:
-                        supabase.table("lancamentos").update({"valor_plan": round(sobra, 2)}).eq("id", proximo.data[0]['id']).execute()
+                        novo_v = float(proximo.data[0]['valor_plan']) + sobra
+                        supabase.table("lancamentos")\
+                            .update({"valor_plan": round(novo_v, 2)}).eq("id", proximo.data[0]['id']).execute()
+                        print(f"RESÍDUO ADICIONADO: {item['descricao']} (+ R$ {sobra:.2f})")
+
+                elif "Copia a diferença" in regra:
+                    if proximo.data:
+                        supabase.table("lancamentos")\
+                            .update({"valor_plan": round(sobra, 2)}).eq("id", proximo.data[0]['id']).execute()
+                        print(f"RESÍDUO COPIADO (Substituição): {item['descricao']} (R$ {sobra:.2f} transferido)")
                     else:
                         novo_item = item.copy()
                         novo_item.pop('id', None)
@@ -275,6 +311,7 @@ def job_madrugada():
                         novo_item['valor_plan'] = round(sobra, 2)
                         novo_item['valor_real'] = 0.0
                         supabase.table("lancamentos").insert(novo_item).execute()
+                        print(f"RESÍDUO COPIADO (Criação): {item['descricao']} (R$ {sobra:.2f} criado para hoje)")
 
         # --- 3. GERAÇÃO E ENVIO DE RELATÓRIO PDF ---
         config_envios = supabase.table("config_projetos").select("usuario_id, projeto_id, zap_ativo, email_ativo").execute()
@@ -285,72 +322,101 @@ def job_madrugada():
                 
                 if res_user.data:
                     perfil = res_user.data[0]
-                    nome_usuario = perfil.get('nome', "Usuario")
-                    nome_plano = cfg.get('projeto_id', "Geral")
+                    nome_usuario = perfil.get('nome') if perfil.get('nome') else "Usuario"
+                    nome_plano = cfg.get('projeto_id', "Geral") # 5) Obtendo o plano
                     
-                    raw_data = supabase.table("lancamentos").select("*")\
+                    # BUSCA TODOS OS DADOS PARA CALCULOS MACRO E ALERTAS
+                    all_data = supabase.table("lancamentos").select("tipo, valor_plan, valor_real, data, parcial_real, permite_parcial, descricao, parcial_data")\
                         .eq("usuario_id", cfg['usuario_id']).eq("projeto_id", cfg['projeto_id']).execute()
-                    all_lancs = raw_data.data if raw_data.data else []
+                    
+                    if not all_data.data:
+                        # 1) Relatório gerado independente de ter lançamentos
+                        analise_macro = {
+                            "plano_hoje": {"e_p":0,"e_r":0,"s_p":0,"s_r":0, "start":"-", "end":"-"},
+                            "plano_total": {"e_p":0,"e_r":0,"s_p":0,"s_r":0, "start":"-", "end":"-"},
+                            "mes_hoje": {"e_p":0,"e_r":0,"s_p":0,"s_r":0, "start":"-", "end":"-"},
+                            "mes_total": {"e_p":0,"e_r":0,"s_p":0,"s_r":0, "start":"-", "end":"-"},
+                            "ano_hoje": {"e_p":0,"e_r":0,"s_p":0,"s_r":0, "start":"-", "end":"-"},
+                            "ano_total": {"e_p":0,"e_r":0,"s_p":0,"s_r":0, "start":"-", "end":"-"}
+                        }
+                        gastos_excedidos = []
+                        resumo_ontem = {"data": ontem.strftime('%d/%m/%Y'), "total_p": 0, "total_r": 0}
+                        dados_hoje = []
+                    else:
+                        # Obter limites reais do plano
+                        datas_plan = [x['data'] for x in all_data.data]
+                        plan_ini = datetime.strptime(min(datas_plan), '%Y-%m-%d').date()
+                        plan_fim = datetime.strptime(max(datas_plan), '%Y-%m-%d').date()
 
-                    # Datas do Plano para Tabela 1
-                    plan_ini_str = min([x['data'] for x in all_lancs]) if all_lancs else hoje.strftime('%Y-%m-%d')
-                    plan_ini = datetime.strptime(plan_ini_str, '%Y-%m-%d').date()
-                    plan_fim_str = max([x['data'] for x in all_lancs]) if all_lancs else hoje.strftime('%Y-%m-%d')
+                        def calc_periodo(start_date=None, end_date=None):
+                            subset = all_data.data
+                            if start_date: subset = [x for x in subset if x['data'] >= start_date.strftime('%Y-%m-%d')]
+                            if end_date: subset = [x for x in subset if x['data'] <= end_date.strftime('%Y-%m-%d')]
+                            
+                            return {
+                                "e_p": sum([x['valor_plan'] or 0 for x in subset if x['tipo'] == 'Entrada']),
+                                "e_r": sum([x['valor_real'] or 0 for x in subset if x['tipo'] == 'Entrada']),
+                                "s_p": sum([x['valor_plan'] or 0 for x in subset if x['tipo'] == 'Saída']),
+                                "s_r": sum([x['valor_real'] or 0 for x in subset if x['tipo'] == 'Saída']),
+                                "start": start_date.strftime('%d/%m/%Y') if start_date else plan_ini.strftime('%d/%m/%Y'),
+                                "end": end_date.strftime('%d/%m/%Y') if end_date else plan_fim.strftime('%d/%m/%Y')
+                            }
 
-                    def calc_periodo(sd, ed):
-                        subset = [x for x in all_lancs if (not sd or x['data'] >= sd.strftime('%Y-%m-%d')) and (not ed or x['data'] <= ed.strftime('%Y-%m-%d'))]
-                        return {
-                            "e_p": sum([x['valor_plan'] or 0 for x in subset if x['tipo'] == 'Entrada']),
-                            "e_r": sum([x['valor_real'] or 0 for x in subset if x['tipo'] == 'Entrada']),
-                            "s_p": sum([x['valor_plan'] or 0 for x in subset if x['tipo'] == 'Saída']),
-                            "s_r": sum([x['valor_real'] or 0 for x in subset if x['tipo'] == 'Saída']),
-                            "start": sd.strftime('%d/%m/%Y') if sd else plan_ini.strftime('%d/%m/%Y'),
-                            "end": ed.strftime('%d/%m/%Y') if ed else plan_fim_str.split('-')[2]+'/'+plan_fim_str.split('-')[1]+'/'+plan_fim_str.split('-')[0]
+                        analise_macro = {
+                            "plano_hoje": calc_periodo(plan_ini, hoje),
+                            "plano_total": calc_periodo(plan_ini, plan_fim),
+                            "mes_hoje": calc_periodo(primeiro_dia_mes, hoje),
+                            "mes_total": calc_periodo(primeiro_dia_mes, (primeiro_dia_mes + timedelta(days=32)).replace(day=1) - timedelta(days=1)),
+                            "ano_hoje": calc_periodo(primeiro_dia_ano, hoje),
+                            "ano_total": calc_periodo(primeiro_dia_ano, primeiro_dia_ano.replace(month=12, day=31))
                         }
 
-                    analise_macro = {
-                        "plano_hoje": calc_periodo(plan_ini, hoje),
-                        "plano_total": calc_periodo(plan_ini, None),
-                        "mes_hoje": calc_periodo(primeiro_dia_mes, hoje),
-                        "mes_total": calc_periodo(primeiro_dia_mes, primeiro_dia_mes.replace(day=28) + timedelta(days=4)),
-                        "ano_hoje": calc_periodo(primeiro_dia_ano, hoje),
-                        "ano_total": calc_periodo(primeiro_dia_ano, primeiro_dia_ano.replace(month=12, day=31))
-                    }
-
-                    # 7) LÓGICA DE GASTOS EXCEDIDOS COMPARATIVO
-                    alertas_excedidos = []
-                    atu_l = [x for x in all_lancs if x['data'] >= primeiro_dia_mes.strftime('%Y-%m-%d') and x['data'] <= hoje.strftime('%Y-%m-%d') and x['tipo'] == 'Saída']
-                    ant_l = [x for x in all_lancs if x['data'] >= primeiro_dia_mes_ant.strftime('%Y-%m-%d') and x['data'] <= ultimo_dia_mes_ant.strftime('%Y-%m-%d') and x['tipo'] == 'Saída']
-                    
-                    for desc in set([x['descricao'] for x in atu_l] + [x['descricao'] for x in ant_l]):
-                        atu_items = [x for x in atu_l if x['descricao'] == desc]
-                        vpa_atu = sum([x['valor_plan'] or 0 for x in atu_items])
-                        vra_atu = sum([(x['parcial_real'] if x.get('permite_parcial') else x['valor_real']) or 0 for x in atu_items])
+                        # 7) LÓGICA DE GASTOS EXCEDIDOS COMPARATIVO (Mês Anterior + Atual)
+                        gastos_excedidos = []
+                        mes_atual_set = [x for x in all_data.data if x['data'] >= primeiro_dia_mes.strftime('%Y-%m-%d') and x['data'] <= hoje.strftime('%Y-%m-%d') and x['tipo'] == 'Saída']
+                        mes_ant_set = [x for x in all_data.data if x['data'] >= primeiro_dia_mes_ant.strftime('%Y-%m-%d') and x['data'] <= ultimo_dia_mes_ant.strftime('%Y-%m-%d') and x['tipo'] == 'Saída']
                         
-                        ant_items = [x for x in ant_l if x['descricao'] == desc]
-                        vpa_ant = sum([x['valor_plan'] or 0 for x in ant_items])
-                        vra_ant = sum([(x['parcial_real'] if x.get('permite_parcial') else x['valor_real']) or 0 for x in ant_items])
+                        descricoes = set([x['descricao'] for x in mes_atual_set] + [x['descricao'] for x in mes_ant_set])
                         
-                        if (vra_atu > vpa_atu and vpa_atu > 0) or (vra_ant > vpa_ant and vpa_ant > 0):
-                            parciais_d = [x.get('parcial_data') for x in atu_items if x.get('parcial_data')]
-                            final_d = max(parciais_d) if parciais_d else (atu_items[0]['data'] if atu_items else hoje.strftime('%Y-%m-%d'))
+                        for desc in descricoes:
+                            atu = [x for x in mes_atual_set if x['descricao'] == desc]
+                            v_p_atu = sum([x['valor_plan'] or 0 for x in atu])
+                            v_r_atu = sum([(x['parcial_real'] if x.get('permite_parcial') else x['valor_real']) or 0 for x in atu])
                             
-                            alertas_excedidos.append({
-                                'descricao': desc, 'data_ref': datetime.strptime(final_d, '%Y-%m-%d').strftime('%d/%m/%Y'),
-                                'v_p_ant': vpa_ant, 'v_r_ant': vra_ant, 'v_p_atu': vpa_atu, 'v_r_atu': vra_atu
-                            })
+                            ant = [x for x in mes_ant_set if x['descricao'] == desc]
+                            v_p_ant = sum([x['valor_plan'] or 0 for x in ant])
+                            v_r_ant = sum([(x['parcial_real'] if x.get('permite_parcial') else x['valor_real']) or 0 for x in ant])
+                            
+                            # Critério de exibição (Estourado ou existente nos dois meses para comparação)
+                            if (v_r_atu > v_p_atu and v_p_atu > 0) or (v_r_ant > v_p_ant and v_p_ant > 0):
+                                d_parc = [x['parcial_data'] for x in atu if x.get('parcial_data')]
+                                if not d_parc: d_parc = [x['data'] for x in atu]
+                                maior_dt = max(d_parc) if d_parc else hoje.strftime('%Y-%m-%d')
+                                
+                                gastos_excedidos.append({
+                                    'descricao': desc,
+                                    'data_ref': datetime.strptime(maior_dt, '%Y-%m-%d').strftime('%d/%m/%Y'),
+                                    'v_p_ant': v_p_ant, 'v_r_ant': v_r_ant,
+                                    'v_p_atu': v_p_atu, 'v_r_atu': v_r_atu
+                                })
 
-                    # 1) O RELATÓRIO DEVE SER GERADO INDEPENDENTE SE EXISTAM LANÇAMENTOS NO DIA OU NÃO
-                    dados_hoje = [x for x in all_lancs if x['data'] == hoje.strftime('%Y-%m-%d')]
-                    pdf_path = gerar_pdf_relatorio(nome_usuario, nome_plano, hoje, dados_hoje, None, analise_macro, alertas_excedidos)
+                        # DADOS ONTEM E HOJE
+                        dados_ontem = [x for x in all_data.data if x['data'] == ontem.strftime('%Y-%m-%d')]
+                        resumo_ontem = {"data": ontem.strftime('%d/%m/%Y'), "total_p": sum([x['valor_plan'] or 0 for x in dados_ontem]), "total_r": sum([x['valor_real'] or 0 for x in dados_ontem])}
+                        dados_hoje = [x for x in all_data.data if x['data'] == hoje.strftime('%Y-%m-%d')]
+
+                    # GERAR PDF
+                    pdf_path = gerar_pdf_relatorio(nome_usuario, nome_plano, hoje, dados_hoje, resumo_ontem, analise_macro, gastos_excedidos)
                     
                     if cfg.get('email_ativo') == 1 and perfil.get('email'):
                         enviar_email_orcas(perfil['email'], pdf_path, nome_usuario)
-                    
-                    if os.path.exists(pdf_path): os.remove(pdf_path)
+                        print(f"RELATÓRIO E-MAIL ENVIADO: {nome_usuario}")
+
+                    if os.path.exists(pdf_path):
+                        os.remove(pdf_path)
 
     except Exception as e:
-        print(f"ERRO CRÍTICO NA ROTINA: {e}")
+        print(f"ERRO DURANTE A EXECUÇÃO: {e}")
 
     print(f"--- ROTINA FINALIZADA ÀS {datetime.now(fuso_br).strftime('%H:%M:%S')} ---")
 
