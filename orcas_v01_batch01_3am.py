@@ -94,7 +94,12 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
     for label, key in periodos:
         d = analise_macro.get(key, {"e_p":0, "e_r":0, "s_p":0, "s_r":0, "start": "-", "end": "-"})
         pdf.cell(45, 6, label, 1)
+        
+        # ----------------------------------------------------------------------
+        # ADAPTAÇÃO SOLICITADA: Lógica de exibição das Datas (Início/Fim)
+        # ----------------------------------------------------------------------
         pdf.cell(35, 6, f"{d['start']} a {d['end']}", 1, align="C")
+        
         pdf.cell(27.5, 6, fmt_br(d['e_p']), 1, align="R")
         pdf.cell(27.5, 6, fmt_br(d['e_r']), 1, align="R")
         pdf.cell(27.5, 6, fmt_br(d['s_p']), 1, align="R")
