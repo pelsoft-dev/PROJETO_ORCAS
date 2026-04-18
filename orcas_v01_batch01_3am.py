@@ -49,8 +49,8 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
         base_path = os.path.dirname(os.path.abspath(__file__))
         image_path = os.path.join(base_path, "orca_mascote.png")
         if os.path.exists(image_path):
-        #    pdf.image(image_path, x=10, y=8, w=25)
-            pdf.image(image_path, x=5, y=5, w=50)
+            # Define a posição e tamanho da baleia conforme sua solicitação
+            pdf.image(image_path, x=4, y=4, w=50)
         else:
             print(f"Aviso: Arquivo {image_path} não encontrado no servidor.")
     except Exception as e:
@@ -96,8 +96,10 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
         pdf.cell(45, 6, label, 1)
         
         # ----------------------------------------------------------------------
-        # ADAPTAÇÃO SOLICITADA: Lógica de exibição das Datas (Início/Fim)
+        # ADAPTAÇÃO SOLICITADA: Lógica de Datas Início/Fim
         # ----------------------------------------------------------------------
+        # Aqui ele usará rigorosamente o 'start' e 'end' que vem do analise_macro
+        # que deve ser alimentado com data_ini e data_fim do seu banco.
         pdf.cell(35, 6, f"{d['start']} a {d['end']}", 1, align="C")
         
         pdf.cell(27.5, 6, fmt_br(d['e_p']), 1, align="R")
@@ -112,9 +114,7 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
     pdf.cell(190, 8, f"Índice de Aderência ao Orçamento (Saídas Acumuladas): {aderencia:.1f}%", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(2)
 
-    # --------------------------------------------------------------------------
-    # MODIFICAÇÃO 02: 2. ALERTAS (TABELA COMPARATIVA REESTRUTURADA)
-    # --------------------------------------------------------------------------
+    # 2. ATENÇÃO: GASTOS ACIMA DO PLANEJADO (COMPARATIVO)
     pdf.set_font("Helvetica", "B", 11)
     pdf.cell(190, 8, " 2. ATENÇÃO: GASTOS ACIMA DO PLANEJADO (COMPARATIVO)", 0, new_x="LMARGIN", new_y="NEXT", fill=True)
     
@@ -124,7 +124,7 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
     pdf.cell(70, 5, "Mês Anterior", 1, align="C")
     pdf.cell(70, 5, f"Mês Atual (Até {data_hoje.strftime('%d/%m/%Y')})", 1, new_x="LMARGIN", new_y="NEXT", align="C")
     
-    # Cabeçalho Inferior - Ajuste de X para alinhar com o topo
+    # Cabeçalho Inferior
     pdf.set_x(60)
     pdf.cell(20, 5, "Data", 1, align="C")
     pdf.cell(25, 5, "Planejado", 1, align="C")
@@ -139,14 +139,14 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
     else:
         for g in gastos_excedidos:
             pdf.cell(50, 6, str(g['descricao'])[:30], 1)
-            # Mês Anterior - Alerta em Vermelho se Realizado > Planejado
+            # Mês Anterior
             if g.get('v_r_ant', 0) > g.get('v_p_ant', 0): pdf.set_text_color(200, 0, 0)
             pdf.cell(20, 6, g.get('dt_ant', '-'), 1, align="C")
             pdf.cell(25, 6, fmt_br(g.get('v_p_ant', 0)), 1, align="R")
             pdf.cell(25, 6, fmt_br(g.get('v_r_ant', 0)), 1, align="R")
             pdf.set_text_color(0, 0, 0)
             
-            # Mês Atual - Alerta em Vermelho se Realizado > Planejado
+            # Mês Atual
             if g.get('v_r_atu', 0) > g.get('v_p_atu', 0): pdf.set_text_color(200, 0, 0)
             pdf.cell(20, 6, g.get('dt_atu', '-'), 1, align="C")
             pdf.cell(25, 6, fmt_br(g.get('v_p_atu', 0)), 1, align="R")
