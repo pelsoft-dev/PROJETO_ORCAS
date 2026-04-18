@@ -50,7 +50,7 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
         image_path = os.path.join(base_path, "orca_mascote.png")
         if os.path.exists(image_path):
         #    pdf.image(image_path, x=10, y=8, w=25)
-            pdf.image(image_path, x=25, y=20, w=75)
+            pdf.image(image_path, x=10, y=8, w=50)
         else:
             print(f"Aviso: Arquivo {image_path} não encontrado no servidor.")
     except Exception as e:
