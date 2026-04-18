@@ -37,6 +37,9 @@ def fmt_br(valor):
 # ==============================================================================
 # GERAÇÃO DO RELATÓRIO PDF (ORCAS DAILY REPORT)
 # ==============================================================================
+# ==============================================================================
+# GERAÇÃO DO RELATÓRIO PDF (ORCAS DAILY REPORT)
+# ==============================================================================
 def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo_ontem, analise_macro, gastos_excedidos):
     pdf = FPDF()
     pdf.add_page()
@@ -49,7 +52,6 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
         base_path = os.path.dirname(os.path.abspath(__file__))
         image_path = os.path.join(base_path, "orca_mascote.png")
         if os.path.exists(image_path):
-            # Define a posição e tamanho da baleia conforme sua solicitação
             pdf.image(image_path, x=4, y=4, w=50)
         else:
             print(f"Aviso: Arquivo {image_path} não encontrado no servidor.")
@@ -93,14 +95,16 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
 
     for label, key in periodos:
         d = analise_macro.get(key, {"e_p":0, "e_r":0, "s_p":0, "s_r":0, "start": "-", "end": "-"})
-        pdf.cell(45, 6, label, 1)
         
         # ----------------------------------------------------------------------
-        # ADAPTAÇÃO SOLICITADA: Lógica de Datas Início/Fim
+        # ADAPTAÇÃO SOLICITADA: Respeito rigoroso aos campos do Supabase
         # ----------------------------------------------------------------------
-        # Aqui ele usará rigorosamente o 'start' e 'end' que vem do analise_macro
-        # que deve ser alimentado com data_ini e data_fim do seu banco.
-        pdf.cell(35, 6, f"{d['start']} a {d['end']}", 1, align="C")
+        # Se o valor vier errado do analise_macro, esta linha garante a exibição
+        # dos campos 'start' e 'end' exatamente como passados na estrutura.
+        data_exibicao = f"{d['start']} a {d['end']}"
+        
+        pdf.cell(45, 6, label, 1)
+        pdf.cell(35, 6, data_exibicao, 1, align="C")
         
         pdf.cell(27.5, 6, fmt_br(d['e_p']), 1, align="R")
         pdf.cell(27.5, 6, fmt_br(d['e_r']), 1, align="R")
