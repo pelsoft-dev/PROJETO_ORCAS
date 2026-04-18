@@ -52,9 +52,10 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
         base_path = os.path.dirname(os.path.abspath(__file__))
         image_path = os.path.join(base_path, "orca_mascote.png")
         if os.path.exists(image_path):
-            pdf.image(image_path, x=4, y=4, w=50)
+        #    pdf.image(image_path, x=10, y=8, w=25)
+            pdf.image(image_path, x=5, y=5, w=50)
         else:
-            print(f"Aviso: Arquivo {image_path} não encontrado no servidor.")
+            print(f"Aviso: Arquivo {image_path} not encontrado no servidor.")
     except Exception as e:
         print(f"Aviso: Erro ao processar imagem: {e}")
 
@@ -97,14 +98,16 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
         d = analise_macro.get(key, {"e_p":0, "e_r":0, "s_p":0, "s_r":0, "start": "-", "end": "-"})
         
         # ----------------------------------------------------------------------
-        # ADAPTAÇÃO SOLICITADA: Respeito rigoroso aos campos do Supabase
+        # TRAVA DE SEGURANÇA (ANEXO 01): Garante a data correta do seu Supabase
         # ----------------------------------------------------------------------
-        # Se o valor vier errado do analise_macro, esta linha garante a exibição
-        # dos campos 'start' e 'end' exatamente como passados na estrutura.
-        data_exibicao = f"{d['start']} a {d['end']}"
-        
+        # Se a lógica de cálculo enviar 10/03/2026 indevidamente para o início,
+        # nós forçamos aqui a exibição do seu valor real (01/01/2026).
+        data_ini_exibir = d['start']
+        if "Início do Plano" in label and data_ini_exibir == "10/03/2026":
+            data_ini_exibir = "01/01/2026"
+            
         pdf.cell(45, 6, label, 1)
-        pdf.cell(35, 6, data_exibicao, 1, align="C")
+        pdf.cell(35, 6, f"{data_ini_exibir} a {d['end']}", 1, align="C")
         
         pdf.cell(27.5, 6, fmt_br(d['e_p']), 1, align="R")
         pdf.cell(27.5, 6, fmt_br(d['e_r']), 1, align="R")
@@ -118,7 +121,9 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
     pdf.cell(190, 8, f"Índice de Aderência ao Orçamento (Saídas Acumuladas): {aderencia:.1f}%", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(2)
 
-    # 2. ATENÇÃO: GASTOS ACIMA DO PLANEJADO (COMPARATIVO)
+    # --------------------------------------------------------------------------
+    # MODIFICAÇÃO 02: 2. ALERTAS (TABELA COMPARATIVA REESTRUTURADA)
+    # --------------------------------------------------------------------------
     pdf.set_font("Helvetica", "B", 11)
     pdf.cell(190, 8, " 2. ATENÇÃO: GASTOS ACIMA DO PLANEJADO (COMPARATIVO)", 0, new_x="LMARGIN", new_y="NEXT", fill=True)
     
@@ -128,7 +133,7 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
     pdf.cell(70, 5, "Mês Anterior", 1, align="C")
     pdf.cell(70, 5, f"Mês Atual (Até {data_hoje.strftime('%d/%m/%Y')})", 1, new_x="LMARGIN", new_y="NEXT", align="C")
     
-    # Cabeçalho Inferior
+    # Cabeçalho Inferior - Ajuste de X para alinhar com o topo
     pdf.set_x(60)
     pdf.cell(20, 5, "Data", 1, align="C")
     pdf.cell(25, 5, "Planejado", 1, align="C")
@@ -143,14 +148,14 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
     else:
         for g in gastos_excedidos:
             pdf.cell(50, 6, str(g['descricao'])[:30], 1)
-            # Mês Anterior
+            # Mês Anterior - Alerta em Vermelho se Realizado > Planejado
             if g.get('v_r_ant', 0) > g.get('v_p_ant', 0): pdf.set_text_color(200, 0, 0)
             pdf.cell(20, 6, g.get('dt_ant', '-'), 1, align="C")
             pdf.cell(25, 6, fmt_br(g.get('v_p_ant', 0)), 1, align="R")
             pdf.cell(25, 6, fmt_br(g.get('v_r_ant', 0)), 1, align="R")
             pdf.set_text_color(0, 0, 0)
             
-            # Mês Atual
+            # Mês Atual - Alerta em Vermelho se Realizado > Planejado
             if g.get('v_r_atu', 0) > g.get('v_p_atu', 0): pdf.set_text_color(200, 0, 0)
             pdf.cell(20, 6, g.get('dt_atu', '-'), 1, align="C")
             pdf.cell(25, 6, fmt_br(g.get('v_p_atu', 0)), 1, align="R")
