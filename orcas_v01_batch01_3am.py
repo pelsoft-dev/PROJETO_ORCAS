@@ -49,7 +49,8 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
         base_path = os.path.dirname(os.path.abspath(__file__))
         image_path = os.path.join(base_path, "orca_mascote.png")
         if os.path.exists(image_path):
-            pdf.image(image_path, x=10, y=8, w=25)
+        #    pdf.image(image_path, x=10, y=8, w=25)
+            pdf.image(image_path, x=25, y=20, w=75)
         else:
             print(f"Aviso: Arquivo {image_path} não encontrado no servidor.")
     except Exception as e:
@@ -61,7 +62,7 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
     
     # Subtítulo (Data e Plano)
     pdf.set_font("Helvetica", "", 10)
-    pdf.cell(190, 10, f"Usuário: {usuario_nome} | PLANO: {nome_plano} | Data: {data_hoje.strftime('%d/%m/%Y')}", new_x="LMARGIN", new_y="NEXT", align="C")
+    pdf.cell(190, 10, f"Usuário: {usuario_nome} | Plano: {nome_plano} | Data: {data_hoje.strftime('%d/%m/%Y')}", new_x="LMARGIN", new_y="NEXT", align="C")
     pdf.ln(5)
 
     # 1. SAÚDE GERAL DO PLANO (VISÃO ACUMULADA)
@@ -110,7 +111,7 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
     # MODIFICAÇÃO 02: 2. ALERTAS (TABELA COMPARATIVA REESTRUTURADA)
     # --------------------------------------------------------------------------
     pdf.set_font("Helvetica", "B", 11)
-    pdf.cell(190, 8, " 2. ALERTAS: GASTOS ACIMA DO PLANEJADO (COMPARATIVO)", 0, new_x="LMARGIN", new_y="NEXT", fill=True)
+    pdf.cell(190, 8, " 2. ATENÇÃO: GASTOS ACIMA DO PLANEJADO (COMPARATIVO)", 0, new_x="LMARGIN", new_y="NEXT", fill=True)
     
     # Cabeçalho Superior
     pdf.set_font("Helvetica", "B", 7)
