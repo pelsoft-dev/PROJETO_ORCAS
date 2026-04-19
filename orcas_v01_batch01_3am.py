@@ -144,8 +144,9 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
     if not gastos_excedidos:
         pdf.cell(190, 6, "Nenhum gasto acima do planejado identificado.", 1, new_x="LMARGIN", new_y="NEXT", align="C")
     else:
-        # LÓGICA DE TRATAMENTO DE PARCIAIS (OPÇÃO B) INTEGRADA
         for g in gastos_excedidos:
+            # LÓGICA DE TRATAMENTO: O Planejado vem do mestre (permite_parcial=True)
+            # O Realizado deve ser a somatória das parciais (parcial_real > 0)
             v_p_ant = float(g.get('v_p_ant') or 0)
             v_r_ant = float(g.get('v_r_ant') or 0)
             v_p_atu = float(g.get('v_p_atu') or 0)
@@ -167,7 +168,7 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
             pdf.set_font("Helvetica", "", 7)
             pdf.cell(50, 6, str(g['descricao'])[:30], 1)
             
-            # --- MÊS ANTERIOR: Formatação Independente ---
+            # --- BLOCO MÊS ANTERIOR (Vermelho+Negrito independente) ---
             if v_r_ant > v_p_ant:
                 pdf.set_text_color(200, 0, 0)
                 pdf.set_font("Helvetica", "B", 7)
@@ -179,7 +180,7 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
             pdf.cell(25, 6, fmt_br(v_p_ant), 1, align="R")
             pdf.cell(25, 6, fmt_br(v_r_ant), 1, align="R")
             
-            # --- MÊS ATUAL: Formatação Independente ---
+            # --- BLOCO MÊS ATUAL (Vermelho+Negrito independente) ---
             if v_r_atu > v_p_atu:
                 pdf.set_text_color(200, 0, 0)
                 pdf.set_font("Helvetica", "B", 7)
@@ -191,6 +192,7 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
             pdf.cell(25, 6, fmt_br(v_p_atu), 1, align="R")
             pdf.cell(25, 6, fmt_br(v_r_atu), 1, new_x="LMARGIN", new_y="NEXT", align="R")
             
+            # Reset final
             pdf.set_text_color(0, 0, 0)
             pdf.set_font("Helvetica", "", 7)
 
