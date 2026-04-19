@@ -122,7 +122,7 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
     pdf.ln(2)
 
     # --------------------------------------------------------------------------
-    # MODIFICAÇÃO 02: 2. ALERTAS (TABELA COMPARATIVA REESTRUTURADA)
+    # MODIFICAÇÃO 02: 2. ATENÇÃO: GASTOS ACIMA DO PLANEJADO (COMPARATIVO)
     # --------------------------------------------------------------------------
     pdf.set_font("Helvetica", "B", 11)
     pdf.cell(190, 8, " 2. ATENÇÃO: GASTOS ACIMA DO PLANEJADO (COMPARATIVO)", 0, new_x="LMARGIN", new_y="NEXT", fill=True)
@@ -148,19 +148,34 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
     else:
         for g in gastos_excedidos:
             pdf.cell(50, 6, str(g['descricao'])[:30], 1)
-            # Mês Anterior - Alerta em Vermelho se Realizado > Planejado
-            if g.get('v_r_ant', 0) > g.get('v_p_ant', 0): pdf.set_text_color(200, 0, 0)
+            
+            # --- LÓGICA MÊS ANTERIOR ---
+            # Se realizado > planejado: Vermelho + Negrito
+            if g.get('v_r_ant', 0) > g.get('v_p_ant', 0):
+                pdf.set_text_color(200, 0, 0)
+                pdf.set_font("Helvetica", "B", 7)
+            
             pdf.cell(20, 6, g.get('dt_ant', '-'), 1, align="C")
             pdf.cell(25, 6, fmt_br(g.get('v_p_ant', 0)), 1, align="R")
             pdf.cell(25, 6, fmt_br(g.get('v_r_ant', 0)), 1, align="R")
-            pdf.set_text_color(0, 0, 0)
             
-            # Mês Atual - Alerta em Vermelho se Realizado > Planejado
-            if g.get('v_r_atu', 0) > g.get('v_p_atu', 0): pdf.set_text_color(200, 0, 0)
+            # Reset para o padrão
+            pdf.set_text_color(0, 0, 0)
+            pdf.set_font("Helvetica", "", 7)
+            
+            # --- LÓGICA MÊS ATUAL ---
+            # Se realizado > planejado: Vermelho + Negrito
+            if g.get('v_r_atu', 0) > g.get('v_p_atu', 0):
+                pdf.set_text_color(200, 0, 0)
+                pdf.set_font("Helvetica", "B", 7)
+            
             pdf.cell(20, 6, g.get('dt_atu', '-'), 1, align="C")
             pdf.cell(25, 6, fmt_br(g.get('v_p_atu', 0)), 1, align="R")
             pdf.cell(25, 6, fmt_br(g.get('v_r_atu', 0)), 1, new_x="LMARGIN", new_y="NEXT", align="R")
+            
+            # Reset para o padrão
             pdf.set_text_color(0, 0, 0)
+            pdf.set_font("Helvetica", "", 7)
 
     pdf.ln(4)
 
