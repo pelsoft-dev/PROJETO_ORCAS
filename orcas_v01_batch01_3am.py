@@ -33,7 +33,48 @@ def fmt_br(valor):
         return f"{float(valor):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     except:
         return "0,00"
+# ==============================================================================
+# BLOCO DE CONSOLIDAÇÃO DE PARCIAIS (EXECUTAR ANTES DO PDF)
+# ==============================================================================
+# Este bloco garante que o 'v_r_atu' seja a soma de todas as parciais do mês,
+# mesmo que o lançamento mestre (permite_parcial=True) esteja com valor zero.
 
+for g in gastos_excedidos:
+    desc_alvo = g.get('descricao')
+    mes_atual = data_hoje.month
+    ano_atual = data_hoje.year
+    
+    # 1. ACESSA O SUPABASE PARA BUSCAR TODAS AS PARCIAIS DESTA DESCRIÇÃO
+    # Exatamente como a query SQL que você testou e validou.
+    try:
+        res_parciais = supabase.table("lancamentos") \
+            .select("parcial_real, parcial_data") \
+            .eq("projeto_id", nome_plano) \
+            .eq("descricao", desc_alvo) \
+            .gt("parcial_real", 0) \
+            .gte("data", f"{ano_atual}-{mes_atual:02d}-01") \
+            .lte("data", f"{ano_atual}-{mes_atual:02d}-31") \
+            .execute()
+
+        if res_parciais.data:
+            # 2. SOMA TODOS OS LANÇAMENTOS QUE SÃO PARCIAIS (> 0)
+            total_realizado = sum(float(item['parcial_real'] or 0) for item in res_parciais.data)
+            
+            # 3. PEGA A DATA DA ÚLTIMA PARCIAL LANÇADA
+            datas = [item['parcial_data'] for item in res_parciais.data if item['parcial_data']]
+            ultima_data = max(datas) if datas else g.get('dt_atu')
+
+            # 4. SOBRESCREVE OS VALORES NO DICIONÁRIO QUE VAI PARA O PDF
+            # Mantemos o v_p_atu (planejado) que veio do mestre, mas atualizamos o v_r (real)
+            g['v_r_atu'] = total_realizado
+            g['dt_atu'] = ultima_data
+            
+    except Exception as e:
+        print(f"Erro ao consolidar parciais para {desc_alvo}: {e}")
+
+# AGORA SIM, CHAMA O PDF COM OS DADOS CORRIGIDOS E SOMADOS
+# arquivo_pdf = gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, ...)
+# ==============================================================================
 # ==============================================================================
 # GERAÇÃO DO RELATÓRIO PDF (ORCAS DAILY REPORT)
 # ==============================================================================
