@@ -48,11 +48,9 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
     # MODIFICAÇÃO 01: INCLUIR A BALEIA COM CAMINHO ABSOLUTO
     # ---------------------------------------------------------
     try:
-        # Resolve o erro [Errno 2] do GitHub Actions usando caminho absoluto
         base_path = os.path.dirname(os.path.abspath(__file__))
         image_path = os.path.join(base_path, "orca_mascote.png")
         if os.path.exists(image_path):
-        #    pdf.image(image_path, x=10, y=8, w=25)
             pdf.image(image_path, x=5, y=5, w=50)
         else:
             print(f"Aviso: Arquivo {image_path} not encontrado no servidor.")
@@ -97,11 +95,7 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
     for label, key in periodos:
         d = analise_macro.get(key, {"e_p":0, "e_r":0, "s_p":0, "s_r":0, "start": "-", "end": "-"})
         
-        # ----------------------------------------------------------------------
-        # TRAVA DE SEGURANÇA (ANEXO 01): Garante a data correta do seu Supabase
-        # ----------------------------------------------------------------------
-        # Se a lógica de cálculo enviar 10/03/2026 indevidamente para o início,
-        # nós forçamos aqui a exibição do seu valor real (01/01/2026).
+        # TRAVA DE SEGURANÇA: Garante a data correta conforme solicitado
         data_ini_exibir = d['start']
         if "Início do Plano" in label and data_ini_exibir == "10/03/2026":
             data_ini_exibir = "01/01/2026"
@@ -127,13 +121,12 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
     pdf.set_font("Helvetica", "B", 11)
     pdf.cell(190, 8, " 2. ATENÇÃO: GASTOS ACIMA DO PLANEJADO (COMPARATIVO)", 0, new_x="LMARGIN", new_y="NEXT", fill=True)
     
-    # Cabeçalho Superior
+    # Cabeçalho da Tabela
     pdf.set_font("Helvetica", "B", 7)
     pdf.cell(50, 10, "Descrição", 1, align="C")
     pdf.cell(70, 5, "Mês Anterior", 1, align="C")
     pdf.cell(70, 5, f"Mês Atual (Até {data_hoje.strftime('%d/%m/%Y')})", 1, new_x="LMARGIN", new_y="NEXT", align="C")
     
-    # Cabeçalho Inferior
     pdf.set_x(60)
     pdf.cell(20, 5, "Data", 1, align="C")
     pdf.cell(25, 5, "Planejado", 1, align="C")
@@ -143,58 +136,58 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
     pdf.cell(25, 5, "Realizado", 1, new_x="LMARGIN", new_y="NEXT", align="C")
     
     pdf.set_font("Helvetica", "", 7)
+    
     if not gastos_excedidos:
         pdf.cell(190, 6, "Nenhum gasto acima do planejado identificado.", 1, new_x="LMARGIN", new_y="NEXT", align="C")
     else:
+        # Helper para formatação rigorosa DD/MM/AAAA
+        def formatar_data_br(dt):
+            if not dt or dt == '-': return '-'
+            if hasattr(dt, 'strftime'): return dt.strftime('%d/%m/%Y')
+            try:
+                from datetime import datetime
+                return datetime.strptime(str(dt), '%Y-%m-%d').strftime('%d/%m/%Y')
+            except: return str(dt)
+
         for g in gastos_excedidos:
-            # Recupera valores tratando possíveis Nones e garantindo tipos numéricos
+            # Lógica: O Realizado (v_r_ant e v_r_atu) já deve chegar aqui somado 
+            # (parcial_real) e a data (dt_ant e dt_atu) deve ser a mais recente.
             v_p_ant = float(g.get('v_p_ant') or 0)
             v_r_ant = float(g.get('v_r_ant') or 0)
             v_p_atu = float(g.get('v_p_atu') or 0)
             v_r_atu = float(g.get('v_r_atu') or 0)
 
-            # Formatação de Datas (Garantindo DD/MM/AAAA)
-            def formatar_data_br(dt):
-                if not dt or dt == '-': return '-'
-                if hasattr(dt, 'strftime'): return dt.strftime('%d/%m/%Y')
-                try:
-                    from datetime import datetime
-                    return datetime.strptime(str(dt), '%Y-%m-%d').strftime('%d/%m/%Y')
-                except: return str(dt)
-
-            dt_ant = formatar_data_br(g.get('dt_ant'))
-            dt_atu = formatar_data_br(g.get('dt_atu'))
-
-            # Linha da Descrição
             pdf.cell(50, 6, str(g['descricao'])[:30], 1)
             
-            # --- MÊS ANTERIOR ---
+            # --- MÊS ANTERIOR (Vermelho+Negrito se Realizado > Planejado) ---
             if v_r_ant > v_p_ant:
                 pdf.set_text_color(200, 0, 0)
                 pdf.set_font("Helvetica", "B", 7)
             
-            pdf.cell(20, 6, dt_ant, 1, align="C")
+            pdf.cell(20, 6, formatar_data_br(g.get('dt_ant')), 1, align="C")
             pdf.cell(25, 6, fmt_br(v_p_ant), 1, align="R")
             pdf.cell(25, 6, fmt_br(v_r_ant), 1, align="R")
             
+            # Reset para o estado padrão
             pdf.set_text_color(0, 0, 0)
             pdf.set_font("Helvetica", "", 7)
             
-            # --- MÊS ATUAL ---
+            # --- MÊS ATUAL (Vermelho+Negrito se Realizado > Planejado) ---
             if v_r_atu > v_p_atu:
                 pdf.set_text_color(200, 0, 0)
                 pdf.set_font("Helvetica", "B", 7)
             
-            pdf.cell(20, 6, dt_atu, 1, align="C")
+            pdf.cell(20, 6, formatar_data_br(g.get('dt_atu')), 1, align="C")
             pdf.cell(25, 6, fmt_br(v_p_atu), 1, align="R")
             pdf.cell(25, 6, fmt_br(v_r_atu), 1, new_x="LMARGIN", new_y="NEXT", align="R")
             
+            # Reset final
             pdf.set_text_color(0, 0, 0)
             pdf.set_font("Helvetica", "", 7)
 
     pdf.ln(4)
 
-    # 3. AGENDA DE HOJE
+    # 3. AGENDA FINANCEIRA DE HOJE
     pdf.set_fill_color(230, 240, 255)
     pdf.set_font("Helvetica", "B", 11)
     pdf.cell(190, 8, f" 3. AGENDA FINANCEIRA DE HOJE ({data_hoje.strftime('%d/%m/%Y')})", 0, new_x="LMARGIN", new_y="NEXT", fill=True)
