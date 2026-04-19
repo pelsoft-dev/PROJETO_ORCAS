@@ -95,7 +95,7 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
     for label, key in periodos:
         d = analise_macro.get(key, {"e_p":0, "e_r":0, "s_p":0, "s_r":0, "start": "-", "end": "-"})
         
-        # TRAVA DE SEGURANÇA: Garante a data correta conforme solicitado
+        # TRAVA DE SEGURANÇA: Garante a data 01/01/2026 para o início do plano
         data_ini_exibir = d['start']
         if "Início do Plano" in label and data_ini_exibir == "10/03/2026":
             data_ini_exibir = "01/01/2026"
@@ -121,12 +121,13 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
     pdf.set_font("Helvetica", "B", 11)
     pdf.cell(190, 8, " 2. ATENÇÃO: GASTOS ACIMA DO PLANEJADO (COMPARATIVO)", 0, new_x="LMARGIN", new_y="NEXT", fill=True)
     
-    # Cabeçalho da Tabela
+    # Cabeçalho Superior
     pdf.set_font("Helvetica", "B", 7)
     pdf.cell(50, 10, "Descrição", 1, align="C")
     pdf.cell(70, 5, "Mês Anterior", 1, align="C")
     pdf.cell(70, 5, f"Mês Atual (Até {data_hoje.strftime('%d/%m/%Y')})", 1, new_x="LMARGIN", new_y="NEXT", align="C")
     
+    # Cabeçalho Inferior
     pdf.set_x(60)
     pdf.cell(20, 5, "Data", 1, align="C")
     pdf.cell(25, 5, "Planejado", 1, align="C")
@@ -140,7 +141,7 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
     if not gastos_excedidos:
         pdf.cell(190, 6, "Nenhum gasto acima do planejado identificado.", 1, new_x="LMARGIN", new_y="NEXT", align="C")
     else:
-        # Helper para formatação rigorosa DD/MM/AAAA
+        # Helper para formatação de data DD/MM/AAAA
         def formatar_data_br(dt):
             if not dt or dt == '-': return '-'
             if hasattr(dt, 'strftime'): return dt.strftime('%d/%m/%Y')
@@ -150,8 +151,8 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
             except: return str(dt)
 
         for g in gastos_excedidos:
-            # Lógica: O Realizado (v_r_ant e v_r_atu) já deve chegar aqui somado 
-            # (parcial_real) e a data (dt_ant e dt_atu) deve ser a mais recente.
+            # Recuperação dos dados (assumindo que o dicionário g já vem com os 
+            # totais agregados de parcial_real e a parcial_data mais recente)
             v_p_ant = float(g.get('v_p_ant') or 0)
             v_r_ant = float(g.get('v_r_ant') or 0)
             v_p_atu = float(g.get('v_p_atu') or 0)
@@ -159,7 +160,7 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
 
             pdf.cell(50, 6, str(g['descricao'])[:30], 1)
             
-            # --- MÊS ANTERIOR (Vermelho+Negrito se Realizado > Planejado) ---
+            # --- MÊS ANTERIOR (VERMELHO+NEGRITO se Realizado > Planejado) ---
             if v_r_ant > v_p_ant:
                 pdf.set_text_color(200, 0, 0)
                 pdf.set_font("Helvetica", "B", 7)
@@ -168,11 +169,11 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
             pdf.cell(25, 6, fmt_br(v_p_ant), 1, align="R")
             pdf.cell(25, 6, fmt_br(v_r_ant), 1, align="R")
             
-            # Reset para o estado padrão
+            # Reset para o Mês Atual
             pdf.set_text_color(0, 0, 0)
             pdf.set_font("Helvetica", "", 7)
             
-            # --- MÊS ATUAL (Vermelho+Negrito se Realizado > Planejado) ---
+            # --- MÊS ATUAL (VERMELHO+NEGRITO se Realizado > Planejado) ---
             if v_r_atu > v_p_atu:
                 pdf.set_text_color(200, 0, 0)
                 pdf.set_font("Helvetica", "B", 7)
@@ -181,7 +182,7 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
             pdf.cell(25, 6, fmt_br(v_p_atu), 1, align="R")
             pdf.cell(25, 6, fmt_br(v_r_atu), 1, new_x="LMARGIN", new_y="NEXT", align="R")
             
-            # Reset final
+            # Reset final da linha
             pdf.set_text_color(0, 0, 0)
             pdf.set_font("Helvetica", "", 7)
 
