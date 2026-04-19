@@ -147,8 +147,9 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
         pdf.cell(190, 6, "Nenhum gasto acima do planejado identificado.", 1, new_x="LMARGIN", new_y="NEXT", align="C")
     else:
         for g in gastos_excedidos:
-            # LÓGICA DE REALIZADO: v_r_ant e v_r_atu devem ser as somas das parcial_real 
-            # se permite_parcial=true, e as datas devem ser as mais recentes.
+            # LÓGICA OPÇÃO B: O realizado (v_r) é a soma de todos os 'parcial_real > 0' 
+            # do mesmo mês e descrição. A data é a maior 'parcial_data' encontrada.
+            # Esta agregação deve ser preparada antes do envio para gastos_excedidos.
             v_p_ant = float(g.get('v_p_ant') or 0)
             v_r_ant = float(g.get('v_r_ant') or 0)
             v_p_atu = float(g.get('v_p_atu') or 0)
@@ -165,13 +166,12 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
             dt_ant = formatar_data_br(g.get('dt_ant'))
             dt_atu = formatar_data_br(g.get('dt_atu'))
 
-            # Descrição (Sempre padrão)
+            # Linha da Descrição
             pdf.set_text_color(0, 0, 0)
             pdf.set_font("Helvetica", "", 7)
             pdf.cell(50, 6, str(g['descricao'])[:30], 1)
             
-            # --- BLOCO MÊS ANTERIOR ---
-            # SOMENTE este bloco fica Vermelho+Negrito se estourar
+            # --- BLOCO MÊS ANTERIOR (VERMELHO+NEGRITO independente se estourado) ---
             if v_r_ant > v_p_ant:
                 pdf.set_text_color(200, 0, 0)
                 pdf.set_font("Helvetica", "B", 7)
@@ -183,8 +183,7 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
             pdf.cell(25, 6, fmt_br(v_p_ant), 1, align="R")
             pdf.cell(25, 6, fmt_br(v_r_ant), 1, align="R")
             
-            # --- BLOCO MÊS ATUAL ---
-            # SOMENTE este bloco fica Vermelho+Negrito se estourar
+            # --- BLOCO MÊS ATUAL (VERMELHO+NEGRITO independente se estourado) ---
             if v_r_atu > v_p_atu:
                 pdf.set_text_color(200, 0, 0)
                 pdf.set_font("Helvetica", "B", 7)
@@ -196,7 +195,7 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
             pdf.cell(25, 6, fmt_br(v_p_atu), 1, align="R")
             pdf.cell(25, 6, fmt_br(v_r_atu), 1, new_x="LMARGIN", new_y="NEXT", align="R")
             
-            # Reset final para garantir que a próxima linha comece limpa
+            # Reset final para a próxima linha
             pdf.set_text_color(0, 0, 0)
             pdf.set_font("Helvetica", "", 7)
 
