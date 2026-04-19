@@ -149,31 +149,35 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
         for g in gastos_excedidos:
             pdf.cell(50, 6, str(g['descricao'])[:30], 1)
             
-            # --- LÓGICA MÊS ANTERIOR ---
-            # Se realizado > planejado: Vermelho + Negrito
+            # --- LÓGICA MÊS ANTERIOR (Formato DD/MM/AAAA e Vermelho+Negrito) ---
             if g.get('v_r_ant', 0) > g.get('v_p_ant', 0):
                 pdf.set_text_color(200, 0, 0)
                 pdf.set_font("Helvetica", "B", 7)
             
-            pdf.cell(20, 6, g.get('dt_ant', '-'), 1, align="C")
+            dt_ant_raw = g.get('dt_ant', '-')
+            dt_ant_fmt = dt_ant_raw.strftime('%d/%m/%Y') if hasattr(dt_ant_raw, 'strftime') else str(dt_ant_raw)
+            
+            pdf.cell(20, 6, dt_ant_fmt, 1, align="C")
             pdf.cell(25, 6, fmt_br(g.get('v_p_ant', 0)), 1, align="R")
             pdf.cell(25, 6, fmt_br(g.get('v_r_ant', 0)), 1, align="R")
             
-            # Reset para o padrão
+            # Reset padrão
             pdf.set_text_color(0, 0, 0)
             pdf.set_font("Helvetica", "", 7)
             
-            # --- LÓGICA MÊS ATUAL ---
-            # Se realizado > planejado: Vermelho + Negrito
+            # --- LÓGICA MÊS ATUAL (Formato DD/MM/AAAA e Vermelho+Negrito) ---
             if g.get('v_r_atu', 0) > g.get('v_p_atu', 0):
                 pdf.set_text_color(200, 0, 0)
                 pdf.set_font("Helvetica", "B", 7)
             
-            pdf.cell(20, 6, g.get('dt_atu', '-'), 1, align="C")
+            dt_atu_raw = g.get('dt_atu', '-')
+            dt_atu_fmt = dt_atu_raw.strftime('%d/%m/%Y') if hasattr(dt_atu_raw, 'strftime') else str(dt_atu_raw)
+            
+            pdf.cell(20, 6, dt_atu_fmt, 1, align="C")
             pdf.cell(25, 6, fmt_br(g.get('v_p_atu', 0)), 1, align="R")
             pdf.cell(25, 6, fmt_br(g.get('v_r_atu', 0)), 1, new_x="LMARGIN", new_y="NEXT", align="R")
             
-            # Reset para o padrão
+            # Reset padrão
             pdf.set_text_color(0, 0, 0)
             pdf.set_font("Helvetica", "", 7)
 
