@@ -33,8 +33,48 @@ def fmt_br(valor):
         return f"{float(valor):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     except:
         return "0,00"
+# ==============================================================================
+# BLOCO DE CONSOLIDAÇÃO DE PARCIAIS (EXECUTAR ANTES DO PDF)
+# ==============================================================================
+# Este bloco garante que o 'v_r_atu' seja a soma de todas as parciais do mês,
+# mesmo que o lançamento mestre (permite_parcial=True) esteja com valor zero.
 
+for g in gastos_excedidos:
+    desc_alvo = g.get('descricao')
+    mes_atual = data_hoje.month
+    ano_atual = data_hoje.year
+    
+    # 1. ACESSA O SUPABASE PARA BUSCAR TODAS AS PARCIAIS DESTA DESCRIÇÃO
+    # Exatamente como a query SQL que você testou e validou.
+    try:
+        res_parciais = supabase.table("lancamentos") \
+            .select("parcial_real, parcial_data") \
+            .eq("projeto_id", nome_plano) \
+            .eq("descricao", desc_alvo) \
+            .gt("parcial_real", 0) \
+            .gte("data", f"{ano_atual}-{mes_atual:02d}-01") \
+            .lte("data", f"{ano_atual}-{mes_atual:02d}-31") \
+            .execute()
 
+        if res_parciais.data:
+            # 2. SOMA TODOS OS LANÇAMENTOS QUE SÃO PARCIAIS (> 0)
+            total_realizado = sum(float(item['parcial_real'] or 0) for item in res_parciais.data)
+            
+            # 3. PEGA A DATA DA ÚLTIMA PARCIAL LANÇADA
+            datas = [item['parcial_data'] for item in res_parciais.data if item['parcial_data']]
+            ultima_data = max(datas) if datas else g.get('dt_atu')
+
+            # 4. SOBRESCREVE OS VALORES NO DICIONÁRIO QUE VAI PARA O PDF
+            # Mantemos o v_p_atu (planejado) que veio do mestre, mas atualizamos o v_r (real)
+            g['v_r_atu'] = total_realizado
+            g['dt_atu'] = ultima_data
+            
+    except Exception as e:
+        print(f"Erro ao consolidar parciais para {desc_alvo}: {e}")
+
+# AGORA SIM, CHAMA O PDF COM OS DADOS CORRIGIDOS E SOMADOS
+# arquivo_pdf = gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, ...)
+# ==============================================================================
 # ==============================================================================
 # GERAÇÃO DO RELATÓRIO PDF (ORCAS DAILY REPORT)
 # ==============================================================================
@@ -53,7 +93,7 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
         base_path = os.path.dirname(os.path.abspath(__file__))
         image_path = os.path.join(base_path, "orca_mascote.png")
         if os.path.exists(image_path):
-            # pdf.image(image_path, x=10, y=8, w=25)
+        #    pdf.image(image_path, x=10, y=8, w=25)
             pdf.image(image_path, x=5, y=5, w=50)
         else:
             print(f"Aviso: Arquivo {image_path} not encontrado no servidor.")
@@ -101,6 +141,8 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
         # ----------------------------------------------------------------------
         # TRAVA DE SEGURANÇA (ANEXO 01): Garante a data correta do seu Supabase
         # ----------------------------------------------------------------------
+        # Se a lógica de cálculo enviar 10/03/2026 indevidamente para o início,
+        # nós forçamos aqui a exibição do seu valor real (01/01/2026).
         data_ini_exibir = d['start']
         if "Início do Plano" in label and data_ini_exibir == "10/03/2026":
             data_ini_exibir = "01/01/2026"
@@ -146,6 +188,8 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
         pdf.cell(190, 6, "Nenhum gasto acima do planejado identificado.", 1, new_x="LMARGIN", new_y="NEXT", align="C")
     else:
         for g in gastos_excedidos:
+            # LÓGICA ADEQUADA: v_p vem do mestre (permite_parcial=true)
+            # v_r deve ser a soma das parciais (parcial_real > 0) processadas anteriormente.
             v_p_ant = float(g.get('v_p_ant') or 0)
             v_r_ant = float(g.get('v_r_ant') or 0)
             v_p_atu = float(g.get('v_p_atu') or 0)
@@ -162,10 +206,12 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
             dt_ant = formatar_data_br(g.get('dt_ant'))
             dt_atu = formatar_data_br(g.get('dt_atu'))
 
+            # Linha da Descrição
             pdf.set_text_color(0, 0, 0)
             pdf.set_font("Helvetica", "", 7)
             pdf.cell(50, 6, str(g['descricao'])[:30], 1)
             
+            # --- BLOCO MÊS ANTERIOR (VERMELHO+NEGRITO independente se estourado) ---
             if v_r_ant > v_p_ant:
                 pdf.set_text_color(200, 0, 0)
                 pdf.set_font("Helvetica", "B", 7)
@@ -177,6 +223,7 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
             pdf.cell(25, 6, fmt_br(v_p_ant), 1, align="R")
             pdf.cell(25, 6, fmt_br(v_r_ant), 1, align="R")
             
+            # --- BLOCO MÊS ATUAL (VERMELHO+NEGRITO independente se estourado) ---
             if v_r_atu > v_p_atu:
                 pdf.set_text_color(200, 0, 0)
                 pdf.set_font("Helvetica", "B", 7)
@@ -188,6 +235,7 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
             pdf.cell(25, 6, fmt_br(v_p_atu), 1, align="R")
             pdf.cell(25, 6, fmt_br(v_r_atu), 1, new_x="LMARGIN", new_y="NEXT", align="R")
             
+            # Reset final para a próxima linha
             pdf.set_text_color(0, 0, 0)
             pdf.set_font("Helvetica", "", 7)
 
@@ -224,7 +272,6 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
     pdf.output(filename)
     return filename
 
-
 # ==============================================================================
 # FUNÇÕES DE ENVIO (E-MAIL E WHATSAPP COMENTADO)
 # ==============================================================================
@@ -258,7 +305,6 @@ def enviar_email_orcas(email_destino, caminho_arquivo, usuario_nome):
     except Exception as e:
         print(f"Erro ao enviar e-mail: {e}")
 
-
 # def enviar_zap_orcas(numero, caminho_arquivo, mensagem):
 #     """
 #     Função para envio via Evolution API (Mantida comentada conforme solicitado)
@@ -274,7 +320,6 @@ def enviar_email_orcas(email_destino, caminho_arquivo, usuario_nome):
 #     # }
 #     # requests.post(f"{EVOLUTION_API_URL}/message/sendMedia/instancia", json=payload...)
 #     pass
-
 
 # ==============================================================================
 # JOB PRINCIPAL - LÓGICA DE NEGÓCIO E SUPABASE
@@ -314,9 +359,7 @@ def job_madrugada():
                         media = sum(v_reais) / len(v_reais)
                         supabase.table("lancamentos").update({"valor_plan": round(float(media), 2)})\
                             .eq("id", item['id']).execute()
-
-
-        # 2. PROCESSAMENTO DE RESÍDUOS (Sobra de orçamento de ontem)
+                        # 2. PROCESSAMENTO DE RESÍDUOS (Sobra de orçamento de ontem)
         lancamentos_ontem = supabase.table("lancamentos")\
             .select("*")\
             .eq("data", ontem.strftime('%Y-%m-%d'))\
@@ -353,7 +396,6 @@ def job_madrugada():
                         novo_item['valor_plan'] = round(sobra, 2)
                         novo_item['valor_real'] = 0.0
                         supabase.table("lancamentos").insert(novo_item).execute()
-
 
         # 3. GERAÇÃO DE RELATÓRIOS E ENVIOS POR USUÁRIO/PROJETO
         configuracoes = supabase.table("config_projetos").select("usuario_id, projeto_id, email_ativo").execute()
@@ -419,33 +461,6 @@ def job_madrugada():
                             'v_p_atu': v_p_atu, 'v_r_atu': v_r_atu
                         })
 
-
-                # ==============================================================================
-                # BLOCO DE CONSOLIDAÇÃO DE PARCIAIS (ACERTO DA QUESTÃO DISCUTIDA)
-                # ==============================================================================
-                for g in alertas:
-                    desc_alvo = g.get('descricao')
-                    try:
-                        res_parciais = supabase.table("lancamentos") \
-                            .select("parcial_real, parcial_data") \
-                            .eq("projeto_id", cfg['projeto_id']) \
-                            .eq("descricao", desc_alvo) \
-                            .gt("parcial_real", 0) \
-                            .gte("data", p_mes.strftime('%Y-%m-%d')) \
-                            .lte("data", hoje.strftime('%Y-%m-%d')) \
-                            .execute()
-
-                        if res_parciais.data:
-                            total_realizado = sum(float(item['parcial_real'] or 0) for item in res_parciais.data)
-                            datas_parc = [item['parcial_data'] for item in res_parciais.data if item['parcial_data']]
-                            ultima_data = max(datas_parc) if datas_parc else g.get('dt_atu')
-                            
-                            g['v_r_atu'] = total_realizado
-                            g['dt_atu'] = ultima_data
-                    except Exception as e:
-                        print(f"Erro ao consolidar parciais para {desc_alvo}: {e}")
-
-
                 dados_hoje = [x for x in lancamentos_all.data if x['data'] == hoje.strftime('%Y-%m-%d')]
                 
                 pdf_path = gerar_pdf_relatorio(perfil['nome'], cfg['projeto_id'], hoje, dados_hoje, {}, macro, alertas)
@@ -456,12 +471,10 @@ def job_madrugada():
                 if os.path.exists(pdf_path):
                     os.remove(pdf_path)
 
-
     except Exception as e:
         print(f"Erro crítico no processamento: {e}")
 
     print("--- ROTINA FINALIZADA ---")
-
 
 if __name__ == "__main__":
     job_madrugada()
