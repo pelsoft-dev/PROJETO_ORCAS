@@ -496,13 +496,14 @@ def job_madrugada():
 
 
                 # dados_hoje = [x for x in lancamentos_all.data if x['data'] == hoje.strftime('%Y-%m-%d')]
-                # Ajuste da query para o Quadro 3: Pendentes até hoje + Realizados hoje
+                # Ajuste para o Quadro 3: Pendentes até hoje + Realizados hoje (Excluindo parciais)
                 dados_hoje = [
                     x for x in lancamentos_all.data 
-                    if (x['data'] <= hoje.strftime('%Y-%m-%d') and x['status'] == 'Planejado') or 
-                       (x['data'] == hoje.strftime('%Y-%m-%d') and x['status'] == 'Realizado')
+                    if ((x['data'] <= hoje.strftime('%Y-%m-%d') and x['status'] == 'Planejado') or 
+                        (x['data'] == hoje.strftime('%Y-%m-%d') and x['status'] == 'Realizado'))
+                    and x.get('permite_parcial') != True
                 ]
-                # Ordenação por data para garantir a lógica da linha divisória
+                # Ordenação cronológica para a linha divisória do PDF funcionar
                 dados_hoje.sort(key=lambda x: x['data'])
                 
                 pdf_path = gerar_pdf_relatorio(perfil['nome'], cfg['projeto_id'], hoje, dados_hoje, {}, macro, alertas)
