@@ -194,32 +194,58 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
     pdf.ln(4)
 
     # 3. AGENDA DE HOJE
+# 3. AGENDA FINANCEIRA DE HOJE (CONCILIAÇÃO E PENDÊNCIAS)
+    pdf.ln(2)
     pdf.set_fill_color(230, 240, 255)
     pdf.set_font("Helvetica", "B", 11)
     pdf.cell(190, 8, f" 3. AGENDA FINANCEIRA DE HOJE ({data_hoje.strftime('%d/%m/%Y')})", 0, new_x="LMARGIN", new_y="NEXT", fill=True)
     
-    pdf.set_font("Helvetica", "B", 9)
-    pdf.cell(90, 7, "Descrição", 1)
-    pdf.cell(30, 7, "Tipo", 1)
-    pdf.cell(35, 7, "Valor Previsto", 1)
-    pdf.cell(35, 7, "Status", 1, new_x="LMARGIN", new_y="NEXT")
+    # Cabeçalho do Quadro 3 (Ajustado para 7 colunas)
+    pdf.set_font("Helvetica", "B", 7)
+    pdf.cell(50, 7, "Descrição", 1, align="C")
+    pdf.cell(22, 7, "Data Venc.", 1, align="C")
+    pdf.cell(15, 7, "Tipo", 1, align="C")
+    pdf.cell(25, 7, "Valor Plan.", 1, align="C")
+    pdf.cell(25, 7, "Valor Real.", 1, align="C")
+    pdf.cell(33, 7, "Status", 1, align="C")
+    pdf.cell(20, 7, "Data", 1, new_x="LMARGIN", new_y="NEXT", align="C")
 
-    pdf.set_font("Helvetica", "", 9)
-    total_hoje = 0
+    pdf.set_font("Helvetica", "", 7)
+    total_e_pend = 0
+    total_s_pend = 0
+    
     if not agenda_hoje:
-        pdf.cell(190, 7, "Nenhum lançamento planejado para hoje.", 1, new_x="LMARGIN", new_y="NEXT", align="C")
+        pdf.cell(190, 7, "Nenhuma pendência ou lançamento para hoje.", 1, new_x="LMARGIN", new_y="NEXT", align="C")
     else:
-        for item in agenda_hoje:
-            pdf.cell(90, 7, str(item['descricao'])[:45], 1)
-            pdf.cell(30, 7, str(item['tipo']), 1)
-            pdf.cell(35, 7, f"R$ {fmt_br(item['valor_plan'])}", 1, align="R")
-            pdf.cell(35, 7, "Pendente", 1, new_x="LMARGIN", new_y="NEXT")
-            total_hoje += (item['valor_plan'] or 0)
+        for i, item in enumerate(agenda_hoje):
+            # Desenha linha divisória grossa se o item for de hoje e o anterior for passado
+            data_item = item.get('data')
+            if i > 0 and data_item == data_hoje.strftime('%Y-%m-%d') and agenda_hoje[i-1]['data'] < data_hoje.strftime('%Y-%m-%d'):
+                pdf.set_line_width(0.8)
+                pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+                pdf.set_line_width(0.2)
+
+            v_r = float(item.get('valor_real') or 0)
+            status_exibir = "Pendente" if v_r == 0 else "Realizado"
+            dt_venc = datetime.strptime(item['data'], '%Y-%m-%d').strftime('%d/%m/%Y')
+            dt_real = dt_venc if v_r > 0 else "" 
+
+            pdf.cell(50, 6, str(item['descricao'])[:30], 1)
+            pdf.cell(22, 6, dt_venc, 1, align="C")
+            pdf.cell(15, 6, str(item['tipo']), 1, align="C")
+            pdf.cell(25, 6, fmt_br(item['valor_plan']), 1, align="R")
+            pdf.cell(25, 6, fmt_br(v_r), 1, align="R")
+            pdf.cell(33, 6, status_exibir, 1, align="C")
+            pdf.cell(20, 6, dt_real, 1, new_x="LMARGIN", new_y="NEXT", align="C")
+
+            if v_r == 0:
+                if item['tipo'] == 'Entrada': total_e_pend += (item['valor_plan'] or 0)
+                else: total_s_pend += (item['valor_plan'] or 0)
 
     pdf.ln(2)
-    pdf.set_font("Helvetica", "B", 10)
-    pdf.cell(190, 8, f"TOTAL PARA HOJE: R$ {fmt_br(total_hoje)}", 0, new_x="LMARGIN", new_y="NEXT", align="R")
-
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.cell(190, 5, f"TOTAL DE ENTRADAS PENDENTES: R$ {fmt_br(total_e_pend)}", 0, new_x="LMARGIN", new_y="NEXT", align="R")
+    pdf.cell(190, 5, f"TOTAL DE SAÍDAS PENDENTES: R$ {fmt_br(total_s_pend)}", 0, new_x="LMARGIN", new_y="NEXT", align="R")
     filename = f"ORCAS_DAILY_REPORT_{usuario_nome}_{data_hoje.strftime('%Y%m%d')}.pdf"
     pdf.output(filename)
     return filename
@@ -469,7 +495,15 @@ def job_madrugada():
                         print(f"Erro ao consolidar parciais para {desc_alvo}: {e}")
 
 
-                dados_hoje = [x for x in lancamentos_all.data if x['data'] == hoje.strftime('%Y-%m-%d')]
+                # dados_hoje = [x for x in lancamentos_all.data if x['data'] == hoje.strftime('%Y-%m-%d')]
+                # Ajuste da query para o Quadro 3: Pendentes até hoje + Realizados hoje
+                dados_hoje = [
+                    x for x in lancamentos_all.data 
+                    if (x['data'] <= hoje.strftime('%Y-%m-%d') and x['status'] == 'Planejado') or 
+                       (x['data'] == hoje.strftime('%Y-%m-%d') and x['status'] == 'Realizado')
+                ]
+                # Ordenação por data para garantir a lógica da linha divisória
+                dados_hoje.sort(key=lambda x: x['data'])
                 
                 pdf_path = gerar_pdf_relatorio(perfil['nome'], cfg['projeto_id'], hoje, dados_hoje, {}, macro, alertas)
                 
