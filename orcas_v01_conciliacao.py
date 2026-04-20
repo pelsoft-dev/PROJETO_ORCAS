@@ -8,29 +8,26 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
     """
     st.markdown(f'<div class="titulo-tela">Conciliação: {st.session_state.projeto_ativo}</div>', unsafe_allow_html=True)
     
-    # INJEÇÃO DE CSS RESTRITA PARA CORREÇÃO DE ALTURAS E ALINHAMENTO
+    # INJEÇÃO DE CSS LOCALIZADA - NÃO AFETA A NAVEGAÇÃO DO SISTEMA
     st.markdown("""
         <style>
-        /* Redução de altura das linhas para layout compacto */
-        [data-testid="stVerticalBlock"] {
-            gap: 0rem !important;
+        /* Redução de altura APENAS para os elementos dentro da conciliação */
+        .block-container {
+            padding-top: 2rem !important;
         }
-        .stElementContainer {
-            margin-bottom: -1.4rem !important;
-        }
-        /* Ajuste do divisor */
-        hr {
-            margin-top: 0.5rem !important;
-            margin-bottom: 0.5rem !important;
-        }
-        /* Alinhamento dos labels dos toggles para evitar quebra de texto */
+        /* Ajuste fino dos labels dos toggles */
         [data-testid="stWidgetLabel"] p {
             font-size: 0.85rem !important;
             white-space: nowrap !important;
         }
-        /* Força a coluna dos toggles a alinhar o conteúdo à esquerda dentro do seu bloco */
-        [data-testid="column"] > div {
-            align-items: flex-start !important;
+        /* Estilização para reduzir o espaço entre as linhas de dados */
+        .stMarkdown div p {
+            margin-bottom: 0px !important;
+        }
+        /* Mantém o divisor discreto */
+        hr {
+            margin-top: 0.5rem !important;
+            margin-bottom: 0.5rem !important;
         }
         </style>
     """, unsafe_allow_html=True)
@@ -39,7 +36,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
     ini_mes_c = hoje_c.replace(day=1)
     limite_c = hoje_c - timedelta(days=3)
 
-    # LINHA DE COMANDO - AJUSTE DE COLUNAS [4, 3] PARA PUXAR TOGGLES PARA A ESQUERDA
+    # LINHA DE COMANDO - Proporção [4, 3] para acomodar os toggles à direita com folga
     col_aviso, col_tog = st.columns([4, 3])
     
     col_aviso.markdown('<div style="font-size: 0.8rem; color: #555; margin-top: 10px;">📱🔄 SE USANDO O CELULAR, TRABALHE COM ELE NA HORIZONTAL</div>', unsafe_allow_html=True)
@@ -84,11 +81,11 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
     if not df_c.empty:
         df_c['dt_obj'] = pd.to_datetime(df_c['data']).dt.date
         
-        # LÓGICA DE FILTRO: LISTAR TUDO DO MÊS (EXCLUINDO PARCIAIS > 0) OU CONCILIAÇÃO PADRÃO
+        # LÓGICA DE FILTRO: LISTAR TUDO DO MÊS (EXCLUINDO PARCIAIS) OU CONCILIAÇÃO PADRÃO
         if st.session_state.listar_todos_mes:
             proximo_mes = (ini_mes_c + timedelta(days=32)).replace(day=1)
             fim_mes_c = proximo_mes - timedelta(days=1)
-            # REGRA: registros com parcial_real > 0 NÃO devem ser listados
+            # REGRA: parcial_real > 0 NÃO devem ser listados
             df_f = df_c[(df_c['dt_obj'] >= ini_mes_c) & (df_c['dt_obj'] <= fim_mes_c) & (df_c['parcial_real'] == 0)].copy()
         else:
             df_f = df_c[(df_c['dt_obj'] <= hoje_c) & ((df_c['status'] == 'Planejado') | ((df_c['status'] == 'Realizado') & (df_c['dt_obj'] >= limite_c)) | ((df_c['valor_plan'] == 0) & (df_c['valor_real'] > 0)))].copy()
@@ -111,13 +108,13 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
             v_acumulado_desc = df[df['descricao'] == row['descricao']]['parcial_real'].sum()
             cor_txt = "red" if (row['valor_plan'] > 0 and v_acumulado_desc > row['valor_plan']) else "black"
             
-            # ESPAÇAMENTO REDUZIDO PELA METADE
+            # ESPAÇAMENTO NEGATIVO PARA REDUZIR ALTURA CONFORME SOLICITADO
             st.markdown('<div style="margin-bottom: -32px;"></div>', unsafe_allow_html=True)
             
             # COLUNAS DO ITEM - LARGURAS: [2.2, 0.5, 1.2, 1.2, 1.2, 0.5]
             c1, c2, c3, c4, c5, c6 = st.columns([2.2, 0.5, 1.2, 1.2, 1.2, 0.5])
             
-            c1.markdown(f"<span style='color:{cor_txt}'>{row['dt_obj'].strftime('%d/%m/%Y')} - {row['descricao']}</span>", unsafe_allow_html=True)
+            c1.markdown(f"<span style='color:{cor_txt}; font-weight: 500;'>{row['dt_obj'].strftime('%d/%m/%Y')} - {row['descricao']}</span>", unsafe_allow_html=True)
             cor_tipo = 'red' if row['tipo'] == 'Saída' else 'blue'
             c2.markdown(f"<span style='color:{cor_tipo}'>{row['tipo'][0]}</span>", unsafe_allow_html=True)
             
