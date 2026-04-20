@@ -54,8 +54,12 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
     # A mensagem aparece apenas se o layout for detectado como móvel (ajuste de colunas)
     col_aviso.markdown('<div class="msg-orientacao">📱🔄 SE USANDO O CELULAR, TRABALHE COM ELE NA HORIZONTAL</div>', unsafe_allow_html=True)
     
+    # Toggles de Controle
     abrir_sem_plan = col_tog.toggle("Lançar sem Planejamento", value=st.session_state.get('abrir_sem_plan', False))
     st.session_state.abrir_sem_plan = abrir_sem_plan
+    
+    listar_todos_mes = col_tog.toggle("Listar todos Lançamentos do mês", value=st.session_state.get('listar_todos_mes', False))
+    st.session_state.listar_todos_mes = listar_todos_mes
     
     st.divider()
 
@@ -67,7 +71,8 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
         
         with cols_sp[3]:
             st.markdown('<div style="margin-top: 28px;"></div>', unsafe_allow_html=True)
-            btn_confirmar = st.button("Confirmar", key="btn_sp_conf", use_container_width=True)
+            # NOME DO BOTÃO ALTERADO PARA OK
+            btn_confirmar = st.button("OK", key="btn_sp_conf", use_container_width=True)
         
         if btn_confirmar:
             v_sp = parse_moeda(sp_valor)
@@ -89,13 +94,21 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
     df_c = df.copy()
     if not df_c.empty:
         df_c['dt_obj'] = pd.to_datetime(df_c['data']).dt.date
-        df_f = df_c[(df_c['dt_obj'] <= hoje_c) & ((df_c['status'] == 'Planejado') | ((df_c['status'] == 'Realizado') & (df_c['dt_obj'] >= limite_c)) | ((df_c['valor_plan'] == 0) & (df_c['valor_real'] > 0)))].copy()
+        
+        # LÓGICA DE FILTRO: LISTAR TUDO DO MÊS OU APENAS CONCILIAÇÃO PADRÃO
+        if st.session_state.listar_todos_mes:
+            proximo_mes = (ini_mes_c + timedelta(days=32)).replace(day=1)
+            fim_mes_c = proximo_mes - timedelta(days=1)
+            df_f = df_c[(df_c['dt_obj'] >= ini_mes_c) & (df_c['dt_obj'] <= fim_mes_c)].copy()
+        else:
+            df_f = df_c[(df_c['dt_obj'] <= hoje_c) & ((df_c['status'] == 'Planejado') | ((df_c['status'] == 'Realizado') & (df_c['dt_obj'] >= limite_c)) | ((df_c['valor_plan'] == 0) & (df_c['valor_real'] > 0)))].copy()
+        
         parciais_topo = df_f[(df_f['permite_parcial'] == True) & (df_f['dt_obj'] >= ini_mes_c)]
         demais_itens = df_f[~df_f.index.isin(parciais_topo.index)].sort_values('dt_obj', ascending=False)
         df_final_concilia = pd.concat([parciais_topo, demais_itens])
 
-        # Cabeçalho
-        h1, h2, h3, h4, h5, h6 = st.columns([2.5, 0.5, 1.2, 1.8, 1.8, 1.2])
+        # Cabeçalho - LARGURAS AJUSTADAS: [2.2, 0.5, 1.2, 1.2, 1.2, 0.5]
+        h1, h2, h3, h4, h5, h6 = st.columns([2.2, 0.5, 1.2, 1.2, 1.2, 0.5])
         h1.write("**Data - Descrição**")
         h2.write("**E/S**")
         h3.write("**V. Plan.**")
@@ -108,9 +121,11 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
             v_acumulado_desc = df[df['descricao'] == row['descricao']]['parcial_real'].sum()
             cor_txt = "red" if (row['valor_plan'] > 0 and v_acumulado_desc > row['valor_plan']) else "black"
             
-            # Ajuste de margem para evitar espaços excessivos
-            st.markdown('<div style="margin-bottom: -38px;"></div>', unsafe_allow_html=True)
-            c1, c2, c3, c4, c5, c6 = st.columns([2.5, 0.5, 1.2, 1.8, 1.8, 1.2])
+            # AJUSTE DE MARGEM REDUZIDO PELA METADE (-19px)
+            st.markdown('<div style="margin-bottom: -19px;"></div>', unsafe_allow_html=True)
+            
+            # COLUNAS DO ITEM
+            c1, c2, c3, c4, c5, c6 = st.columns([2.2, 0.5, 1.2, 1.2, 1.2, 0.5])
             
             c1.markdown(f"<span style='color:{cor_txt}'>{row['dt_obj'].strftime('%d/%m/%Y')} - {row['descricao']}</span>", unsafe_allow_html=True)
             cor_tipo = 'red' if row['tipo'] == 'Saída' else 'blue'
@@ -124,7 +139,8 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                 if v_key not in st.session_state: st.session_state[v_key] = 0
                 v_parc_in = c5.text_input("", key=f"p_{row['id']}_{st.session_state[v_key]}", value="0,00", label_visibility="collapsed")
                 
-                if c6.button("Confirmar", key=f"btn_p_{row['id']}", use_container_width=True):
+                # NOME DO BOTÃO ALTERADO PARA OK
+                if c6.button("OK", key=f"btn_p_{row['id']}", use_container_width=True):
                     v_dig = parse_moeda(v_parc_in)
                     if v_dig > 0:
                         supabase.table("lancamentos").insert({
@@ -144,7 +160,8 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                     c6.write("✅")
                 else:
                     v_norm_in = c4.text_input("", key=f"n_{row['id']}", value="0,00", label_visibility="collapsed")
-                    if c6.button("Confirmar", key=f"btn_n_{row['id']}", use_container_width=True):
+                    # NOME DO BOTÃO ALTERADO PARA OK
+                    if c6.button("OK", key=f"btn_n_{row['id']}", use_container_width=True):
                         v_para_gravar = parse_moeda(v_norm_in)
                         if v_para_gravar == 0: v_para_gravar = row['valor_plan']
                         supabase.table("lancamentos").update({"valor_real": v_para_gravar, "status": "Realizado"}).eq("id", row['id']).execute()

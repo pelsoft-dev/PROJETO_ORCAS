@@ -4,29 +4,67 @@ from datetime import datetime, timedelta
 
 def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moeda):
     """
-    Sub-rotina da Tela Conciliação - Mantida integralmente conforme lógica original de layout e filtros.
+    Sub-rotina da Tela Conciliação - Scroll Sincronizado via CSS Injection.
     """
     st.markdown(f'<div class="titulo-tela">Conciliação: {st.session_state.projeto_ativo}</div>', unsafe_allow_html=True)
     
+    # INJEÇÃO DE CSS DE ALTO RIGOR
+    # Força todos os blocos horizontais (st.columns) a não quebrarem e a terem scroll
+    st.markdown("""
+        <style>
+        /* Container principal da página para permitir o scroll do conjunto */
+        [data-testid="stVerticalBlock"] > [data-testid="stVerticalBlock"] {
+            overflow-x: auto !important;
+            display: block !important;
+            -webkit-overflow-scrolling: touch !important;
+        }
+        /* Força as colunas a manterem largura mínima e não empilharem */
+        [data-testid="stHorizontalBlock"] {
+            flex-wrap: nowrap !important;
+            min-width: 750px !important; /* Largura que garante tudo em linha */
+            margin-bottom: 0px !important;
+        }
+        /* Garante que os inputs não fiquem espremidos */
+        [data-testid="column"] {
+            flex-shrink: 0 !important;
+            min-width: 50px !important;
+        }
+        /* Largura específica para a primeira coluna (Data/Descrição) */
+        [data-testid="column"]:nth-child(1) {
+            min-width: 230px !important;
+        }
+        /* Estilização da mensagem de orientação */
+        .msg-orientacao {
+            font-size: 0.85rem;
+            color: #555;
+            display: flex;
+            align-items: center;
+            height: 100%;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
     hoje_c = datetime.now().date()
     ini_mes_c = hoje_c.replace(day=1)
     limite_c = hoje_c - timedelta(days=3)
 
-    # Toggle alinhado à direita
-    col_tit, col_tog = st.columns([5, 2])
+    # LINHA DE COMANDO COM MENSAGEM À ESQUERDA E TOGGLE À DIREITA
+    col_aviso, col_tog = st.columns([5, 2])
+    
+    # A mensagem aparece apenas se o layout for detectado como móvel (ajuste de colunas)
+    col_aviso.markdown('<div class="msg-orientacao">📱🔄 SE USANDO O CELULAR, TRABALHE COM ELE NA HORIZONTAL</div>', unsafe_allow_html=True)
+    
     abrir_sem_plan = col_tog.toggle("Lançar sem Planejamento", value=st.session_state.get('abrir_sem_plan', False))
     st.session_state.abrir_sem_plan = abrir_sem_plan
     
     st.divider()
 
-    # Alinhamento Horizontal Total dos campos com o botão Confirmar
     if st.session_state.abrir_sem_plan:
         cols_sp = st.columns([2.5, 1, 1.2, 1])
         sp_desc = cols_sp[0].text_input("Descrição", key="sp_desc", placeholder="Ex: Gasto Extra")
         sp_tipo = cols_sp[1].selectbox("E/S", ["Entrada", "Saída"], key="sp_tipo")
         sp_valor = cols_sp[2].text_input("Valor Real", key="sp_valor", value="0,00")
         
-        # Alinhamento vertical preciso do botão com os inputs
         with cols_sp[3]:
             st.markdown('<div style="margin-top: 28px;"></div>', unsafe_allow_html=True)
             btn_confirmar = st.button("Confirmar", key="btn_sp_conf", use_container_width=True)
@@ -41,11 +79,8 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                     "data": hoje_c.strftime('%Y-%m-%d'),
                     "data_vencimento": hoje_c.strftime('%Y-%m-%d'),
                     "tipo": sp_tipo,
-                    "valor_plan": 0,
-                    "valor_real": v_sp,
-                    "status": "Realizado",
-                    "parcial_real": 0,
-                    "permite_parcial": False
+                    "valor_plan": 0, "valor_real": v_sp,
+                    "status": "Realizado", "parcial_real": 0, "permite_parcial": False
                 }).execute()
                 st.session_state.abrir_sem_plan = False
                 st.rerun()
@@ -54,22 +89,12 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
     df_c = df.copy()
     if not df_c.empty:
         df_c['dt_obj'] = pd.to_datetime(df_c['data']).dt.date
-        
-        # Lógica de Filtro: Planejados passados, realizados recentes ou lançamentos diretos
-        df_f = df_c[
-            (df_c['dt_obj'] <= hoje_c) & 
-            (
-                (df_c['status'] == 'Planejado') | 
-                ((df_c['status'] == 'Realizado') & (df_c['dt_obj'] >= limite_c)) |
-                ((df_c['valor_plan'] == 0) & (df_c['valor_real'] > 0))
-            )
-        ].copy()
-
+        df_f = df_c[(df_c['dt_obj'] <= hoje_c) & ((df_c['status'] == 'Planejado') | ((df_c['status'] == 'Realizado') & (df_c['dt_obj'] >= limite_c)) | ((df_c['valor_plan'] == 0) & (df_c['valor_real'] > 0)))].copy()
         parciais_topo = df_f[(df_f['permite_parcial'] == True) & (df_f['dt_obj'] >= ini_mes_c)]
         demais_itens = df_f[~df_f.index.isin(parciais_topo.index)].sort_values('dt_obj', ascending=False)
         df_final_concilia = pd.concat([parciais_topo, demais_itens])
 
-        # Cabeçalho Compacto
+        # Cabeçalho
         h1, h2, h3, h4, h5, h6 = st.columns([2.5, 0.5, 1.2, 1.8, 1.8, 1.2])
         h1.write("**Data - Descrição**")
         h2.write("**E/S**")
@@ -83,6 +108,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
             v_acumulado_desc = df[df['descricao'] == row['descricao']]['parcial_real'].sum()
             cor_txt = "red" if (row['valor_plan'] > 0 and v_acumulado_desc > row['valor_plan']) else "black"
             
+            # Ajuste de margem para evitar espaços excessivos
             st.markdown('<div style="margin-bottom: -38px;"></div>', unsafe_allow_html=True)
             c1, c2, c3, c4, c5, c6 = st.columns([2.5, 0.5, 1.2, 1.8, 1.8, 1.2])
             
@@ -95,27 +121,19 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                 c4.markdown(f"<span style='color:{cor_txt}'>{format_moeda(v_acumulado_desc)}</span>", unsafe_allow_html=True)
                 
                 v_key = f"v_p_{row['id']}"
-                if v_key not in st.session_state:
-                    st.session_state[v_key] = 0
-                
+                if v_key not in st.session_state: st.session_state[v_key] = 0
                 v_parc_in = c5.text_input("", key=f"p_{row['id']}_{st.session_state[v_key]}", value="0,00", label_visibility="collapsed")
                 
-                if c6.button("Confirmar", key=f"btn_p_{row['id']}"):
+                if c6.button("Confirmar", key=f"btn_p_{row['id']}", use_container_width=True):
                     v_dig = parse_moeda(v_parc_in)
                     if v_dig > 0:
                         supabase.table("lancamentos").insert({
                             "projeto_id": str(st.session_state.projeto_ativo),
                             "usuario_id": str(ID_USUARIO_LOGADO), 
-                            "descricao": row['descricao'], 
-                            "data": ini_mes_c.strftime('%Y-%m-%d'), 
-                            "data_vencimento": ini_mes_c.strftime('%Y-%m-%d'), 
-                            "tipo": row['tipo'],
-                            "valor_plan": 0,
-                            "valor_real": 0,
-                            "status": "Realizado",
-                            "parcial_real": v_dig,
-                            "parcial_data": hoje_c.strftime('%Y-%m-%d'),
-                            "permite_parcial": False
+                            "descricao": row['descricao'], "data": ini_mes_c.strftime('%Y-%m-%d'), 
+                            "data_vencimento": ini_mes_c.strftime('%Y-%m-%d'), "tipo": row['tipo'],
+                            "valor_plan": 0, "valor_real": 0, "status": "Realizado",
+                            "parcial_real": v_dig, "parcial_data": hoje_c.strftime('%Y-%m-%d'), "permite_parcial": False
                         }).execute()
                         st.session_state[v_key] += 1
                         st.rerun()
@@ -126,15 +144,10 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                     c6.write("✅")
                 else:
                     v_norm_in = c4.text_input("", key=f"n_{row['id']}", value="0,00", label_visibility="collapsed")
-                    if c6.button("Confirmar", key=f"btn_n_{row['id']}"):
+                    if c6.button("Confirmar", key=f"btn_n_{row['id']}", use_container_width=True):
                         v_para_gravar = parse_moeda(v_norm_in)
-                        if v_para_gravar == 0:
-                            v_para_gravar = row['valor_plan']
-                            
-                        supabase.table("lancamentos").update({
-                            "valor_real": v_para_gravar, 
-                            "status": "Realizado"
-                        }).eq("id", row['id']).execute()
+                        if v_para_gravar == 0: v_para_gravar = row['valor_plan']
+                        supabase.table("lancamentos").update({"valor_real": v_para_gravar, "status": "Realizado"}).eq("id", row['id']).execute()
                         st.rerun()
             st.divider()
     else:
