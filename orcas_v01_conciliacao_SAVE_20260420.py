@@ -41,21 +41,6 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
             align-items: center;
             height: 100%;
         }
-        /* REDUÇÃO DE ALTURAS - AÇÃO SOLICITADA NO ANEXO */
-        [data-testid="stVerticalBlock"] { gap: 0rem !important; }
-        .stElementContainer { margin-bottom: -1.6rem !important; }
-        hr { margin-top: 0.5rem !important; margin-bottom: 0.5rem !important; 
-        }
-        /* Garante que os toggles ocupem o espaço disponível da coluna sem quebrar o texto */
-        [data-testid="column"]:nth-of-type(2) [data-testid="stWidgetLabel"] {
-            min-width: 250px !important; /* Ajuste este valor se o texto ainda quebrar */
-            text-align: left !important;
-        }
-        
-        /* Remove espaços internos da coluna dos toggles para ganhar área útil */
-        [data-testid="column"]:nth-of-type(2) {
-            padding-left: 0px !important;
-        }                        
         </style>
     """, unsafe_allow_html=True)
 
@@ -64,7 +49,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
     limite_c = hoje_c - timedelta(days=3)
 
     # LINHA DE COMANDO COM MENSAGEM À ESQUERDA E TOGGLE À DIREITA
-    col_aviso, col_tog = st.columns([4, 3])
+    col_aviso, col_tog = st.columns([5, 2])
     
     # A mensagem aparece apenas se o layout for detectado como móvel (ajuste de colunas)
     col_aviso.markdown('<div class="msg-orientacao">📱🔄 SE USANDO O CELULAR, TRABALHE COM ELE NA HORIZONTAL</div>', unsafe_allow_html=True)
@@ -114,9 +99,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
         if st.session_state.listar_todos_mes:
             proximo_mes = (ini_mes_c + timedelta(days=32)).replace(day=1)
             fim_mes_c = proximo_mes - timedelta(days=1)
-            #df_f = df_c[(df_c['dt_obj'] >= ini_mes_c) & (df_c['dt_obj'] <= fim_mes_c)].copy()
-            # Regra: parcial_real > 0 NÃO deve ser listado nesta função
-            df_f = df_c[(df_c['dt_obj'] >= ini_mes_c) & (df_c['dt_obj'] <= fim_mes_c) & (df_c['parcial_real'] == 0)].copy()
+            df_f = df_c[(df_c['dt_obj'] >= ini_mes_c) & (df_c['dt_obj'] <= fim_mes_c)].copy()
         else:
             df_f = df_c[(df_c['dt_obj'] <= hoje_c) & ((df_c['status'] == 'Planejado') | ((df_c['status'] == 'Realizado') & (df_c['dt_obj'] >= limite_c)) | ((df_c['valor_plan'] == 0) & (df_c['valor_real'] > 0)))].copy()
         
