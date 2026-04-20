@@ -9,7 +9,6 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
     st.markdown(f'<div class="titulo-tela">Conciliação: {st.session_state.projeto_ativo}</div>', unsafe_allow_html=True)
     
     # INJEÇÃO DE CSS DE ALTO RIGOR
-    # Força todos os blocos horizontais (st.columns) a não quebrarem e a terem scroll
     st.markdown("""
         <style>
         /* Container principal da página para permitir o scroll do conjunto */
@@ -21,17 +20,29 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
         /* Força as colunas a manterem largura mínima e não empilharem */
         [data-testid="stHorizontalBlock"] {
             flex-wrap: nowrap !important;
-            min-width: 750px !important; /* Largura que garante tudo em linha */
+            min-width: 750px !important;
             margin-bottom: 0px !important;
+        }
+        /* REDUÇÃO AGRESSIVA DE ALTURAS CONFORME SOLICITADO NO ANEXO */
+        [data-testid="stVerticalBlock"] {
+            gap: 0rem !important;
+        }
+        .stElementContainer {
+            margin-bottom: -1.3rem !important;
+        }
+        hr {
+            margin-top: 0.4rem !important;
+            margin-bottom: 0.4rem !important;
         }
         /* Garante que os inputs não fiquem espremidos */
         [data-testid="column"] {
             flex-shrink: 0 !important;
             min-width: 50px !important;
         }
-        /* Largura específica para a primeira coluna (Data/Descrição) */
-        [data-testid="column"]:nth-child(1) {
-            min-width: 230px !important;
+        /* Ajuste para que os labels dos toggles não quebrem e alinhem conforme solicitado */
+        [data-testid="column"] .stWidgetLabel {
+            white-space: nowrap !important;
+            min-width: fit-content !important;
         }
         /* Estilização da mensagem de orientação */
         .msg-orientacao {
@@ -41,21 +52,6 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
             align-items: center;
             height: 100%;
         }
-        /* REDUÇÃO DE ALTURAS - AÇÃO SOLICITADA NO ANEXO */
-        [data-testid="stVerticalBlock"] { gap: 0rem !important; }
-        .stElementContainer { margin-bottom: -1.6rem !important; }
-        hr { margin-top: 0.5rem !important; margin-bottom: 0.5rem !important; 
-        }
-        /* Garante que os toggles ocupem o espaço disponível da coluna sem quebrar o texto */
-        [data-testid="column"]:nth-of-type(2) [data-testid="stWidgetLabel"] {
-            min-width: 250px !important; /* Ajuste este valor se o texto ainda quebrar */
-            text-align: left !important;
-        }
-        
-        /* Remove espaços internos da coluna dos toggles para ganhar área útil */
-        [data-testid="column"]:nth-of-type(2) {
-            padding-left: 0px !important;
-        }                        
         </style>
     """, unsafe_allow_html=True)
 
@@ -63,10 +59,9 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
     ini_mes_c = hoje_c.replace(day=1)
     limite_c = hoje_c - timedelta(days=3)
 
-    # LINHA DE COMANDO COM MENSAGEM À ESQUERDA E TOGGLE À DIREITA
+    # LINHA DE COMANDO - PROPORÇÃO AJUSTADA PARA [4, 3] PARA TRAZER TOGGLES MAIS À ESQUERDA
     col_aviso, col_tog = st.columns([4, 3])
     
-    # A mensagem aparece apenas se o layout for detectado como móvel (ajuste de colunas)
     col_aviso.markdown('<div class="msg-orientacao">📱🔄 SE USANDO O CELULAR, TRABALHE COM ELE NA HORIZONTAL</div>', unsafe_allow_html=True)
     
     # Toggles de Controle
@@ -86,7 +81,6 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
         
         with cols_sp[3]:
             st.markdown('<div style="margin-top: 28px;"></div>', unsafe_allow_html=True)
-            # NOME DO BOTÃO ALTERADO PARA OK
             btn_confirmar = st.button("OK", key="btn_sp_conf", use_container_width=True)
         
         if btn_confirmar:
@@ -110,12 +104,11 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
     if not df_c.empty:
         df_c['dt_obj'] = pd.to_datetime(df_c['data']).dt.date
         
-        # LÓGICA DE FILTRO: LISTAR TUDO DO MÊS OU APENAS CONCILIAÇÃO PADRÃO
+        # LÓGICA DE FILTRO: LISTAR TUDO DO MÊS (EXCLUINDO PARCIAIS) OU CONCILIAÇÃO PADRÃO
         if st.session_state.listar_todos_mes:
             proximo_mes = (ini_mes_c + timedelta(days=32)).replace(day=1)
             fim_mes_c = proximo_mes - timedelta(days=1)
-            #df_f = df_c[(df_c['dt_obj'] >= ini_mes_c) & (df_c['dt_obj'] <= fim_mes_c)].copy()
-            # Regra: parcial_real > 0 NÃO deve ser listado nesta função
+            # REGRA APLICADA: registros com parcial_real > 0 NÃO devem ser listados nesta função
             df_f = df_c[(df_c['dt_obj'] >= ini_mes_c) & (df_c['dt_obj'] <= fim_mes_c) & (df_c['parcial_real'] == 0)].copy()
         else:
             df_f = df_c[(df_c['dt_obj'] <= hoje_c) & ((df_c['status'] == 'Planejado') | ((df_c['status'] == 'Realizado') & (df_c['dt_obj'] >= limite_c)) | ((df_c['valor_plan'] == 0) & (df_c['valor_real'] > 0)))].copy()
@@ -124,7 +117,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
         demais_itens = df_f[~df_f.index.isin(parciais_topo.index)].sort_values('dt_obj', ascending=False)
         df_final_concilia = pd.concat([parciais_topo, demais_itens])
 
-        # Cabeçalho - LARGURAS AJUSTADAS: [2.2, 0.5, 1.2, 1.2, 1.2, 0.5]
+        # Cabeçalho - LARGURAS AJUSTADAS CONFORME ANEXO: [2.2, 0.5, 1.2, 1.2, 1.2, 0.5]
         h1, h2, h3, h4, h5, h6 = st.columns([2.2, 0.5, 1.2, 1.2, 1.2, 0.5])
         h1.write("**Data - Descrição**")
         h2.write("**E/S**")
@@ -138,10 +131,10 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
             v_acumulado_desc = df[df['descricao'] == row['descricao']]['parcial_real'].sum()
             cor_txt = "red" if (row['valor_plan'] > 0 and v_acumulado_desc > row['valor_plan']) else "black"
             
-            # AJUSTE DE MARGEM REDUZIDO PELA METADE (-19px)
-            st.markdown('<div style="margin-bottom: -19px;"></div>', unsafe_allow_html=True)
+            # AJUSTE DE MARGEM PARA REDUZIR ALTURA PELA METADE (-32px conforme necessidade do layout)
+            st.markdown('<div style="margin-bottom: -32px;"></div>', unsafe_allow_html=True)
             
-            # COLUNAS DO ITEM
+            # COLUNAS DO ITEM - LARGURAS AJUSTADAS: [2.2, 0.5, 1.2, 1.2, 1.2, 0.5]
             c1, c2, c3, c4, c5, c6 = st.columns([2.2, 0.5, 1.2, 1.2, 1.2, 0.5])
             
             c1.markdown(f"<span style='color:{cor_txt}'>{row['dt_obj'].strftime('%d/%m/%Y')} - {row['descricao']}</span>", unsafe_allow_html=True)
@@ -156,7 +149,6 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                 if v_key not in st.session_state: st.session_state[v_key] = 0
                 v_parc_in = c5.text_input("", key=f"p_{row['id']}_{st.session_state[v_key]}", value="0,00", label_visibility="collapsed")
                 
-                # NOME DO BOTÃO ALTERADO PARA OK
                 if c6.button("OK", key=f"btn_p_{row['id']}", use_container_width=True):
                     v_dig = parse_moeda(v_parc_in)
                     if v_dig > 0:
@@ -177,7 +169,6 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                     c6.write("✅")
                 else:
                     v_norm_in = c4.text_input("", key=f"n_{row['id']}", value="0,00", label_visibility="collapsed")
-                    # NOME DO BOTÃO ALTERADO PARA OK
                     if c6.button("OK", key=f"btn_n_{row['id']}", use_container_width=True):
                         v_para_gravar = parse_moeda(v_norm_in)
                         if v_para_gravar == 0: v_para_gravar = row['valor_plan']
