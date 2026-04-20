@@ -407,17 +407,40 @@ def job_madrugada():
                     f_atu = [x for x in m_atual if x['descricao'] == d]
                     f_ant = [x for x in m_anterior if x['descricao'] == d]
                     
-                    v_p_atu = sum([x['valor_plan'] or 0 for x in f_atu]); v_r_atu = sum([x['valor_real'] or 0 for x in f_atu])
-                    v_p_ant = sum([x['valor_plan'] or 0 for x in f_ant]); v_r_ant = sum([x['valor_real'] or 0 for x in f_ant])
+                    v_p_atu = sum([x['valor_plan'] or 0 for x in f_atu])
+                    v_r_atu = sum([x['valor_real'] or 0 for x in f_atu])
+                    v_p_ant = sum([x['valor_plan'] or 0 for x in f_ant])
+                    v_r_ant = sum([x['valor_real'] or 0 for x in f_ant])
                     
+                    # --- CONSOLIDAÇÃO DE PARCIAIS ANTES DO FILTRO ---
+                    try:
+                        res_parc = supabase.table("lancamentos").select("parcial_real, parcial_data")\
+                            .eq("projeto_id", cfg['projeto_id']).eq("descricao", d)\
+                            .gt("parcial_real", 0).gte("data", p_mes.strftime('%Y-%m-%d'))\
+                            .lte("data", hoje.strftime('%Y-%m-%d')).execute()
+                        
+                        if res_parc.data:
+                            v_r_atu = sum(float(p['parcial_real'] or 0) for p in res_parc.data)
+                            datas_p = [p['parcial_data'] for p in res_parc.data if p['parcial_data']]
+                            dt_atu_final = max(datas_p) if datas_p else (f_atu[0]['data'] if f_atu else '-')
+                        else:
+                            dt_atu_final = f_atu[0]['data'] if f_atu else '-'
+                    except:
+                        dt_atu_final = f_atu[0]['data'] if f_atu else '-'
+
                     if (v_r_atu > v_p_atu > 0) or (v_r_ant > v_p_ant > 0):
                         alertas.append({
                             'descricao': d, 
                             'dt_ant': f_ant[0]['data'] if f_ant else '-',
                             'v_p_ant': v_p_ant, 'v_r_ant': v_r_ant,
-                            'dt_atu': f_atu[0]['data'] if f_atu else '-',
+                            'dt_atu': dt_atu_final,
                             'v_p_atu': v_p_atu, 'v_r_atu': v_r_atu
                         })
+
+                dados_hoje = [x for x in lancamentos_all.data if x['data'] == hoje.strftime('%Y-%m-%d')]
+                
+                # AQUI É ONDE ESTAVA O ERRO DE NOME: Alterado de 'gastos_excedidos' para 'alertas'
+                pdf_path = gerar_pdf_relatorio(perfil['nome'], cfg['projeto_id'], hoje, dados_hoje, {}, macro, alertas)
 
 
                 # ==============================================================================
