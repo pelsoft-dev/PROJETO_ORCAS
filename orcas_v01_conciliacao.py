@@ -4,53 +4,33 @@ from datetime import datetime, timedelta
 
 def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moeda):
     """
-    Sub-rotina da Tela Conciliação - Scroll Sincronizado via CSS Injection.
+    Sub-rotina da Tela Conciliação - Layout Compacto e Filtro de Parciais.
     """
     st.markdown(f'<div class="titulo-tela">Conciliação: {st.session_state.projeto_ativo}</div>', unsafe_allow_html=True)
     
-    # INJEÇÃO DE CSS DE ALTO RIGOR
+    # INJEÇÃO DE CSS RESTRITA PARA CORREÇÃO DE ALTURAS E ALINHAMENTO
     st.markdown("""
         <style>
-        /* Container principal da página para permitir o scroll do conjunto */
-        [data-testid="stVerticalBlock"] > [data-testid="stVerticalBlock"] {
-            overflow-x: auto !important;
-            display: block !important;
-            -webkit-overflow-scrolling: touch !important;
-        }
-        /* Força as colunas a manterem largura mínima e não empilharem */
-        [data-testid="stHorizontalBlock"] {
-            flex-wrap: nowrap !important;
-            min-width: 750px !important;
-            margin-bottom: 0px !important;
-        }
-        /* REDUÇÃO AGRESSIVA DE ALTURAS CONFORME SOLICITADO NO ANEXO */
+        /* Redução de altura das linhas para layout compacto */
         [data-testid="stVerticalBlock"] {
             gap: 0rem !important;
         }
         .stElementContainer {
-            margin-bottom: -1.3rem !important;
+            margin-bottom: -1.4rem !important;
         }
+        /* Ajuste do divisor */
         hr {
-            margin-top: 0.4rem !important;
-            margin-bottom: 0.4rem !important;
+            margin-top: 0.5rem !important;
+            margin-bottom: 0.5rem !important;
         }
-        /* Garante que os inputs não fiquem espremidos */
-        [data-testid="column"] {
-            flex-shrink: 0 !important;
-            min-width: 50px !important;
-        }
-        /* Ajuste para que os labels dos toggles não quebrem e alinhem conforme solicitado */
-        [data-testid="column"] .stWidgetLabel {
+        /* Alinhamento dos labels dos toggles para evitar quebra de texto */
+        [data-testid="stWidgetLabel"] p {
+            font-size: 0.85rem !important;
             white-space: nowrap !important;
-            min-width: fit-content !important;
         }
-        /* Estilização da mensagem de orientação */
-        .msg-orientacao {
-            font-size: 0.85rem;
-            color: #555;
-            display: flex;
-            align-items: center;
-            height: 100%;
+        /* Força a coluna dos toggles a alinhar o conteúdo à esquerda dentro do seu bloco */
+        [data-testid="column"] > div {
+            align-items: flex-start !important;
         }
         </style>
     """, unsafe_allow_html=True)
@@ -59,10 +39,10 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
     ini_mes_c = hoje_c.replace(day=1)
     limite_c = hoje_c - timedelta(days=3)
 
-    # LINHA DE COMANDO - PROPORÇÃO AJUSTADA PARA [4, 3] PARA TRAZER TOGGLES MAIS À ESQUERDA
+    # LINHA DE COMANDO - AJUSTE DE COLUNAS [4, 3] PARA PUXAR TOGGLES PARA A ESQUERDA
     col_aviso, col_tog = st.columns([4, 3])
     
-    col_aviso.markdown('<div class="msg-orientacao">📱🔄 SE USANDO O CELULAR, TRABALHE COM ELE NA HORIZONTAL</div>', unsafe_allow_html=True)
+    col_aviso.markdown('<div style="font-size: 0.8rem; color: #555; margin-top: 10px;">📱🔄 SE USANDO O CELULAR, TRABALHE COM ELE NA HORIZONTAL</div>', unsafe_allow_html=True)
     
     # Toggles de Controle
     abrir_sem_plan = col_tog.toggle("Lançar sem Planejamento", value=st.session_state.get('abrir_sem_plan', False))
@@ -104,11 +84,11 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
     if not df_c.empty:
         df_c['dt_obj'] = pd.to_datetime(df_c['data']).dt.date
         
-        # LÓGICA DE FILTRO: LISTAR TUDO DO MÊS (EXCLUINDO PARCIAIS) OU CONCILIAÇÃO PADRÃO
+        # LÓGICA DE FILTRO: LISTAR TUDO DO MÊS (EXCLUINDO PARCIAIS > 0) OU CONCILIAÇÃO PADRÃO
         if st.session_state.listar_todos_mes:
             proximo_mes = (ini_mes_c + timedelta(days=32)).replace(day=1)
             fim_mes_c = proximo_mes - timedelta(days=1)
-            # REGRA APLICADA: registros com parcial_real > 0 NÃO devem ser listados nesta função
+            # REGRA: registros com parcial_real > 0 NÃO devem ser listados
             df_f = df_c[(df_c['dt_obj'] >= ini_mes_c) & (df_c['dt_obj'] <= fim_mes_c) & (df_c['parcial_real'] == 0)].copy()
         else:
             df_f = df_c[(df_c['dt_obj'] <= hoje_c) & ((df_c['status'] == 'Planejado') | ((df_c['status'] == 'Realizado') & (df_c['dt_obj'] >= limite_c)) | ((df_c['valor_plan'] == 0) & (df_c['valor_real'] > 0)))].copy()
@@ -117,7 +97,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
         demais_itens = df_f[~df_f.index.isin(parciais_topo.index)].sort_values('dt_obj', ascending=False)
         df_final_concilia = pd.concat([parciais_topo, demais_itens])
 
-        # Cabeçalho - LARGURAS AJUSTADAS CONFORME ANEXO: [2.2, 0.5, 1.2, 1.2, 1.2, 0.5]
+        # CABEÇALHO - LARGURAS RIGOROSAS: [2.2, 0.5, 1.2, 1.2, 1.2, 0.5]
         h1, h2, h3, h4, h5, h6 = st.columns([2.2, 0.5, 1.2, 1.2, 1.2, 0.5])
         h1.write("**Data - Descrição**")
         h2.write("**E/S**")
@@ -131,10 +111,10 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
             v_acumulado_desc = df[df['descricao'] == row['descricao']]['parcial_real'].sum()
             cor_txt = "red" if (row['valor_plan'] > 0 and v_acumulado_desc > row['valor_plan']) else "black"
             
-            # AJUSTE DE MARGEM PARA REDUZIR ALTURA PELA METADE (-32px conforme necessidade do layout)
+            # ESPAÇAMENTO REDUZIDO PELA METADE
             st.markdown('<div style="margin-bottom: -32px;"></div>', unsafe_allow_html=True)
             
-            # COLUNAS DO ITEM - LARGURAS AJUSTADAS: [2.2, 0.5, 1.2, 1.2, 1.2, 0.5]
+            # COLUNAS DO ITEM - LARGURAS: [2.2, 0.5, 1.2, 1.2, 1.2, 0.5]
             c1, c2, c3, c4, c5, c6 = st.columns([2.2, 0.5, 1.2, 1.2, 1.2, 0.5])
             
             c1.markdown(f"<span style='color:{cor_txt}'>{row['dt_obj'].strftime('%d/%m/%Y')} - {row['descricao']}</span>", unsafe_allow_html=True)
