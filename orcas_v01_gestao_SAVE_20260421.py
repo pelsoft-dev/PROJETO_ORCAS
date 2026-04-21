@@ -161,15 +161,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             if res_p.data: dados_p["id"] = res_p.data[0]["id"]
             
             supabase.table("config_projetos").upsert(dados_p).execute()
-            # --- NOVO BLOCO QUE ENTRA AQUI ---
-            # Deleta lançamentos com data MAIOR (gt) que a nova data de término
-            supabase.table("lancamentos")\
-                .delete()\
-                .eq("projeto_id", nome_plano_input)\
-                .eq("usuario_id", uid_gestao)\
-                .gt("data", st.session_state.tmp_fim_plano.strftime('%Y-%m-%d'))\
-                .execute()
-            # -------------------------------------------------------
+            
             if 'tmp_fim_plano' in st.session_state: del st.session_state.tmp_fim_plano
             st.session_state.projeto_ativo = nome_plano_input
             st.session_state.msg_sucesso = "Configurações salvas com sucesso!"
