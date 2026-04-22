@@ -58,7 +58,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
         
         with cols_sp[3]:
             st.markdown('<div style="margin-top: 28px;"></div>', unsafe_allow_html=True)
-            btn_confirmar = st.button("OK", key="btn_sp_conf", use_container_width=True)
+            btn_confirmar = st.button("Ok", key="btn_sp_conf", use_container_width=True)
         
         if btn_confirmar:
             v_sp = parse_moeda(sp_valor)
@@ -126,7 +126,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                 if v_key not in st.session_state: st.session_state[v_key] = 0
                 v_parc_in = c5.text_input("", key=f"p_{row['id']}_{st.session_state[v_key]}", value="0,00", label_visibility="collapsed")
                 
-                if c6.button("OK", key=f"btn_p_{row['id']}", use_container_width=True):
+                if c6.button("Ok", key=f"btn_p_{row['id']}", use_container_width=True):
                     v_dig = parse_moeda(v_parc_in)
                     if v_dig > 0:
                         supabase.table("lancamentos").insert({
@@ -146,7 +146,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                     c6.write("✅")
                 else:
                     v_norm_in = c4.text_input("", key=f"n_{row['id']}", value="0,00", label_visibility="collapsed")
-                    if c6.button("OK", key=f"btn_n_{row['id']}", use_container_width=True):
+                    if c6.button("Ok", key=f"btn_n_{row['id']}", use_container_width=True):
                         v_para_gravar = parse_moeda(v_norm_in)
                         if v_para_gravar == 0: v_para_gravar = row['valor_plan']
                         supabase.table("lancamentos").update({"valor_real": v_para_gravar, "status": "Realizado"}).eq("id", row['id']).execute()

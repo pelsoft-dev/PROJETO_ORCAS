@@ -246,7 +246,7 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
     pdf.set_font("Helvetica", "B", 8)
     pdf.cell(190, 5, f"TOTAL DE ENTRADAS PENDENTES: R$ {fmt_br(total_e_pend)}", 0, new_x="LMARGIN", new_y="NEXT", align="R")
     pdf.cell(190, 5, f"TOTAL DE SAÍDAS PENDENTES: R$ {fmt_br(total_s_pend)}", 0, new_x="LMARGIN", new_y="NEXT", align="R")
-    filename = f"ORCAS_DAILY_REPORT_{usuario_nome}_{data_hoje.strftime('%Y%m%d')}.pdf"
+    filename = f"RESUMO_DIARIO_ORCAS_{usuario_nome}_{data_hoje.strftime('%Y%m%d')}.pdf"
     pdf.output(filename)
     return filename
 
@@ -254,7 +254,7 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
 # ==============================================================================
 # FUNÇÕES DE ENVIO (E-MAIL E WHATSAPP COMENTADO)
 # ==============================================================================
-def enviar_email_orcas(email_destino, caminho_arquivo, usuario_nome):
+def enviar_email_orcas(email_destino, caminho_arquivo, usuario_nome, nome_plano):
     if not SMTP_SERVER or not SMTP_USER or not SMTP_PASS:
         print("Erro: Credenciais SMTP não configuradas.")
         return
