@@ -454,7 +454,9 @@ def job_madrugada():
                     except:
                         dt_atu_final = f_atu[0]['data'] if f_atu else '-'
 
-                    if (v_r_atu > v_p_atu > 0) or (v_r_ant > v_p_ant > 0):
+                    # 20260422 --- if (v_r_atu > v_p_atu > 0) or (v_r_ant > v_p_ant > 0):
+                    # A alteração retira a trava '> 0' do planejamento e inclui a regra de gasto extra (plan==0)
+                    if (v_r_atu > v_p_atu) or (v_p_atu == 0 and v_r_atu > 0) or (v_r_ant > v_p_ant):
                         alertas.append({
                             'descricao': d, 
                             'dt_ant': f_ant[0]['data'] if f_ant else '-',
