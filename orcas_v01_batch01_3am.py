@@ -36,10 +36,10 @@ def fmt_br(valor):
 
 
 # ==============================================================================
-# GERAÇÃO DO RELATÓRIO PDF (ORCAS DAILY REPORT)
+# GERAÇÃO DO RELATÓRIO PDF (RESUMO DIÁRIO ORCAS)
 # ==============================================================================
 # ==============================================================================
-# GERAÇÃO DO RELATÓRIO PDF (ORCAS DAILY REPORT)
+# GERAÇÃO DO RELATÓRIO PDF (RESUMO DIÁRIO ORCAS)
 # ==============================================================================
 def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo_ontem, analise_macro, gastos_excedidos):
     pdf = FPDF()
@@ -54,7 +54,7 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
         image_path = os.path.join(base_path, "orca_mascote.png")
         if os.path.exists(image_path):
             # pdf.image(image_path, x=10, y=8, w=25)
-            pdf.image(image_path, x=5, y=5, w=50)
+            pdf.image(image_path, x=4, y=4, w=50)
         else:
             print(f"Aviso: Arquivo {image_path} not encontrado no servidor.")
     except Exception as e:
@@ -62,7 +62,7 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
 
     # Título Principal
     pdf.set_font("Helvetica", "B", 16)
-    pdf.cell(190, 10, "ORCAS DAILY REPORT", new_x="LMARGIN", new_y="NEXT", align="C")
+    pdf.cell(190, 10, "RESUMO DIÁRIO ORCAS", new_x="LMARGIN", new_y="NEXT", align="C")
     
     # Subtítulo (Data e Plano)
     pdf.set_font("Helvetica", "", 10)
@@ -262,9 +262,9 @@ def enviar_email_orcas(email_destino, caminho_arquivo, usuario_nome):
     msg = MIMEMultipart()
     msg['From'] = f"ORCAS <{SMTP_USER}>"
     msg['To'] = email_destino
-    msg['Subject'] = f"ORCAS DAILY REPORT - {usuario_nome}"
+    msg['Subject'] = f"RESUMO DIÁRIO ORCAS - {usuario_nome}"
 
-    corpo = f"Olá {usuario_nome},\n\nSegue em anexo o seu ORCAS DAILY REPORT diário.\n\nAtenciosamente,\nEquipe ORCAS."
+    corpo = f"Olá {usuario_nome},\n\nSegue em anexo o seu RESUMO DIÁRIO ORCAS referente ao plano {nome_plano}.\n\nAtenciosamente,\nEquipe ORCAS."
     msg.attach(MIMEText(corpo, 'plain'))
 
     try:

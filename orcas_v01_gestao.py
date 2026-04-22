@@ -82,8 +82,8 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         with col_l4_1:
             st.write("") 
             st.write("") 
-            ativar_zap_atual = st.checkbox("Adicionar o Relatório Diário ORCAS via Whatsapp", value=(zap_plano_db == 1))
-            ativar_email_atual = st.checkbox("Adicionar o Relatório Diário ORCAS via E-mail", value=(email_plano_db == 1))
+            ativar_zap_atual = st.checkbox("Adicionar o Resumo Diário ORCAS via Whatsapp", value=(zap_plano_db == 1))
+            ativar_email_atual = st.checkbox("Adicionar o Resumo Diário ORCAS via E-mail", value=(email_plano_db == 1))
         
         res_all = supabase.table("config_projetos").select("*").eq("usuario_id", uid_gestao).execute()
         dados_db = res_all.data if res_all.data else []
@@ -128,7 +128,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             <div style="font-weight: bold; font-size: 16px; margin-bottom: 10px;">Valor da Assinatura Mensal: R$ {format_moeda(v_mensal_total)}</div>
             <div style="margin-left: 20px; font-size: 14px;">
                 Assinatura do Orcas Baby: <span style="float: right;">19,90</span><br>
-                {qtd_relatorios_totais} Relatório(s) Diário(s) via Whatsapp / E-mail: <span style="float: right;">{format_moeda(custo_relatorio_total)}</span><br>
+                {qtd_relatorios_totais} Resumo(s) Diário(s) via Whatsapp / E-mail: <span style="float: right;">{format_moeda(custo_relatorio_total)}</span><br>
                 Usuário com {qtd_total_planos} Planos: <span style="float: right;">{format_moeda(add_planos_extra)}</span><br>
                 {c24} Plano(s) com 24 meses: <span style="float: right;">0,00</span><br>
                 {c36} Plano(s) com 36 meses: <span style="float: right;">{format_moeda(v_p36)}</span><br>

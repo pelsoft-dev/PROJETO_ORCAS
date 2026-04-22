@@ -95,7 +95,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
         df_final_concilia = pd.concat([parciais_topo, demais_itens])
 
         # CABEÇALHO - LARGURAS RIGOROSAS: [2.2, 0.5, 1.2, 1.2, 1.2, 0.5]
-        h1, h2, h3, h4, h5, h6 = st.columns([2.2, 0.5, 1.2, 1.2, 1.2, 0.5])
+        h1, h2, h3, h4, h5, h6 = st.columns([2.2, 0.5, 1.1, 1.1, 1.1, 0.5])
         h1.write("**Data - Descrição**")
         h2.write("**E/S**")
         h3.write("**V. Plan.**")
@@ -112,7 +112,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
             st.markdown('<div style="margin-bottom: -32px;"></div>', unsafe_allow_html=True)
             
             # COLUNAS DO ITEM - LARGURAS: [2.2, 0.5, 1.2, 1.2, 1.2, 0.5]
-            c1, c2, c3, c4, c5, c6 = st.columns([2.2, 0.5, 1.2, 1.2, 1.2, 0.5])
+            c1, c2, c3, c4, c5, c6 = st.columns([2.2, 0.5, 1.1, 1.1, 1.1, 0.5])
             
             c1.markdown(f"<span style='color:{cor_txt}; font-weight: 500;'>{row['dt_obj'].strftime('%d/%m/%Y')} - {row['descricao']}</span>", unsafe_allow_html=True)
             cor_tipo = 'red' if row['tipo'] == 'Saída' else 'blue'
