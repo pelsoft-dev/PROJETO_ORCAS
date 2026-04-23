@@ -254,7 +254,7 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
 # ==============================================================================
 # FUNÇÕES DE ENVIO (E-MAIL E WHATSAPP COMENTADO)
 # ==============================================================================
-def enviar_email_orcas(email_destino, caminho_arquivo, usuario_nome, nome_plano):
+def enviar_email_orcas(email_destino, caminho_arquivo, usuario_nome):
     if not SMTP_SERVER or not SMTP_USER or not SMTP_PASS:
         print("Erro: Credenciais SMTP não configuradas.")
         return
@@ -264,7 +264,7 @@ def enviar_email_orcas(email_destino, caminho_arquivo, usuario_nome, nome_plano)
     msg['To'] = email_destino
     msg['Subject'] = f"RESUMO DIÁRIO ORCAS - {usuario_nome}"
 
-    corpo = f"Olá {usuario_nome},\n\nSegue em anexo o seu RESUMO DIÁRIO ORCAS referente ao plano {nome_plano}.\n\nAtenciosamente,\nEquipe ORCAS."
+    corpo = f"Olá {usuario_nome},\n\nSegue em anexo o seu RESUMO DIÁRIO ORCAS.\n\nAtenciosamente,\nEquipe ORCAS."
     msg.attach(MIMEText(corpo, 'plain'))
 
     try:
