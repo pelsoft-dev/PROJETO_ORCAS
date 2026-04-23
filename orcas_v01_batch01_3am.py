@@ -249,44 +249,65 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
     pdf.cell(190, 5, f"TOTAL DE SAÍDAS PENDENTES: R$ {fmt_br(total_s_pend)}", 0, new_x="LMARGIN", new_y="NEXT", align="R")
     
 # ==============================================================================
-    # BLOCO ISOLADO FINAL: AJUSTE DE PARCIAL_REAL INDEPENDENTE DE FLAG
+    # BLOCO IA ATUALIZADO: DETECÇÃO DE MOVIMENTOS E VOLATILIDADE
     # ==============================================================================
     try:
         pdf.ln(8)
         ia_plan_total = 0
         ia_real_total = 0
+        saldo_acumulado = 0
+        menor_saldo = 0
+        maior_queda = 0
+        ultimo_saldo = 0
 
-        # Percorre todos os lançamentos (passados, presentes e futuros)
-        for l in todos_lancamentos:
-            # Garante que os valores sejam numéricos para evitar erros de soma
+        # Ordenar lançamentos por data para simular a linha do tempo do gráfico
+        lancamentos_ordenados = sorted(todos_lancamentos, key=lambda x: x['data'])
+
+        for l in lancamentos_ordenados:
             v_p = float(l.get('valor_plan') or 0)
             v_r = float(l.get('valor_real') or 0)
             v_parcial = float(l.get('parcial_real') or 0)
+            tipo = l.get('tipo')
             
-            if l.get('tipo') == 'Saída':
-                # 1. PLANEJAMENTO: Soma o planejado de cada uma das linhas (ex: os 21 meses)
+            # Prioridade para parcial_real conforme sua regra
+            valor_final_real = v_parcial if v_parcial > 0 else v_r
+
+            if tipo == 'Entrada':
                 ia_plan_total += v_p
-                
-                # 2. REALIZADO: Prioridade total ao campo parcial_real
-                if v_parcial > 0:
-                    ia_real_total += v_parcial
-                else:
-                    ia_real_total += v_r
+                saldo_acumulado += valor_final_real
+            else:
+                ia_plan_total += v_p
+                ia_real_total += valor_final_real
+                saldo_acumulado -= valor_final_real
 
-        saldo_restante = ia_plan_total - ia_real_total
+            # Monitor de pontos críticos (o "vale" do gráfico)
+            if saldo_acumulado < menor_saldo:
+                menor_saldo = saldo_acumulado
+            
+            queda_atual = ultimo_saldo - saldo_acumulado
+            if queda_atual > maior_queda:
+                maior_queda = queda_atual
+            
+            ultimo_saldo = saldo_acumulado
 
-        # Construção da análise baseada nos novos cálculos
-        status_ia = "DENTRO DO ESPERADO" if saldo_restante >= 0 else "ACIMA DO PLANEJADO"
+        saldo_residual = ia_plan_total - ia_real_total
+        
+        # Lógica de Comentário Inteligente baseada no movimento provocado
+        alerta_ia = ""
+        if menor_saldo < 0:
+            alerta_ia = f" CRÍTICO: Detectamos uma queda acentuada onde o saldo atingiu R$ {fmt_br(menor_saldo)}. "
+        elif maior_queda > (ia_plan_total * 0.15): # Queda maior que 15% do plano
+            alerta_ia = " ALERTA: Identificamos uma volatilidade atípica com variações bruscas no fluxo. "
+
         texto_ia = (
-            f"Análise Orcas: O plano '{nome_plano}' apresenta um consumo total de R$ {fmt_br(ia_real_total)} "
-            f"frente a um orçamento global de R$ {fmt_br(ia_plan_total)}. Atualmente, sua execução financeira está {status_ia}. "
-            f"A detecção de consumos foi ajustada: agora o sistema captura todos os lançamentos de 'parcial_real' "
-            f"diretamente, independentemente de outras marcações. "
-            f"Com um saldo residual estratégico de R$ {fmt_br(saldo_restante)}, o plano mantém sua viabilidade "
-            f"considerando a projeção completa de todos os meses cadastrados."
+            f"Análise Orcas: O plano '{nome_plano}' acumulou R$ {fmt_br(ia_real_total)} em saídas "
+            f"para um orçamento de R$ {fmt_br(ia_plan_total)}.{alerta_ia}"
+            f"O comportamento recente sugere um estresse de liquidez. Embora o saldo residual estratégico "
+            f"seja de R$ {fmt_br(saldo_residual)}, os picos negativos observados indicam que o plano "
+            f"precisa de um colchão de segurança maior para suportar essas oscilações sem comprometer a saúde financeira."
         )
 
-        # Renderização no PDF
+        # Renderização do Quadro no PDF
         pdf.set_fill_color(245, 245, 245)
         pdf.set_font("Helvetica", "B", 11)
         pdf.cell(190, 8, " SEU PLANO COMENTADO POR UMA INTELIGÊNCIA ARTIFICIAL", 0, 1, 'L', fill=True)
@@ -294,7 +315,7 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
         pdf.set_font("Helvetica", "I", 9)
         pdf.set_text_color(50, 50, 50)
         pdf.multi_cell(190, 5, texto_ia, border=1, align='J')
-        pdf.set_text_color(0, 0, 0) # Reseta para cor padrão
+        pdf.set_text_color(0, 0, 0)
         pdf.ln(4)
     except Exception as e:
         print(f"Erro ao gerar análise IA: {e}")
