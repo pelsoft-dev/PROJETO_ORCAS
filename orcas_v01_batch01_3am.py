@@ -41,7 +41,8 @@ def fmt_br(valor):
 # ==============================================================================
 # GERAÇÃO DO RELATÓRIO PDF (RESUMO DIÁRIO ORCAS)
 # ==============================================================================
-def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo_ontem, analise_macro, gastos_excedidos):
+#def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo_ontem, analise_macro, gastos_excedidos):
+def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo_ontem, analise_macro, gastos_excedidos, todos_lancamentos):    
     pdf = FPDF()
     pdf.add_page()
     
@@ -246,6 +247,58 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
     pdf.set_font("Helvetica", "B", 8)
     pdf.cell(190, 5, f"TOTAL DE ENTRADAS PENDENTES: R$ {fmt_br(total_e_pend)}", 0, new_x="LMARGIN", new_y="NEXT", align="R")
     pdf.cell(190, 5, f"TOTAL DE SAÍDAS PENDENTES: R$ {fmt_br(total_s_pend)}", 0, new_x="LMARGIN", new_y="NEXT", align="R")
+    
+    # ==============================================================================
+    # BLOCO ISOLADO: SEU PLANO COMENTADO POR UMA IA
+    # ==============================================================================
+    try:
+        pdf.ln(8)
+        # 1. Processamento da lógica de parciais e totais
+        ia_plan_total = 0
+        ia_real_total = 0
+        ia_parciais = {}
+
+        for l in todos_lancamentos:
+            v_p = float(l.get('valor_plan') or 0)
+            v_r = float(l.get('valor_real') or 0)
+            
+            if l.get('tipo') == 'Saída':
+                if l.get('permite_parcial'): # Regra para TRUE
+                    chave = f"{l['data'][:7]}_{l['descricao']}" # Mes_Ano + Descricao
+                    ia_parciais[chave] = ia_parciais.get(chave, 0) + float(l.get('parcial_real') or 0)
+                    # Soma o planejado apenas se for a primeira vez que vê essa descrição no mês
+                    if chave not in ia_parciais: ia_plan_total += v_p
+                else: # Regra para FALSE
+                    ia_plan_total += v_p
+                    ia_real_total += v_r
+
+        ia_real_total += sum(ia_parciais.values())
+        saldo_restante = ia_plan_total - ia_real_total
+
+        # 2. Construção do Texto (IA Fake baseada nos dados reais)
+        status_ia = "DENTRO DO ESPERADO" if saldo_restante >= 0 else "ACIMA DO PLANEJADO"
+        texto_ia = (
+            f"Análise Orcas: O plano '{nome_plano}' apresenta um consumo total de R$ {fmt_br(ia_real_total)} "
+            f"frente a um orçamento global de R$ {fmt_br(ia_plan_total)}. Atualmente, sua execução financeira está {status_ia}. "
+            f"Identifiquei que a consolidação de gastos parcelados está ativa e impactando o fluxo. "
+            f"Minha recomendação é manter a disciplina nos lançamentos extras para não comprometer a margem de segurança "
+            f"até o término do plano. O saldo residual estratégico é de R$ {fmt_br(saldo_restante)}."
+        )
+
+        # 3. Impressão no PDF
+        pdf.set_fill_color(245, 245, 245)
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.cell(190, 8, " SEU PLANO COMENTADO POR UMA INTELIGÊNCIA ARTIFICIAL", 0, 1, 'L', fill=True)
+        
+        pdf.set_font("Helvetica", "I", 9)
+        pdf.set_text_color(50, 50, 50)
+        pdf.multi_cell(190, 5, texto_ia, border=1, align='J')
+        pdf.set_text_color(0, 0, 0) # Reseta a cor para o restante do PDF
+        pdf.ln(4)
+    except Exception as e:
+        print(f"Erro ao gerar análise IA: {e}")
+    # ==============================================================================
+    
     filename = f"RESUMO_DIARIO_ORCAS_{usuario_nome}_{data_hoje.strftime('%Y%m%d')}.pdf"
     pdf.output(filename)
     return filename
@@ -468,8 +521,8 @@ def job_madrugada():
                 dados_hoje = [x for x in lancamentos_all.data if x['data'] == hoje.strftime('%Y-%m-%d')]
                 
                 # AQUI É ONDE ESTAVA O ERRO DE NOME: Alterado de 'gastos_excedidos' para 'alertas'
-                pdf_path = gerar_pdf_relatorio(perfil['nome'], cfg['projeto_id'], hoje, dados_hoje, {}, macro, alertas)
-
+                # pdf_path = gerar_pdf_relatorio(perfil['nome'], cfg['projeto_id'], hoje, dados_hoje, {}, macro, alertas)
+                pdf_path = gerar_pdf_relatorio(perfil['nome'], cfg['projeto_id'], hoje, dados_hoje, {}, macro, alertas, lancamentos_all.data)
 
                 # ==============================================================================
                 # BLOCO DE CONSOLIDAÇÃO DE PARCIAIS (ACERTO DA QUESTÃO DISCUTIDA)
@@ -508,8 +561,8 @@ def job_madrugada():
                 # Ordenação cronológica para a linha divisória do PDF funcionar
                 dados_hoje.sort(key=lambda x: x['data'])
                 
-                pdf_path = gerar_pdf_relatorio(perfil['nome'], cfg['projeto_id'], hoje, dados_hoje, {}, macro, alertas)
-                
+                # pdf_path = gerar_pdf_relatorio(perfil['nome'], cfg['projeto_id'], hoje, dados_hoje, {}, macro, alertas)
+                pdf_path = gerar_pdf_relatorio(perfil['nome'], cfg['projeto_id'], hoje, dados_hoje, {}, macro, alertas, lancamentos_all.data)
                 if cfg.get('email_ativo') == 1 and perfil.get('email'):
                     enviar_email_orcas(perfil['email'], pdf_path, perfil['nome'])
                 
