@@ -249,55 +249,56 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
     pdf.cell(190, 5, f"TOTAL DE SAÍDAS PENDENTES: R$ {fmt_br(total_s_pend)}", 0, new_x="LMARGIN", new_y="NEXT", align="R")
     
 # ==============================================================================
-    # BLOCO ISOLADO CORRIGIDO: ANÁLISE IA (AGORA COM TOTALIZAÇÃO CORRETA)
+    # BLOCO ISOLADO FINAL: AJUSTE DE PARCIAL_REAL INDEPENDENTE DE FLAG
     # ==============================================================================
     try:
         pdf.ln(8)
         ia_plan_total = 0
         ia_real_total = 0
-        ia_parciais_real = {} # Agrupa os gastos reais por Mês/Descrição
 
+        # Percorre todos os lançamentos (passados, presentes e futuros)
         for l in todos_lancamentos:
+            # Garante que os valores sejam numéricos para evitar erros de soma
             v_p = float(l.get('valor_plan') or 0)
             v_r = float(l.get('valor_real') or 0)
+            v_parcial = float(l.get('parcial_real') or 0)
             
             if l.get('tipo') == 'Saída':
-                # 1. TRATAMENTO DO PLANEJAMENTO (Soma sempre o valor_plan de cada registro único)
+                # 1. PLANEJAMENTO: Soma o planejado de cada uma das linhas (ex: os 21 meses)
                 ia_plan_total += v_p
                 
-                # 2. TRATAMENTO DO REALIZADO
-                if l.get('permite_parcial'): # Se for TRUE
-                    # Agrupa o que foi gasto em parciais (parcial_real) por Mês/Descrição
-                    chave = f"{l['data'][:7]}_{l['descricao']}"
-                    ia_parciais_real[chave] = ia_parciais_real.get(chave, 0) + float(l.get('parcial_real') or 0)
-                else: # Se for FALSE
-                    ia_parciais_real_valor = v_r
+                # 2. REALIZADO: Prioridade total ao campo parcial_real
+                if v_parcial > 0:
+                    ia_real_total += v_parcial
+                else:
                     ia_real_total += v_r
 
-        # Adiciona a somatória de todas as parciais reais ao total realizado
-        ia_real_total += sum(ia_parciais_real.values())
         saldo_restante = ia_plan_total - ia_real_total
 
-        # Texto da análise atualizado com os novos cálculos
+        # Construção da análise baseada nos novos cálculos
         status_ia = "DENTRO DO ESPERADO" if saldo_restante >= 0 else "ACIMA DO PLANEJADO"
         texto_ia = (
             f"Análise Orcas: O plano '{nome_plano}' apresenta um consumo total de R$ {fmt_br(ia_real_total)} "
             f"frente a um orçamento global de R$ {fmt_br(ia_plan_total)}. Atualmente, sua execução financeira está {status_ia}. "
-            f"A análise agora considera corretamente os 21 meses de planejamento (incluindo Supermercado e Combustível) "
-            f"e a somatória integral das parciais realizadas. Recomendamos atenção ao saldo residual de R$ {fmt_br(saldo_restante)} "
-            f"para garantir a cobertura de todos os compromissos até o fim do período projetado."
+            f"A detecção de consumos foi ajustada: agora o sistema captura todos os lançamentos de 'parcial_real' "
+            f"diretamente, independentemente de outras marcações. "
+            f"Com um saldo residual estratégico de R$ {fmt_br(saldo_restante)}, o plano mantém sua viabilidade "
+            f"considerando a projeção completa de todos os meses cadastrados."
         )
 
+        # Renderização no PDF
         pdf.set_fill_color(245, 245, 245)
         pdf.set_font("Helvetica", "B", 11)
         pdf.cell(190, 8, " SEU PLANO COMENTADO POR UMA INTELIGÊNCIA ARTIFICIAL", 0, 1, 'L', fill=True)
+        
         pdf.set_font("Helvetica", "I", 9)
         pdf.set_text_color(50, 50, 50)
         pdf.multi_cell(190, 5, texto_ia, border=1, align='J')
-        pdf.set_text_color(0, 0, 0)
+        pdf.set_text_color(0, 0, 0) # Reseta para cor padrão
         pdf.ln(4)
     except Exception as e:
         print(f"Erro ao gerar análise IA: {e}")
+    # ==============================================================================
     
     filename = f"RESUMO_DIARIO_ORCAS_{usuario_nome}_{data_hoje.strftime('%Y%m%d')}.pdf"
     pdf.output(filename)
