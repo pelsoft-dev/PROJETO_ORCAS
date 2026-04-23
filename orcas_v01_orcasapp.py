@@ -152,7 +152,6 @@ if not st.session_state.logado:
                 col_b1, col_b2 = st.columns(2)
                 if col_b1.button("Entrar no Sistema"):
                     senha_hash = hashlib.sha256(str.encode(se)).hexdigest()
-                    # ACERTO: Incluído o campo 'nome' e 'celular' na seleção para garantir a sessão completa
                     res = supabase.table("usuarios").select("id, nome, email, celular, vencimento, zap_ativo").eq("email", em).eq("senha", senha_hash).execute()
                     if res.data: 
                         user_data = res.data[0]
@@ -175,24 +174,44 @@ if not st.session_state.logado:
                 new_email = st.text_input("E-mail")
                 new_celular = st.text_input("Celular (com DDD)")
                 
-                # Interface conforme anexo
-                if st.button("Enviar Código para Celular"):
+                # Colunas para botões lado a lado conforme solicitado
+                col_env1, col_env2 = st.columns(2)
+                
+                if col_env1.button("Enviar Código para Celular"):
                     if new_email and new_celular:
                         codigo = str(random.randint(100000, 999999))
                         st.session_state.codigo_verificacao = codigo
+                        st.session_state.codigo_timestamp = datetime.now()
                         st.session_state.temp_user_data = {"nome": new_nome, "email": new_email, "celular": new_celular}
                         st.info(f"Código enviado para o celular {new_celular}") 
                     else:
                         st.error("Preencha E-mail e Celular para receber o código.")
                 
-                cod_input = st.text_input("Digite o código recebido no celular", key="new_acc_code")
+                if col_env2.button("Enviar Código para E-mail"):
+                    if new_email:
+                        codigo = str(random.randint(100000, 999999))
+                        st.session_state.codigo_verificacao = codigo
+                        st.session_state.codigo_timestamp = datetime.now()
+                        st.session_state.temp_user_data = {"nome": new_nome, "email": new_email, "celular": new_celular}
+                        st.info(f"Código enviado para o e-mail {new_email}")
+                    else:
+                        st.error("Preencha o campo E-mail para receber o código.")
+                
+                # Título alterado conforme solicitação exata
+                cod_input = st.text_input("Digite o Código recebido no Celular ou no E-mail abaixo e clique em [Validar Código]", key="new_acc_code")
                 
                 if st.button("Validar Código"):
-                    if cod_input == st.session_state.get('codigo_verificacao'):
-                        st.session_state.etapa_auth = "definir_senha"
-                        st.rerun()
+                    if 'codigo_timestamp' in st.session_state:
+                        decorrido = (datetime.now() - st.session_state.codigo_timestamp).total_seconds() / 60
+                        if decorrido > 10:
+                            st.error("O código expirou (validade de 10 minutos). Solicite um novo.")
+                        elif cod_input == st.session_state.get('codigo_verificacao'):
+                            st.session_state.etapa_auth = "definir_senha"
+                            st.rerun()
+                        else:
+                            st.error("Código inválido.")
                     else:
-                        st.error("Código inválido.")
+                        st.error("Solicite um código antes de validar.")
 
                 if st.button("Voltar", key="btn_voltar_new"):
                     st.session_state.etapa_auth = "login"
@@ -202,24 +221,43 @@ if not st.session_state.logado:
             st.subheader("Verificação de Segurança")
             em_recupera = st.text_input("Digite o E-mail da conta")
             
-            if st.button("Enviar Código para Celular"):
+            col_rec1, col_rec2 = st.columns(2)
+            if col_rec1.button("Enviar Código para Celular"):
                 res = supabase.table("usuarios").select("celular").eq("email", em_recupera).execute()
                 if res.data:
                     codigo = str(random.randint(100000, 999999))
                     st.session_state.codigo_verificacao = codigo
+                    st.session_state.codigo_timestamp = datetime.now()
                     st.session_state.temp_email = em_recupera
                     st.info(f"Código enviado para o celular cadastrado.")
                 else:
                     st.error("E-mail não encontrado.")
 
-            cod_input = st.text_input("Digite o código recebido no celular", key="forgot_code")
+            if col_rec2.button("Enviar Código para E-mail"):
+                res = supabase.table("usuarios").select("email").eq("email", em_recupera).execute()
+                if res.data:
+                    codigo = str(random.randint(100000, 999999))
+                    st.session_state.codigo_verificacao = codigo
+                    st.session_state.codigo_timestamp = datetime.now()
+                    st.session_state.temp_email = em_recupera
+                    st.info(f"Código enviado para o e-mail cadastrado.")
+                else:
+                    st.error("E-mail não encontrado.")
+
+            cod_input = st.text_input("Digite o Código recebido no Celular ou no E-mail abaixo e clique em [Validar Código]", key="forgot_code")
             
             if st.button("Validar Código"):
-                if cod_input == st.session_state.get('codigo_verificacao'):
-                    st.session_state.etapa_auth = "definir_senha"
-                    st.rerun()
+                if 'codigo_timestamp' in st.session_state:
+                    decorrido = (datetime.now() - st.session_state.codigo_timestamp).total_seconds() / 60
+                    if decorrido > 10:
+                        st.error("O código expirou (validade de 10 minutos). Solicite um novo.")
+                    elif cod_input == st.session_state.get('codigo_verificacao'):
+                        st.session_state.etapa_auth = "definir_senha"
+                        st.rerun()
+                    else:
+                        st.error("Código inválido.")
                 else:
-                    st.error("Código inválido.")
+                    st.error("Solicite um código antes de validar.")
             
             if st.button("Voltar", key="btn_voltar_forgot"):
                 st.session_state.etapa_auth = "login"
@@ -235,7 +273,6 @@ if not st.session_state.logado:
                     senha_hash = hashlib.sha256(str.encode(nova_se)).hexdigest()
                     
                     if "temp_user_data" in st.session_state:
-                        # ACERTO: Gravação rigorosa dos campos 'nome' e 'celular' na tabela usuarios
                         d = st.session_state.temp_user_data
                         venc_inicial = (datetime.now() + timedelta(days=7)).date().strftime('%Y-%m-%d')
                         res = supabase.table("usuarios").insert({
@@ -246,7 +283,6 @@ if not st.session_state.logado:
                         user_email = d['email']
                         user_venc = venc_inicial
                     else:
-                        # Recuperação de senha
                         user_email = st.session_state.temp_email
                         res = supabase.table("usuarios").update({"senha": senha_hash}).eq("email", user_email).execute()
                         user_id = res.data[0]['id']
