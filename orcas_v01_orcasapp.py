@@ -159,6 +159,29 @@ if 'logado' not in st.session_state:
 if 'etapa_auth' not in st.session_state:
     st.session_state.etapa_auth = "login"
 
+# --- FUNÇÃO DE ENVIO INTEGRADA COM SEUS SECRETS ---
+def disparar_email_codigo(destinatario, codigo):
+    try:
+        # Usa os nomes exatos do seu script de batch
+        server_host = st.secrets["SMTP_SERVER"]
+        server_port = int(st.secrets["SMTP_PORT"])
+        user_email = st.secrets["SMTP_USER"]
+        pass_email = st.secrets["SMTP_PASS"]
+        
+        msg = MIMEText(f"Seu código de verificação ORCAS é: {codigo}. Validade: 10 minutos.")
+        msg['Subject'] = f"Código de Verificação - {codigo}"
+        msg['From'] = user_email
+        msg['To'] = destinatario
+
+        # O Batch usa porta 465 com SSL (padrão para SMTP_SSL)
+        with smtplib.SMTP_SSL(server_host, server_port) as server:
+            server.login(user_email, pass_email)
+            server.sendmail(user_email, destinatario, msg.as_string())
+        return True
+    except Exception as e:
+        st.error(f"Erro técnico ao enviar e-mail: {e}")
+        return False
+
 if not st.session_state.logado:
     st.markdown("<h1 style='text-align: center; margin-top: 50px;'>🐋 ORCAS</h1>", unsafe_allow_html=True)
     c1, c2, c3 = st.columns([1,2,1])
@@ -210,7 +233,6 @@ if not st.session_state.logado:
                 if col_env2.button("Enviar Código para E-mail"):
                     if new_email:
                         codigo = str(random.randint(100000, 999999))
-                        # Chama a função de disparo SMTP
                         if disparar_email_codigo(new_email, codigo):
                             st.session_state.codigo_verificacao = codigo
                             st.session_state.codigo_timestamp = datetime.now()
