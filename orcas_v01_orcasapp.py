@@ -9,6 +9,7 @@ from supabase import Client
 import random
 import smtplib  # Adicione este
 from email.mime.text import MIMEText # Adicione este
+import os
 
 # --- 1. IMPORTAÇÃO DOS MÓDULOS EXTERNOS ---
 import orcas_v01_gestao as gestao
@@ -18,23 +19,26 @@ import orcas_v01_projetar as proj
 import orcas_v01_conciliacao as conc
 import orcas_v01_admin as adm
 
-# Para fazer o envio de email com código de verificação
+# --- FUNÇÃO DE ENVIO INTEGRADA (Colocar no topo do arquivo) ---
 def disparar_email_codigo(destinatario, codigo):
     try:
-        usuario_email = st.secrets["email_auth"]["user"]
-        senha_email = st.secrets["email_auth"]["password"]
+        # Puxa dos Secrets do Streamlit (deve ter os mesmos nomes do seu Batch)
+        server_host = st.secrets["SMTP_SERVER"]
+        server_port = int(st.secrets["SMTP_PORT"])
+        user_email = st.secrets["SMTP_USER"]
+        pass_email = st.secrets["SMTP_PASS"]
         
         msg = MIMEText(f"Seu código de verificação ORCAS é: {codigo}. Validade: 10 minutos.")
         msg['Subject'] = f"Código de Verificação - {codigo}"
-        msg['From'] = usuario_email
+        msg['From'] = user_email
         msg['To'] = destinatario
 
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-            server.login(usuario_email, senha_email)
-            server.sendmail(usuario_email, destinatario, msg.as_string())
+        with smtplib.SMTP_SSL(server_host, server_port) as server:
+            server.login(user_email, pass_email)
+            server.sendmail(user_email, destinatario, msg.as_string())
         return True
     except Exception as e:
-        st.error(f"Erro técnico ao enviar e-mail: {e}")
+        st.error(f"Erro ao disparar e-mail: {e}")
         return False
 
 # --- 2. SEGURANÇA E CONEXÃO ---
@@ -158,29 +162,6 @@ if 'logado' not in st.session_state:
     st.session_state.logado = False
 if 'etapa_auth' not in st.session_state:
     st.session_state.etapa_auth = "login"
-
-# --- FUNÇÃO DE ENVIO INTEGRADA COM SEUS SECRETS ---
-def disparar_email_codigo(destinatario, codigo):
-    try:
-        # Usa os nomes exatos do seu script de batch
-        server_host = st.secrets["SMTP_SERVER"]
-        server_port = int(st.secrets["SMTP_PORT"])
-        user_email = st.secrets["SMTP_USER"]
-        pass_email = st.secrets["SMTP_PASS"]
-        
-        msg = MIMEText(f"Seu código de verificação ORCAS é: {codigo}. Validade: 10 minutos.")
-        msg['Subject'] = f"Código de Verificação - {codigo}"
-        msg['From'] = user_email
-        msg['To'] = destinatario
-
-        # O Batch usa porta 465 com SSL (padrão para SMTP_SSL)
-        with smtplib.SMTP_SSL(server_host, server_port) as server:
-            server.login(user_email, pass_email)
-            server.sendmail(user_email, destinatario, msg.as_string())
-        return True
-    except Exception as e:
-        st.error(f"Erro técnico ao enviar e-mail: {e}")
-        return False
 
 if not st.session_state.logado:
     st.markdown("<h1 style='text-align: center; margin-top: 50px;'>🐋 ORCAS</h1>", unsafe_allow_html=True)
