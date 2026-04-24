@@ -7,6 +7,8 @@ import plotly.graph_objects as go
 import streamlit.components.v1 as components
 from supabase import Client
 import random
+import smtplib  # Adicione este
+from email.mime.text import MIMEText # Adicione este
 
 # --- 1. IMPORTAÇÃO DOS MÓDULOS EXTERNOS ---
 import orcas_v01_gestao as gestao
@@ -15,6 +17,25 @@ import orcas_v01_lancamentos as lanc
 import orcas_v01_projetar as proj
 import orcas_v01_conciliacao as conc
 import orcas_v01_admin as adm
+
+# Para fazer o envio de email com código de verificação
+def disparar_email_codigo(destinatario, codigo):
+    try:
+        usuario_email = st.secrets["email_auth"]["user"]
+        senha_email = st.secrets["email_auth"]["password"]
+        
+        msg = MIMEText(f"Seu código de verificação ORCAS é: {codigo}. Validade: 10 minutos.")
+        msg['Subject'] = f"Código de Verificação - {codigo}"
+        msg['From'] = usuario_email
+        msg['To'] = destinatario
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(usuario_email, senha_email)
+            server.sendmail(usuario_email, destinatario, msg.as_string())
+        return True
+    except Exception as e:
+        st.error(f"Erro técnico ao enviar e-mail: {e}")
+        return False
 
 # --- 2. SEGURANÇA E CONEXÃO ---
 try:
@@ -174,7 +195,6 @@ if not st.session_state.logado:
                 new_email = st.text_input("E-mail")
                 new_celular = st.text_input("Celular (com DDD)")
                 
-                # Colunas para botões lado a lado conforme solicitado
                 col_env1, col_env2 = st.columns(2)
                 
                 if col_env1.button("Enviar Código para Celular"):
@@ -190,14 +210,15 @@ if not st.session_state.logado:
                 if col_env2.button("Enviar Código para E-mail"):
                     if new_email:
                         codigo = str(random.randint(100000, 999999))
-                        st.session_state.codigo_verificacao = codigo
-                        st.session_state.codigo_timestamp = datetime.now()
-                        st.session_state.temp_user_data = {"nome": new_nome, "email": new_email, "celular": new_celular}
-                        st.info(f"Código enviado para o e-mail {new_email}")
+                        # Chama a função de disparo SMTP
+                        if disparar_email_codigo(new_email, codigo):
+                            st.session_state.codigo_verificacao = codigo
+                            st.session_state.codigo_timestamp = datetime.now()
+                            st.session_state.temp_user_data = {"nome": new_nome, "email": new_email, "celular": new_celular}
+                            st.info(f"Código enviado para o e-mail {new_email}")
                     else:
                         st.error("Preencha o campo E-mail para receber o código.")
                 
-                # Título alterado conforme solicitação exata
                 cod_input = st.text_input("Digite o Código recebido no Celular ou no E-mail abaixo e clique em [Validar Código]", key="new_acc_code")
                 
                 if st.button("Validar Código"):
@@ -237,10 +258,11 @@ if not st.session_state.logado:
                 res = supabase.table("usuarios").select("email").eq("email", em_recupera).execute()
                 if res.data:
                     codigo = str(random.randint(100000, 999999))
-                    st.session_state.codigo_verificacao = codigo
-                    st.session_state.codigo_timestamp = datetime.now()
-                    st.session_state.temp_email = em_recupera
-                    st.info(f"Código enviado para o e-mail cadastrado.")
+                    if disparar_email_codigo(em_recupera, codigo):
+                        st.session_state.codigo_verificacao = codigo
+                        st.session_state.codigo_timestamp = datetime.now()
+                        st.session_state.temp_email = em_recupera
+                        st.info(f"Código enviado para o e-mail cadastrado.")
                 else:
                     st.error("E-mail não encontrado.")
 
