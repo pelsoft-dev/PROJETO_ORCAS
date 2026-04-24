@@ -248,7 +248,8 @@ if not st.session_state.logado:
         elif st.session_state.etapa_auth == "esqueci_senha":
             st.subheader("Verificação de Segurança")
             # em_recupera = st.text_input("Digite o E-mail da conta")
-            em_recupera = st.text_input("Digite o E-mail da conta", key="email_recuperacao")
+            # em_recupera = st.text_input("Digite o E-mail da conta", key="email_recuperacao")
+            em_recupera = st.text_input("Digite o E-mail da conta", key="forgot_email_field")
             
             col_rec1, col_rec2 = st.columns(2)
             if col_rec1.button("Enviar Código para Celular"):
@@ -275,7 +276,14 @@ if not st.session_state.logado:
                     st.error("E-mail não encontrado.")
 
             # cod_input = st.text_input("Digite o Código recebido no Celular ou no E-mail abaixo e clique em [Validar Código]", key="forgot_code")
-            cod_input = st.text_input("Digite o Código recebido no Celular ou no E-mail abaixo e clique em [Validar Código]", value="", key="forgot_code_input_unique")
+            # cod_input = st.text_input("Digite o Código recebido no Celular ou no E-mail abaixo e clique em [Validar Código]", value="", key="forgot_code_input_unique")
+            cod_input = st.text_input(
+                "Digite o Código recebido no Celular ou no E-mail abaixo e clique em [Validar Código]", 
+                value="", 
+                key="forgot_code_final_fix",
+                placeholder="000000"
+            )
+
             if st.button("Validar Código"):
                 if 'codigo_timestamp' in st.session_state:
                     decorrido = (datetime.now() - st.session_state.codigo_timestamp).total_seconds() / 60
