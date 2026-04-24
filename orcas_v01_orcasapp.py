@@ -19,10 +19,10 @@ import orcas_v01_projetar as proj
 import orcas_v01_conciliacao as conc
 import orcas_v01_admin as adm
 
-# --- FUNÇÃO DE ENVIO INTEGRADA (Colocar no topo do arquivo) ---
+# --- FUNÇÃO DE ENVIO INTEGRADA (Versão Corrigida para Porta 587/TLS) ---
 def disparar_email_codigo(destinatario, codigo):
     try:
-        # Puxa dos Secrets do Streamlit (deve ter os mesmos nomes do seu Batch)
+        # Puxa dos Secrets do Streamlit
         server_host = st.secrets["SMTP_SERVER"]
         server_port = int(st.secrets["SMTP_PORT"])
         user_email = st.secrets["SMTP_USER"]
@@ -30,12 +30,16 @@ def disparar_email_codigo(destinatario, codigo):
         
         msg = MIMEText(f"Seu código de verificação ORCAS é: {codigo}. Validade: 10 minutos.")
         msg['Subject'] = f"Código de Verificação - {codigo}"
-        msg['From'] = user_email
+        msg['From'] = f"ORCAS App <{user_email}>"
         msg['To'] = destinatario
 
-        with smtplib.SMTP_SSL(server_host, server_port) as server:
-            server.login(user_email, pass_email)
-            server.sendmail(user_email, destinatario, msg.as_string())
+        # MUDANÇA AQUI: smtplib.SMTP em vez de SMTP_SSL
+        server = smtplib.SMTP(server_host, server_port)
+        server.starttls() # Inicia a segurança TLS necessária para a porta 587
+        server.login(user_email, pass_email)
+        server.sendmail(user_email, destinatario, msg.as_string())
+        server.quit()
+        
         return True
     except Exception as e:
         st.error(f"Erro ao disparar e-mail: {e}")
