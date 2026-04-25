@@ -241,7 +241,8 @@ if not st.session_state.logado:
                     else:
                         st.error("Solicite um código antes de validar.")
 
-                if st.button("Voltar", key="btn_voltar_new"):
+                # Paulo --- 2026-04-24 --- if st.button("Voltar", key="btn_voltar_new"):
+                if st.button("Voltar", key="btn_voltar_forgot_final"):
                     st.session_state.etapa_auth = "login"
                     st.rerun()
 
