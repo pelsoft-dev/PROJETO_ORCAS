@@ -247,57 +247,66 @@ if not st.session_state.logado:
 
         elif st.session_state.etapa_auth == "esqueci_senha":
             st.subheader("Verificação de Segurança")
-            # em_recupera = st.text_input("Digite o E-mail da conta")
-            # em_recupera = st.text_input("Digite o E-mail da conta", key="email_recuperacao")
-            em_recupera = st.text_input("Digite o E-mail da conta", key="forgot_email_field")
+            
+            # Usando uma chave que o navegador não associa a e-mail para evitar autofill
+            conta_id = st.text_input("Informe a identificação da conta", key="usr_identity_check")
             
             col_rec1, col_rec2 = st.columns(2)
             if col_rec1.button("Enviar Código para Celular"):
-                res = supabase.table("usuarios").select("celular").eq("email", em_recupera).execute()
-                if res.data:
-                    codigo = str(random.randint(100000, 999999))
-                    st.session_state.codigo_verificacao = codigo
-                    st.session_state.codigo_timestamp = datetime.now()
-                    st.session_state.temp_email = em_recupera
-                    st.info(f"Código enviado para o celular cadastrado.")
-                else:
-                    st.error("E-mail não encontrado.")
-
-            if col_rec2.button("Enviar Código para E-mail"):
-                res = supabase.table("usuarios").select("email").eq("email", em_recupera).execute()
-                if res.data:
-                    codigo = str(random.randint(100000, 999999))
-                    if disparar_email_codigo(em_recupera, codigo):
+                if conta_id:
+                    res = supabase.table("usuarios").select("celular").eq("email", conta_id).execute()
+                    if res.data:
+                        codigo = str(random.randint(100000, 999999))
                         st.session_state.codigo_verificacao = codigo
                         st.session_state.codigo_timestamp = datetime.now()
-                        st.session_state.temp_email = em_recupera
-                        st.info(f"Código enviado para o e-mail cadastrado.")
+                        st.session_state.temp_email = conta_id
+                        st.info(f"Código enviado para o celular cadastrado.")
+                    else:
+                        st.error("Conta não localizada.")
                 else:
-                    st.error("E-mail não encontrado.")
+                    st.warning("Informe o e-mail primeiro.")
 
-            # cod_input = st.text_input("Digite o Código recebido no Celular ou no E-mail abaixo e clique em [Validar Código]", key="forgot_code")
-            # cod_input = st.text_input("Digite o Código recebido no Celular ou no E-mail abaixo e clique em [Validar Código]", value="", key="forgot_code_input_unique")
-            cod_input = st.text_input(
-                "Digite o Código recebido no Celular ou no E-mail abaixo e clique em [Validar Código]", 
+            if col_rec2.button("Enviar Código para E-mail"):
+                if conta_id:
+                    res = supabase.table("usuarios").select("email").eq("email", conta_id).execute()
+                    if res.data:
+                        codigo = str(random.randint(100000, 999999))
+                        if disparar_email_codigo(conta_id, codigo):
+                            st.session_state.codigo_verificacao = codigo
+                            st.session_state.codigo_timestamp = datetime.now()
+                            st.session_state.temp_email = conta_id
+                            st.info(f"Código enviado para o e-mail cadastrado.")
+                    else:
+                        st.error("Conta não localizada.")
+                else:
+                    st.warning("Informe o e-mail primeiro.")
+
+            st.write("---")
+            
+            # Campo de código com nome e placeholder que 'quebram' o preenchimento automático do navegador
+            input_val = st.text_input(
+                "Digite a sequência numérica recebida", 
                 value="", 
-                key="forgot_code_final_fix",
-                placeholder="000000"
+                placeholder="Ex: 123456",
+                key="field_code_validation_secure"
             )
 
-            if st.button("Validar Código"):
+            if st.button("Validar Código", use_container_width=True):
                 if 'codigo_timestamp' in st.session_state:
                     decorrido = (datetime.now() - st.session_state.codigo_timestamp).total_seconds() / 60
                     if decorrido > 10:
-                        st.error("O código expirou (validade de 10 minutos). Solicite um novo.")
-                    elif cod_input == st.session_state.get('codigo_verificacao'):
+                        st.error("O código expirou. Solicite um novo.")
+                    elif input_val == st.session_state.get('codigo_verificacao'):
+                        # Se validou, garante que o e-mail alvo vá para a próxima etapa
+                        st.session_state.temp_email = conta_id
                         st.session_state.etapa_auth = "definir_senha"
                         st.rerun()
                     else:
-                        st.error("Código inválido.")
+                        st.error("Sequência numérica incorreta.")
                 else:
-                    st.error("Solicite um código antes de validar.")
+                    st.error("Gere um código antes de validar.")
             
-            if st.button("Voltar", key="btn_voltar_forgot"):
+            if st.button("Voltar", key="btn_voltar_forgot_final"):
                 st.session_state.etapa_auth = "login"
                 st.rerun()
 
