@@ -12,6 +12,10 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
     hoje = datetime.now().date()
     uid_gestao = ID_USUARIO_LOGADO
 
+    # --- REGRAS DE NEGÓCIO CENTRALIZADAS ---
+    DESC_6_MESES = 0.05  # 5%
+    DESC_12_MESES = 0.11 # 11%
+
     if st.session_state.get('msg_sucesso'):
         st.success(st.session_state.msg_sucesso)
         st.session_state.msg_sucesso = None
@@ -197,6 +201,46 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 st.rerun()
     else:
         st.info("Por favor, selecione um plano existente ou digite um nome para iniciar a configuração.")
+
+# --- BLOCO DE SELEÇÃO DE PAGAMENTO ---
+    st.write("---")
+    st.subheader("💳 Finalizar Assinatura")
+    
+    # Opções de antecipação
+    tipo_pagamento = st.radio(
+        "Escolha o período de renovação:",
+        ["Mensal (Sem desconto)", "6 Meses (5% de desconto)", "12 Meses (11% de desconto)"],
+        horizontal=True
+    )
+
+    # Cálculo dinâmico baseado na linha 128 (v_mensal_total)
+    if "6 Meses" in tipo_pagamento:
+        qtd_meses = 6
+        valor_bruto = v_mensal_total * 6
+        valor_final = valor_bruto * (1 - DESC_6_MESES)
+        label_desc = "5% OFF"
+    elif "12 Meses" in tipo_pagamento:
+        qtd_meses = 12
+        valor_bruto = v_mensal_total * 12
+        valor_final = valor_bruto * (1 - DESC_12_MESES)
+        label_desc = "11% OFF"
+    else:
+        qtd_meses = 1
+        valor_final = v_mensal_total
+        label_desc = "Valor Padrão"
+
+    col_res1, col_res2 = st.columns([2, 1])
+    with col_res1:
+        st.write(f"**Resumo:** {tipo_pagamento}")
+        st.write(f"**Total a pagar:** :blue[R$ {valor_final:.2f}] ({label_desc})")
+    
+    with col_res2:
+        if st.button("🚀 PAGAR AGORA", use_container_width=True):
+            # Guardamos tudo na sacola para o próximo módulo
+            st.session_state.valor_checkout = valor_final
+            st.session_state.descricao_pag = f"Assinatura ORCAS - {qtd_meses} Meses"
+            st.session_state.escolha = "💳 Pagamentos"
+            st.rerun()
 
     st.markdown("""
     <div style="font-size: 12px; color: #333; margin-top: 20px; text-align: justify; line-height: 1.6;">

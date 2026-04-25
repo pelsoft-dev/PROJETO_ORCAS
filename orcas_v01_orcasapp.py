@@ -18,6 +18,7 @@ import orcas_v01_lancamentos as lanc
 import orcas_v01_projetar as proj
 import orcas_v01_conciliacao as conc
 import orcas_v01_admin as adm
+import orcas_v01_pagamentos as pag
 
 # --- FUNÇÃO DE ENVIO INTEGRADA (Versão Corrigida para Porta 587/TLS) ---
 def disparar_email_codigo(destinatario, codigo):
@@ -136,7 +137,7 @@ st.markdown("""
         overflow-x: auto !important;
     }
 
-    /* Estilos customizados ORCAS */
+    /* Estilos customizados ORCAS 
     .logo-sidebar { font-size: 2.2rem !important; font-weight: bold; color: #1E3A8A; font-family: 'Arial Black', sans-serif; margin-bottom: 20px; }
     .user-email { font-size: 0.85rem; color: #64748b; margin-bottom: 2px; }
     .venc-text { font-size: 0.8rem; color: #e11d48; font-weight: bold; margin-bottom: 10px; }
@@ -241,8 +242,7 @@ if not st.session_state.logado:
                     else:
                         st.error("Solicite um código antes de validar.")
 
-                # Paulo --- 2026-04-24 --- if st.button("Voltar", key="btn_voltar_new"):
-                if st.button("Voltar", key="btn_voltar_forgot_final"):
+                if st.button("Voltar", key="btn_voltar_new"):
                     st.session_state.etapa_auth = "login"
                     st.rerun()
 
@@ -418,7 +418,16 @@ elif st.session_state.escolha == "✅ Conciliação":
 elif st.session_state.escolha == "⚙️ Gestão":
     gestao.exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, format_moeda, parse_moeda, security)
 elif st.session_state.escolha == "📊 Admin":
-    adm.exibir_admin(df, supabase, ir_para_o_topo)
+    adm.exibir_admin(df, supabase, ID_USUARIO_LOGADO, ir_para_o_topo)
 
+# ... (Bloco de roteamento inserido -PAGAMENTOS- em 2026-04-24)
+
+elif st.session_state.escolha == "💳 Pagamentos":
+    pag.exibir_pagamentos(supabase, ID_USUARIO_LOGADO)
+
+# --- O RODAPÉ DEVE VIR ANTES DO STOP ---
 st.divider()
 st.caption(f"ORCAS v01 | Usuário: {st.session_state.usuario} | Projeto: {st.session_state.projeto_ativo}")
+
+# --- O STOP VEM POR ÚLTIMO ---
+st.stop()
