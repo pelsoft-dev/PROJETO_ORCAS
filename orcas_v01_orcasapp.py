@@ -79,14 +79,13 @@ def recolher_menu_via_clique():
 
 st.markdown("""
     <style>
-    /* Oculta menus nativos e footer */
+    /* 1. Oculta menus nativos e footer */
     #MainMenu {visibility: hidden;} 
     footer {visibility: hidden;}
     .stAppDeployButton {display:none !important;}
     [data-testid="stStatusWidget"] {display:none !important;}
     
-    /* SOLUÇÃO DEFINITIVA PARA O BOTÃO >> (ABRIR MENU NO CELULAR) */
-    /* Empurramos ele para baixo da barra do GitHub/Fork e damos destaque */
+    /* 2. SOLUÇÃO PARA O BOTÃO >> (MENU CELULAR) */
     [data-testid="stSidebarCollapsedControl"] {
         top: 60px !important; 
         left: 20px !important;
@@ -95,11 +94,11 @@ st.markdown("""
         width: 45px !important;
         height: 45px !important;
         display: flex !important;
-        z-index: 9999999 !important; /* Força ficar na frente de tudo */
+        z-index: 9999999 !important;
         box-shadow: 2px 2px 10px rgba(0,0,0,0.3) !important;
     }
 
-    /* Força o ícone >> a ser branco para contrastar */
+    /* Ícone branco no botão do celular */
     [data-testid="stSidebarCollapsedControl"] button svg {
         fill: white !important;
         width: 25px !important;
@@ -110,7 +109,7 @@ st.markdown("""
         background-color: rgba(0,0,0,0) !important;
     }
 
-    /* Remove badges flutuantes */
+    /* 3. Remove badges flutuantes */
     [data-testid="stDecoration"],
     .viewerBadge_container__1QSob,
     .viewerBadge_link__1S137,
@@ -119,13 +118,13 @@ st.markdown("""
         visibility: hidden !important;
     }
 
-    /* Ajuste de altura para conteúdo */
+    /* 4. Ajuste de altura para conteúdo principal */
     .block-container {
-        padding-top: 4.0rem !important;
-        margin-top: -1.5rem !important;
+        padding-top: 3.5rem !important;
+        margin-top: -1.0rem !important;
     }
 
-    /* FORÇA COMPACTAÇÃO RIGOROSA - SEM QUEBRA DE LINHA */
+    /* 5. FORÇA COMPACTAÇÃO RIGOROSA DE TABELAS */
     [data-testid="stTable"] td, [data-testid="stTable"] th,
     [data-testid="stDataFrame"] td, [data-testid="stDataFrame"] th,
     table td, table th {
@@ -137,17 +136,66 @@ st.markdown("""
         overflow-x: auto !important;
     }
 
-    /* Estilos customizados ORCAS 
-    .logo-sidebar { font-size: 2.2rem !important; font-weight: bold; color: #1E3A8A; font-family: 'Arial Black', sans-serif; margin-bottom: 20px; }
-    .user-email { font-size: 0.85rem; color: #64748b; margin-bottom: 2px; }
-    .venc-text { font-size: 0.8rem; color: #e11d48; font-weight: bold; margin-bottom: 10px; }
-    .titulo-tela { font-size: 1.6rem; font-weight: bold; color: #1E3A8A; border-bottom: 2px solid #E5E7EB; margin-bottom: 15px; padding-bottom: 5px; }
-    .project-tag-sidebar { color: #1E3A8A; font-weight: bold; font-size: 0.9rem; margin-bottom: 15px; padding: 8px; border-left: 5px solid #1E3A8A; background: #F3F4F6; border-radius: 4px; }
+    /* 6. ESTILOS CUSTOMIZADOS ORCAS (Restaurados) */
+    .logo-sidebar { 
+        font-size: 2.2rem !important; 
+        font-weight: bold; 
+        color: #1E3A8A; 
+        font-family: 'Arial Black', sans-serif; 
+        margin-bottom: 20px; 
+    }
     
+    .user-email { 
+        font-size: 0.85rem; 
+        color: #64748b; 
+        margin-bottom: 2px; 
+    }
+    
+    .venc-text { 
+        font-size: 0.8rem; 
+        color: #e11d48; 
+        font-weight: bold; 
+        margin-bottom: 10px; 
+    }
+    
+    .titulo-tela { 
+        font-size: 1.6rem; 
+        font-weight: bold; 
+        color: #1E3A8A; 
+        border-bottom: 2px solid #E5E7EB; 
+        margin-bottom: 15px; 
+        padding-bottom: 5px; 
+    }
+    
+    .project-tag-sidebar { 
+        color: #1E3A8A; 
+        font-weight: bold; 
+        font-size: 0.9rem; 
+        margin-bottom: 15px; 
+        padding: 8px; 
+        border-left: 5px solid #1E3A8A; 
+        background: #F3F4F6; 
+        border-radius: 4px; 
+    }
+    
+    /* Garante que textos de alerta e info quebrem linha normalmente */
     .info-pagamento, .stAlert p { 
         white-space: normal !important; 
         word-wrap: break-word !important; 
         display: block !important;
+    }
+
+    /* 7. RESET ESTÉTICO DO MENU LATERAL (Para voltar ao Anexo 02) */
+    /* Garante fonte padrão do Streamlit nos itens do menu */
+    [data-testid="stSidebar"] [data-testid="stWidgetLabel"] p {
+        font-size: 1rem !important;
+        font-weight: 500 !important;
+        color: #31333F !important;
+    }
+    
+    /* Ajuste de espaçamento entre itens do rádio */
+    [data-testid="stSidebar"] .stRadio div[role="radiogroup"] {
+        gap: 0.5rem !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -381,7 +429,10 @@ with st.sidebar:
         st.markdown(f'<div class="project-tag-sidebar">Plano Ativo: {st.session_state.projeto_ativo}</div>', unsafe_allow_html=True)
     
     st.divider()
-    menu_opcoes = ["🏠 Dashboard", "📑 Lançamentos", "📅 Projetar", "✅ Conciliação", "⚙️ Gestão", "📊 Admin"]
+    # menu_opcoes = ["🏠 Dashboard", "📑 Lançamentos", "📅 Projetar", "✅ Conciliação", "⚙️ Gestão", "📊 Admin"]
+    # Incluido em 2026-04-25 "💳 Pagamentos"
+    opcoes_menu = ["🏠 Dashboard", "📝 Lançamentos", "🗓️ Projetar", "✅ Conciliação", "⚙️ Gestão", "📊 Admin", "💳 Pagamentos"]
+
     idx_inicial = menu_opcoes.index(st.session_state.escolha) if st.session_state.escolha in menu_opcoes else 4
     
     escolha_temp = st.radio("Menu de Navegação", menu_opcoes, index=idx_inicial)

@@ -183,9 +183,9 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             if btn_col2.button("Excluir Plano", type="primary", use_container_width=True):
                 st.session_state.confirmar_exclusao_plano = True
 
-        if st.button("Ir para Pagamentos", use_container_width=True, type="secondary"):
-            st.session_state.escolha = "💳 Pagamentos"
-            st.rerun()
+        # if st.button("Ir para Pagamentos", use_container_width=True, type="secondary"):
+        #    st.session_state.escolha = "💳 Pagamentos"
+        #    st.rerun()
 
         if st.session_state.get('confirmar_exclusao_plano', False):
             st.error(f"Deseja mesmo excluir o plano {st.session_state.projeto_ativo}?")
