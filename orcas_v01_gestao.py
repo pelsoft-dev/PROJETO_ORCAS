@@ -12,6 +12,8 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
     hoje = datetime.now().date()
     uid_gestao = ID_USUARIO_LOGADO
 
+    v_mensal_total = 0.0
+
     # --- REGRAS DE NEGÓCIO CENTRALIZADAS ---
     DESC_6_MESES = 0.05  # 5%
     DESC_12_MESES = 0.11 # 11%
@@ -213,7 +215,8 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         horizontal=True
     )
 
-    # Cálculo dinâmico baseado na linha 128 (v_mensal_total)
+    # Cálculo dinâmico baseado na variável v_mensal_total (que deve estar definida acima)
+    # Usamos o round para evitar dízimas no valor final
     if "6 Meses" in tipo_pagamento:
         qtd_meses = 6
         valor_bruto = v_mensal_total * 6
@@ -235,15 +238,19 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         st.write(f"**Total a pagar:** :blue[R$ {valor_final:.2f}] ({label_desc})")
     
     with col_res2:
+        # Botão único e definitivo para o fluxo de pagamento
         if st.button("🚀 PAGAR AGORA", use_container_width=True):
-            # Guardamos tudo na sacola para o próximo módulo
-            st.session_state.valor_checkout = valor_final
+            # Guardamos as informações no estado da sessão
+            st.session_state.valor_checkout = round(valor_final, 2)
             st.session_state.descricao_pag = f"Assinatura ORCAS - {qtd_meses} Meses"
+            
+            # ATENÇÃO: Verifique se no orcasapp.py o item é exatamente "💳 Pagamentos"
             st.session_state.escolha = "💳 Pagamentos"
             st.rerun()
 
+    # Rodapé informativo fixo
     st.markdown("""
-    <div style="font-size: 12px; color: #333; margin-top: 20px; text-align: justify; line-height: 1.6;">
+    <div style="font-size: 12px; color: #333; margin-top: 20px; text-align: justify; line-height: 1.6; border-top: 1px solid #eee; padding-top: 10px;">
     Sua Assinatura ORCAS BABY mensal custa R$ 19,90 e contempla 2 Planos de 24 meses cada um, mas se você quiser ou necessitar, é possível aumentar o período de um Plano em blocos adicionais de 12 meses tendo um acréscimo de R$ 6,40 para cada 12 meses adicionais. Para aumentar o número de Planos (Padrão - 24 meses), o valor é de R$ 12,80 por Plano adicional. Para receber um Resumo Diário das análises e pendências como, o que preciso pagar e receber hoje, o que ainda está em aberto, quanto já gastei de supermercado até hoje, quanto já gastei nessa reforma, etc de seu Plano via Whatsapp ou E-mail terá um acréscimo de R$ 9,85 por Plano.
     </div>
     """, unsafe_allow_html=True)
