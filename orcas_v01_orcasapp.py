@@ -429,43 +429,67 @@ with st.sidebar:
         st.markdown(f'<div class="project-tag-sidebar">Plano Ativo: {st.session_state.projeto_ativo}</div>', unsafe_allow_html=True)
     
     st.divider()
-    menu_opcoes = ["🏠 Dashboard", "📑 Lançamentos", "📅 Projetar", "✅ Conciliação", "⚙️ Gestão", "📊 Admin"]
+    # menu_opcoes = ["🏠 Dashboard", "📑 Lançamentos", "📅 Projetar", "✅ Conciliação", "⚙️ Gestão", "📊 Admin"]
     # Incluido em 2026-04-25 "💳 Pagamentos"
     # menu_opcoes = ["🏠 Dashboard", "📝 Lançamentos", "🗓️ Projetar", "✅ Conciliação", "⚙️ Gestão", "📊 Admin", "💳 Pagamentos"]
-
-    idx_inicial = menu_opcoes.index(st.session_state.escolha) 
+    #
+    # idx_inicial = menu_opcoes.index(st.session_state.escolha) 
     # if st.session_state.escolha in menu_opcoes else 4
     # 2. Lógica para manter o índice correto no rádio lateral
+    # if st.session_state.escolha in menu_opcoes:
+    #     idx_selecionado = menu_opcoes.index(st.session_state.escolha)
+    # else:
+    #     # Se estivermos em 'Pagamentos', deixamos o marcador visual na 'Gestão'
+    #     idx_selecionado = 4 
+    #
+    # escolha_sidebar = st.sidebar.radio("Menu de Navegação", menu_opcoes, index=idx_selecionado)
+    # 
+    # 4. Atualização do estado (Se o usuário clicar no menu, muda a tela)
+    # Mas ATENÇÃO: se estivermos em 'Pagamentos', só mudamos se ele clicar em algo diferente de 'Gestão'
+    # if escolha_sidebar != st.session_state.escolha:
+    #     # Se a escolha atual for Pagamentos e o rádio estiver na Gestão (índice 4), 
+    #     # não resetamos, a menos que o usuário clique em outro item.
+    #     if st.session_state.escolha == "💳 Pagamentos" and escolha_sidebar == "⚙️ Gestão":
+    #         pass 
+    #     else:
+    #         st.session_state.escolha = escolha_sidebar
+    #         st.rerun()
+    #
+    # Atualiza a escolha se o usuário clicar no menu lateral
+    # if escolha_sidebar != st.session_state.escolha and st.session_state.escolha != "💳 Pagamentos":
+    #     st.session_state.escolha = escolha_sidebar
+    #
+    # escolha_temp = st.radio("Menu de Navegação", menu_opcoes, index=idx_inicial)
+    # escolha_temp = st.sidebar.radio("Menu de Navegação", menu_opcoes, index=idx_inicial)
+    #
+    # if escolha_temp != st.session_state.escolha and st.session_state.escolha != "💳 Pagamentos":
+    #     st.session_state.escolha = escolha_temp
+    #     st.rerun
+    
+    # 1. Lista de menu (Pagamentos fica fora para ser 'invisível' no menu lateral)
+    menu_opcoes = ["🏠 Dashboard", "📝 Lançamentos", "🗓️ Projetar", "✅ Conciliação", "⚙️ Gestão", "📊 Admin"]
+
+    # 2. Lógica para definir qual item do menu ficará marcado visualmente
     if st.session_state.escolha in menu_opcoes:
         idx_selecionado = menu_opcoes.index(st.session_state.escolha)
     else:
-        # Se estivermos em 'Pagamentos', deixamos o marcador visual na 'Gestão'
+        # Se estivermos na tela de Pagamentos (que não está na lista), 
+        # o marcador visual do menu lateral deve ficar na 'Gestão' (índice 4)
         idx_selecionado = 4 
 
+    # 3. CRIAÇÃO DO MENU LATERAL (Apenas uma vez!)
     escolha_sidebar = st.sidebar.radio("Menu de Navegação", menu_opcoes, index=idx_selecionado)
 
-    # 4. Atualização do estado (Se o usuário clicar no menu, muda a tela)
-    # Mas ATENÇÃO: se estivermos em 'Pagamentos', só mudamos se ele clicar em algo diferente de 'Gestão'
+    # 4. Atualização do estado e Navegação
     if escolha_sidebar != st.session_state.escolha:
         # Se a escolha atual for Pagamentos e o rádio estiver na Gestão (índice 4), 
-        # não resetamos, a menos que o usuário clique em outro item.
+        # ignoramos a mudança (a menos que o usuário clique em outro item diferente de Gestão)
         if st.session_state.escolha == "💳 Pagamentos" and escolha_sidebar == "⚙️ Gestão":
             pass 
         else:
             st.session_state.escolha = escolha_sidebar
             st.rerun()
 
-    # Atualiza a escolha se o usuário clicar no menu lateral
-    # if escolha_sidebar != st.session_state.escolha and st.session_state.escolha != "💳 Pagamentos":
-    #     st.session_state.escolha = escolha_sidebar
-
-    # escolha_temp = st.radio("Menu de Navegação", menu_opcoes, index=idx_inicial)
-    # escolha_temp = st.sidebar.radio("Menu de Navegação", menu_opcoes, index=idx_inicial)
-    
-    # if escolha_temp != st.session_state.escolha and st.session_state.escolha != "💳 Pagamentos":
-    #     st.session_state.escolha = escolha_temp
-    #     st.rerun
-    
     st.divider()
     if st.button("Sair do Sistema"):
         st.session_state.clear()
