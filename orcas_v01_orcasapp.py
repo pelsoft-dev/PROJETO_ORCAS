@@ -434,13 +434,18 @@ with st.sidebar:
     # menu_opcoes = ["🏠 Dashboard", "📝 Lançamentos", "🗓️ Projetar", "✅ Conciliação", "⚙️ Gestão", "📊 Admin", "💳 Pagamentos"]
 
     idx_inicial = menu_opcoes.index(st.session_state.escolha) if st.session_state.escolha in menu_opcoes else 4
+
+    # escolha_temp = st.radio("Menu de Navegação", menu_opcoes, index=idx_inicial)
+    escolha_temp = st.sidebar.radio("Menu de Navegação", menu_opcoes, index=idx_inicial)
     
-    escolha_temp = st.radio("Menu de Navegação", menu_opcoes, index=idx_inicial)
-    
-    if escolha_temp != st.session_state.escolha:
+    if escolha_temp != st.session_state.escolha and st.session_state.escolha != "💳 Pagamentos":
         st.session_state.escolha = escolha_temp
-        recolher_menu_via_clique() 
-        st.rerun()
+        st.rerun
+   
+    # if escolha_temp != st.session_state.escolha:
+        # st.session_state.escolha = escolha_temp
+        # recolher_menu_via_clique() 
+        # st.rerun()
     
     st.divider()
     if st.button("Sair do Sistema"):
@@ -474,6 +479,7 @@ elif st.session_state.escolha == "📊 Admin":
 # ... (Bloco de roteamento inserido -PAGAMENTOS- em 2026-04-24)
 
 elif st.session_state.escolha == "💳 Pagamentos":
+    import orcas_v01_pagamentos as pag
     pag.exibir_pagamentos(supabase, ID_USUARIO_LOGADO)
 
 # --- O RODAPÉ DEVE VIR ANTES DO STOP ---

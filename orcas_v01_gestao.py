@@ -240,13 +240,18 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
     with col_res2:
         # Botão único e definitivo para o fluxo de pagamento
         if st.button("🚀 PAGAR AGORA", use_container_width=True):
-            # Guardamos as informações no estado da sessão
-            st.session_state.valor_checkout = round(valor_final, 2)
+            st.session_state.valor_checkout = valor_final
             st.session_state.descricao_pag = f"Assinatura ORCAS - {qtd_meses} Meses"
-            
-            # ATENÇÃO: Verifique se no orcasapp.py o item é exatamente "💳 Pagamentos"
-            st.session_state.escolha = "💳 Pagamentos"
+            st.session_state.escolha = "💳 Pagamentos" # Nome idêntico ao do roteamento acima
             st.rerun()
+
+        # if st.button("🚀 PAGAR AGORA", use_container_width=True):
+            # Guardamos as informações no estado da sessão
+            # st.session_state.valor_checkout = round(valor_final, 2)
+            # st.session_state.descricao_pag = f"Assinatura ORCAS - {qtd_meses} Meses"
+            # ATENÇÃO: Verifique se no orcasapp.py o item é exatamente "💳 Pagamentos"
+            # st.session_state.escolha = "💳 Pagamentos"
+            # st.rerun()
 
     # Rodapé informativo fixo
     st.markdown("""
