@@ -244,7 +244,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
 
     valor_final = max(v_base - desc_extra, 1.00)
 
-    # CSS SELETIVO PARA CORES
+    # CSS SELETIVO PARA CORES (Pagar Verde / Excluir Vermelho)
     st.markdown("""
         <style>
         div.stButton > button:has(div:contains("🚀")) { background-color: #28a745 !important; color: white !important; }
@@ -260,7 +260,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         if st.button("🚀 PAGAR AGORA", use_container_width=True):
             import mercadopago
             try:
-                # Busca o token diretamente aqui para garantir
                 mp_token = st.secrets.get("MP_ACCESS_TOKEN")
                 if not mp_token:
                     st.error("Token não encontrado nos Secrets!")
@@ -270,14 +269,18 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                         "items": [{"title": f"Assinatura ORCAS - {qtd_meses} Meses", "quantity": 1, "unit_price": float(round(valor_final, 2))}],
                         "external_reference": str(ID_USUARIO_LOGADO),
                         "payment_methods": {"excluded_payment_methods": [{"id": "consumer_credits"}], "installments": 1},
+                        "back_urls": {
+                            "success": "https://share.streamlit.io/", # URL de retorno obrigatória
+                            "failure": "https://share.streamlit.io/",
+                            "pending": "https://share.streamlit.io/"
+                        },
                         "auto_return": "approved",
                     }
                     res_mp = sdk.preference().create(pref_data)
                     
-                    if res_mp["status"] == 201 or res_mp["status"] == 200:
+                    if res_mp["status"] in [200, 201]:
                         st.session_state.url_link = res_mp["response"].get("init_point")
                     else:
-                        # Isso vai nos dizer o erro real do Mercado Pago
                         st.error(f"Erro MP: {res_mp['status']} - {res_mp['response'].get('message')}")
             except Exception as e:
                 st.error(f"Erro de conexão: {e}")
@@ -285,7 +288,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         if "url_link" in st.session_state:
             st.markdown(f'''
                 <a href="{st.session_state.url_link}" target="_blank" style="text-decoration: none;">
-                    <div style="background-color: #009EE3; color: white; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center; margin-top: 10px;">
+                    <div style="background-color: #009EE3; color: white; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center; margin-top: 10px; box-shadow: 0px 4px 10px rgba(0,0,0,0.1);">
                         ABRIR CHECKOUT SEGURO ➔
                     </div>
                 </a>
@@ -294,6 +297,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
     # Rodapé Original
     st.markdown("""
     <div style="font-size: 12px; color: #333; margin-top: 20px; text-align: justify; line-height: 1.6; border-top: 1px solid #eee; padding-top: 10px;">
-    Sua Assinatura ORCAS BABY mensal custa R$ 19,90 e contempla 2 Planos de 24 meses cada um...
+    Sua Assinatura ORCAS BABY mensal custa R$ 19,90 e contempla 2 Planos de 24 meses cada um, mas se você quiser ou necessitar...
     </div>
     """, unsafe_allow_html=True)
