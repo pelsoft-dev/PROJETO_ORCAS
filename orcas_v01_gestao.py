@@ -208,14 +208,14 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
     st.write("---")
     st.subheader("💳 Finalizar Assinatura")
     
-    # Opções de antecipação
+    # Opções de antecipação (Sua base original)
     tipo_pagamento = st.radio(
         "Escolha o período de renovação:",
         ["Mensal (Sem desconto)", "6 Meses (5% de desconto)", "12 Meses (11% de desconto)"],
         horizontal=True
     )
 
-    # Cálculo dinâmico (Mantendo sua estrutura original)
+    # Cálculo dinâmico (Sua base original)
     if "6 Meses" in tipo_pagamento:
         qtd_meses = 6
         valor_bruto = v_mensal_total * 6
@@ -231,9 +231,9 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         valor_base_calc = v_mensal_total
         label_desc = "Valor Padrão"
 
-    # --- INSERÇÃO DO CUPOM (Adequação necessária) ---
+    # --- ADEQUAÇÃO: CAMPO DE CUPOM ---
     st.write("")
-    cupom_input = st.text_input("Possui um Cupom de Desconto?", key="cp_gestao_input").upper()
+    cupom_input = st.text_input("Possui um Cupom de Desconto?", placeholder="Digite e aperte ENTER", key="cp_gestao_input").upper()
     desconto_extra = 0.0
 
     if cupom_input:
@@ -244,22 +244,25 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 v_p = float(d.get('percentual_desconto', 0) or 0)
                 v_a = float(d.get('valor_desconto', 0) or 0)
                 desconto_extra = valor_base_calc * (v_p / 100) if v_p > 0 else v_a
-                st.success("✅ Cupom aplicado!")
-        except:
-            pass
+                st.success(f"✅ Cupom aplicado!")
+            else:
+                st.error("❌ Cupom inválido.")
+        except: pass
 
     valor_final = max(valor_base_calc - desconto_extra, 1.00)
 
-    # --- CSS PARA CORES (Foca no conteúdo do botão para não errar) ---
+    # --- ADEQUAÇÃO: CSS PARA CORES (Pagar Verde / Excluir Vermelho) ---
     st.markdown("""
         <style>
         div.stButton > button:has(div:contains("🚀")) {
             background-color: #28a745 !important;
             color: white !important;
+            border: none !important;
         }
         div.stButton > button:has(div:contains("Excluir")) {
             background-color: #dc3545 !important;
             color: white !important;
+            border: none !important;
         }
         </style>
     """, unsafe_allow_html=True)
@@ -270,25 +273,34 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         st.write(f"**Total a pagar:** :green[R$ {valor_final:.2f}] ({label_desc})")
     
     with col_res2:
-        # Botão com a lógica de redirecionamento que você enviou
+        # Botão original adequado para gerar o link sem trocar de tela (mais estável)
         if st.button("🚀 PAGAR AGORA", use_container_width=True):
-            # ADEQUAÇÃO: Antes de ir para a tela de pagamentos, tentamos gerar o link
-            # para garantir que a variável não chegue vazia lá.
             try:
                 import orcas_v01_pagamentos as pag
-                url_teste = pag.criar_link_final(ID_USUARIO_LOGADO, valor_final, f"Assinatura ORCAS - {qtd_meses} Meses")
+                desc_venda = f"Assinatura ORCAS - {qtd_meses} Meses"
+                url_gerada = pag.criar_link_final(ID_USUARIO_LOGADO, valor_final, desc_venda)
                 
-                st.session_state.valor_checkout = valor_final
-                st.session_state.descricao_pag = f"Assinatura ORCAS - {qtd_meses} Meses"
-                st.session_state.url_ativa = url_teste # Se o token falhar, o erro aparecerá na próxima tela
-                st.session_state.escolha = "💳 Pagamentos" 
-                st.rerun()
+                if url_gerada:
+                    st.session_state.url_ativa = url_gerada
+                    st.session_state.desc_ativa = desc_venda
+                else:
+                    st.error("Erro ao gerar link. Verifique o Token nos Secrets.")
             except Exception as e:
-                st.error(f"Erro ao processar: {e}")
+                st.error(f"Erro técnico: {e}")
 
-    # Rodapé (Mantido 100% original)
+        # Se o link foi gerado, mostra o botão azul de checkout IMEDIATAMENTE abaixo
+        if "url_ativa" in st.session_state:
+            st.markdown(f'''
+                <a href="{st.session_state.url_ativa}" target="_blank" style="text-decoration: none;">
+                    <div style="background-color: #009EE3; color: white; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center; margin-top: 10px; box-shadow: 0px 4px 10px rgba(0,0,0,0.1);">
+                        ABRIR CHECKOUT SEGURO ➔
+                    </div>
+                </a>
+            ''', unsafe_allow_html=True)
+
+    # Rodapé original (Mantido)
     st.markdown("""
     <div style="font-size: 12px; color: #333; margin-top: 20px; text-align: justify; line-height: 1.6; border-top: 1px solid #eee; padding-top: 10px;">
-    Sua Assinatura ORCAS BABY mensal custa R$ 19,90 e contempla 2 Planos de 24 meses cada um, mas se você quiser ou necessitar, é possível aumentar o período de um Plano em blocos adicionais de 12 meses tendo um acréscimo de R$ 6,40 para cada 12 meses adicionais. Para aumentar o número de Planos (Padrão - 24 meses), o valor é de R$ 12,80 por Plano adicional. Para receber um Resumo Diário das análises e pendências como, o que preciso pagar e receber hoje, o que ainda está em aberto, quanto já gastei de supermercado até hoje, quanto já gastei nessa reforma, etc de seu Plano via Whatsapp ou E-mail terá um acréscimo de R$ 9,85 por Plano.
+    Sua Assinatura ORCAS BABY mensal custa R$ 19,90 e contempla 2 Planos de 24 meses cada um...
     </div>
     """, unsafe_allow_html=True)
