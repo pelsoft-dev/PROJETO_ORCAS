@@ -214,7 +214,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         horizontal=True
     )
 
-    # Cálculos de valores (v_mensal_total deve estar definido antes no seu código)
+    # Cálculos de valores (v_mensal_total, DESC_6_MESES, DESC_12_MESES devem estar definidos)
     if "6 Meses" in tipo_pagamento:
         qtd_meses = 6
         valor_base = (v_mensal_total * 6) * (1 - DESC_6_MESES)
@@ -246,13 +246,19 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
 
     valor_final = max(valor_base - desc_extra, 1.00)
 
-    # --- FUNÇÃO DE PAGAMENTO INTEGRADA (Para evitar erro de importação) ---
+    # --- FUNÇÃO DE PAGAMENTO INTEGRADA ---
     def gerar_checkout_mp(user_id, valor, desc):
         import mercadopago
         try:
-            sdk = mercadopago.SDK(st.secrets["MP_ACCESS_TOKEN"])
+            # Tenta pegar o token dos Secrets
+            token = st.secrets.get("MP_ACCESS_TOKEN")
+            if not token:
+                st.error("ERRO: MP_ACCESS_TOKEN não encontrado no st.secrets.")
+                return None
+                
+            sdk = mercadopago.SDK(token)
             preference_data = {
-                "items": [{"title": desc, "quantity": 1, "unit_price": float(valor)}],
+                "items": [{"title": desc, "quantity": 1, "unit_price": float(round(valor, 2))}],
                 "external_reference": str(user_id),
                 "payment_methods": {
                     "excluded_payment_methods": [{"id": "consumer_credits"}],
@@ -263,35 +269,41 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             res = sdk.preference().create(preference_data)
             return res["response"].get("init_point")
         except Exception as e:
-            st.error(f"Erro técnico: {e}")
+            st.error(f"Erro técnico no Mercado Pago: {e}")
             return None
+
+    # CSS PARA CORES DOS BOTÕES (Usando seletores específicos para não afetar tudo)
+    st.markdown("""
+        <style>
+        /* Estilo para o botão de PAGAR (usaremos a lógica de ícone para identificar) */
+        div.stButton > button:contains("🚀") {
+            background-color: #28a745 !important;
+            color: white !important;
+            border: none !important;
+        }
+        /* Estilo para o botão de EXCLUIR (vermelho) */
+        div.stButton > button:contains("Excluir") {
+            background-color: #dc3545 !important;
+            color: white !important;
+            border: none !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
 
     col_res1, col_res2 = st.columns([2, 1])
     with col_res1:
         st.write(f"**Total a pagar:** :green[R$ {valor_final:.2f}]")
     
     with col_res2:
-        # FORÇA A COR VERDE NO BOTÃO
-        st.markdown("""
-            <style>
-            div.stButton > button:first-child { 
-                background-color: #28a745 !important; 
-                color: white !important; 
-                border-radius: 8px;
-            }
-            </style>
-        """, unsafe_allow_html=True)
-
-        # BOTÃO 1: VERDE - GERA O LINK
+        # BOTÃO 1: VERDE (Pelo ícone no CSS acima)
         if st.button("🚀 PAGAR AGORA", use_container_width=True):
             descricao_venda = f"Assinatura ORCAS - {qtd_meses} Meses"
             link = gerar_checkout_mp(ID_USUARIO_LOGADO, valor_final, descricao_venda)
             if link:
                 st.session_state.url_ativa = link
-            else:
-                st.error("Não foi possível gerar o link. Verifique o Access Token.")
+                st.rerun() # Força o refresh para mostrar o botão azul
 
-        # BOTÃO 2: AZUL - SÓ APARECE SE O LINK FOR GERADO
+        # BOTÃO 2: AZUL (Apenas se o link existir)
         if "url_ativa" in st.session_state:
             st.markdown(f'''
                 <a href="{st.session_state.url_ativa}" target="_blank" style="text-decoration: none;">
@@ -304,6 +316,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
     # Rodapé informativo fixo
     st.markdown("""
     <div style="font-size: 12px; color: #333; margin-top: 20px; text-align: justify; line-height: 1.6; border-top: 1px solid #eee; padding-top: 10px;">
-    Sua Assinatura ORCAS BABY mensal custa R$ 19,90 e contempla 2 Planos de 24 meses cada um...
+    Sua Assinatura ORCAS BABY mensal custa R$ 19,90...
     </div>
     """, unsafe_allow_html=True)
