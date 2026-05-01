@@ -57,9 +57,9 @@ def criar_link_final(user_id, valor, descricao):
             "auto_return": "approved",
         }
         res = sdk.preference().create(preference_data)
+        # O .get("init_point") evita o erro se a resposta vier vazia
         return res["response"].get("init_point")
     except Exception as e:
-        st.error(f"Erro técnico MP: {e}")
         return None
 
 # Você pode manter a função exibir_pagamentos vazia ou removê-la, 
