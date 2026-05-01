@@ -134,7 +134,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             <div style="font-weight: bold; font-size: 16px; margin-bottom: 10px;">Valor da Assinatura Mensal: R$ {format_moeda(v_mensal_total)}</div>
             <div style="margin-left: 20px; font-size: 14px;">
                 Assinatura do Orcas Baby: <span style="float: right;">19,90</span><br>
-                {qtd_relatorios_totais} Resumo(s) Diário(s) via Whatsapp / E-mail: <span style="float: right;">{format_moeda(custo_relatorio_total)}</span><br>
+                {qtd_relatorios_totais} Resumo(s) Diário(s) - Whatsapp/E-mail: <span style="float: right;">{format_moeda(custo_relatorio_total)}</span><br>
                 Usuário com {qtd_total_planos} Planos: <span style="float: right;">{format_moeda(add_planos_extra)}</span><br>
                 {c24} Plano(s) com 24 meses: <span style="float: right;">0,00</span><br>
                 {c36} Plano(s) com 36 meses: <span style="float: right;">{format_moeda(v_p36)}</span><br>
@@ -215,79 +215,43 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         horizontal=True
     )
 
-    # 1. Cálculo base de antecipação (v_mensal_total deve estar definido no seu código acima)
+    # Cálculo dinâmico baseado na variável v_mensal_total (que deve estar definida acima)
+    # Usamos o round para evitar dízimas no valor final
     if "6 Meses" in tipo_pagamento:
         qtd_meses = 6
         valor_bruto = v_mensal_total * 6
-        valor_base_desc = valor_bruto * (1 - DESC_6_MESES)
-        label_base = "5% OFF (Antecipação)"
+        valor_final = valor_bruto * (1 - DESC_6_MESES)
+        label_desc = "5% OFF"
     elif "12 Meses" in tipo_pagamento:
         qtd_meses = 12
         valor_bruto = v_mensal_total * 12
-        valor_base_desc = valor_bruto * (1 - DESC_12_MESES)
-        label_base = "11% OFF (Antecipação)"
+        valor_final = valor_bruto * (1 - DESC_12_MESES)
+        label_desc = "11% OFF"
     else:
         qtd_meses = 1
-        valor_base_desc = v_mensal_total
-        label_base = "Valor Padrão"
+        valor_final = v_mensal_total
+        label_desc = "Valor Padrão"
 
-    # 2. SISTEMA DE CUPOM (Híbrido: Percentual ou Absoluto)
-    st.write("")
-    cupom_input = st.text_input("Possui um Cupom de Desconto?", placeholder="Digite o código e aperte ENTER", key="cupom_gestao").upper()
-    desconto_extra = 0.0
-
-    if cupom_input:
-        try:
-            # Busca o cupom no banco (tabela liberada na API)
-            res = supabase.table("cupons").select("*").eq("codigo", cupom_input).eq("ativo", True).execute()
-            if res.data:
-                d = res.data[0]
-                v_abs = float(d.get('valor_desconto', 0) or 0)
-                v_perc = float(d.get('percentual_desconto', 0) or 0)
-
-                # Regra: Prioriza percentual se ambos existirem
-                if v_perc > 0:
-                    desconto_extra = valor_base_desc * (v_perc / 100)
-                    st.success(f"✅ Cupom de {v_perc}% aplicado!")
-                else:
-                    desconto_extra = v_abs
-                    st.success(f"✅ Cupom de R$ {v_abs:.2f} aplicado!")
-            else:
-                st.error("❌ Cupom inválido ou expirado.")
-        except Exception as e:
-            st.error(f"Erro ao validar cupom: {e}")
-
-    # 3. Valor Final Pós-Cupom
-    valor_final = max(valor_base_desc - desconto_extra, 1.00)
-
-    # Exibição do Resumo Financeiro
     col_res1, col_res2 = st.columns([2, 1])
     with col_res1:
         st.write(f"**Resumo:** {tipo_pagamento}")
-        if desconto_extra > 0:
-            st.write(f"**Total a pagar:** :blue[R$ {valor_final:.2f}] (Desc. Cupom aplicado)")
-        else:
-            st.write(f"**Total a pagar:** :blue[R$ {valor_final:.2f}] ({label_base})")
+        st.write(f"**Total a pagar:** :blue[R$ {valor_final:.2f}] ({label_desc})")
     
     with col_res2:
-        # Botão Único Consolidado
-        if st.button("🚀 PAGAR AGORA", use_container_width=True, type="primary"):
-            with st.spinner("Conectando ao Mercado Pago..."):
-                import orcas_v01_pagamentos as pag
-                desc_mp = f"Assinatura ORCAS - {qtd_meses} Meses"
-                url_mp = pag.criar_link_final(ID_USUARIO_LOGADO, valor_final, desc_mp)
-                
-                if url_mp:
-                    # Exibe o botão azul de redirecionamento direto
-                    st.markdown(f'''
-                        <div style="text-align: center; margin-top: 10px;">
-                            <a href="{url_mp}" target="_blank" style="text-decoration: none;">
-                                <div style="background-color: #009EE3; color: white; padding: 15px; border-radius: 8px; font-weight: bold; font-size: 18px; box-shadow: 0px 4px 12px rgba(0,0,0,0.2);">
-                                    ABRIR CHECKOUT SEGURO ➔
-                                </div>
-                            </a>
-                        </div>
-                    ''', unsafe_allow_html=True)
+        # Botão único e definitivo para o fluxo de pagamento
+        if st.button("🚀 PAGAR AGORA", use_container_width=True):
+            st.session_state.valor_checkout = valor_final
+            st.session_state.descricao_pag = f"Assinatura ORCAS - {qtd_meses} Meses"
+            st.session_state.escolha = "💳 Pagamentos" # Nome idêntico ao do roteamento acima
+            st.rerun()
+
+        # if st.button("🚀 PAGAR AGORA", use_container_width=True):
+            # Guardamos as informações no estado da sessão
+            # st.session_state.valor_checkout = round(valor_final, 2)
+            # st.session_state.descricao_pag = f"Assinatura ORCAS - {qtd_meses} Meses"
+            # ATENÇÃO: Verifique se no orcasapp.py o item é exatamente "💳 Pagamentos"
+            # st.session_state.escolha = "💳 Pagamentos"
+            # st.rerun()
 
     # Rodapé informativo fixo
     st.markdown("""

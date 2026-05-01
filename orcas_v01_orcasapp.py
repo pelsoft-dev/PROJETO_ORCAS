@@ -508,9 +508,9 @@ st.markdown("<div id='topo-ancora'></div>", unsafe_allow_html=True)
 
 if st.session_state.escolha == "🏠 Dashboard":
     dash.exibir_dashboard(df, supabase, ID_USUARIO_LOGADO, s_db)
-elif st.session_state.escolha == "📑 Lançamentos":
+elif st.session_state.escolha == "📝 Lançamentos":
     lanc.exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db, format_moeda, ir_para_o_topo)
-elif st.session_state.escolha == "📅 Projetar":
+elif st.session_state.escolha == "🗓️ Projetar":
     proj.exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda)
 elif st.session_state.escolha == "✅ Conciliação":
     conc.exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moeda)
