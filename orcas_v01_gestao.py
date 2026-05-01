@@ -208,84 +208,97 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
     st.write("---")
     st.subheader("💳 Finalizar Assinatura")
     
-    # Opções de período
     tipo_pagamento = st.radio(
         "Escolha o período de renovação:",
         ["Mensal (Sem desconto)", "6 Meses (5% de desconto)", "12 Meses (11% de desconto)"],
         horizontal=True
     )
 
-    # Cálculo do valor baseado na escolha (v_mensal_total deve estar definido antes)
+    # Cálculo do valor (Certifique-se que v_mensal_total, DESC_6_MESES e DESC_12_MESES estão definidos)
     if "6 Meses" in tipo_pagamento:
         qtd_meses = 6
-        valor_bruto = v_mensal_total * 6
-        valor_base_desc = valor_bruto * (1 - DESC_6_MESES)
+        valor_base_desc = (v_mensal_total * 6) * (1 - DESC_6_MESES)
         label_base = "5% OFF"
     elif "12 Meses" in tipo_pagamento:
         qtd_meses = 12
-        valor_bruto = v_mensal_total * 12
-        valor_base_desc = valor_bruto * (1 - DESC_12_MESES)
+        valor_base_desc = (v_mensal_total * 12) * (1 - DESC_12_MESES)
         label_base = "11% OFF"
     else:
         qtd_meses = 1
         valor_base_desc = v_mensal_total
         label_base = "Valor Padrão"
 
-    # --- NOVO SISTEMA DE CUPOM (HÍBRIDO) ---
+    # Sistema de Cupom
     st.write("")
-    cupom_input = st.text_input("Possui um Cupom de Desconto?", placeholder="Digite e aperte ENTER", key="cp_gestao_input").upper()
+    cupom_input = st.text_input("Possui um Cupom?", placeholder="Digite e aperte ENTER", key="cp_gestao_input").upper()
     desconto_extra = 0.0
 
     if cupom_input:
         try:
-            # Busca na tabela cupons (agora com API Enabled e Policy SELECT)
             res = supabase.table("cupons").select("*").eq("codigo", cupom_input).eq("ativo", True).execute()
             if res.data:
                 d = res.data[0]
                 v_perc = float(d.get('percentual_desconto', 0) or 0)
                 v_abs = float(d.get('valor_desconto', 0) or 0)
-
-                # Regra: Se tiver percentual, ele manda. Senão, usa valor fixo.
-                if v_perc > 0:
-                    desconto_extra = valor_base_desc * (v_perc / 100)
-                    st.success(f"✅ Cupom de {v_perc}% aplicado!")
-                else:
-                    desconto_extra = v_abs
-                    st.success(f"✅ Cupom de R$ {v_abs:.2f} aplicado!")
+                desconto_extra = valor_base_desc * (v_perc / 100) if v_perc > 0 else v_abs
+                st.success(f"✅ Cupom aplicado!")
             else:
-                st.error("❌ Cupom inválido ou expirado.")
-        except Exception as e:
-            st.error(f"Erro ao validar cupom: {e}")
+                st.error("❌ Cupom inválido.")
+        except Exception:
+            pass
 
-    # Valor Final
     valor_final = max(valor_base_desc - desconto_extra, 1.00)
 
     col_res1, col_res2 = st.columns([2, 1])
     with col_res1:
         st.write(f"**Resumo:** {tipo_pagamento}")
-        st.write(f"**Total a pagar:** :blue[R$ {valor_final:.2f}]")
+        st.write(f"**Total a pagar:** :green[R$ {valor_final:.2f}]")
     
     with col_res2:
-        # BOTÃO 1: Processar e Gerar Link
-        if st.button("🚀 PAGAR AGORA", use_container_width=True, type="primary"):
-            with st.spinner("Gerando link..."):
+        # CSS PARA DEIXAR O BOTÃO VERDE (Streamlit usa cores do tema, isso força o verde)
+        st.markdown("""
+            <style>
+            div.stButton > button:first-child {
+                background-color: #28a745;
+                color: white;
+                border: none;
+            }
+            div.stButton > button:hover {
+                background-color: #218838;
+                color: white;
+            }
+            </style>
+        """, unsafe_allow_html=True)
+
+        # BOTÃO 1: Processar (Agora Verde)
+        if st.button("🚀 PAGAR AGORA", use_container_width=True):
+            try:
                 import orcas_v01_pagamentos as pag
                 desc_mp = f"Assinatura ORCAS - {qtd_meses} Meses"
                 url_mp = pag.criar_link_final(ID_USUARIO_LOGADO, valor_final, desc_mp)
                 
                 if url_mp:
-                    # BOTÃO 2: Abrir Checkout (Aparece após o clique no primeiro)
-                    st.markdown(f'''
-                        <div style="text-align: center; margin-top: 10px;">
-                            <a href="{url_mp}" target="_blank" style="text-decoration: none;">
-                                <div style="background-color: #009EE3; color: white; padding: 15px; border-radius: 8px; font-weight: bold; font-size: 18px;">
-                                    ABRIR CHECKOUT SEGURO ➔
-                                </div>
-                            </a>
-                        </div>
-                    ''', unsafe_allow_html=True)
+                    # Guardamos a URL no session_state para garantir que ela não suma
+                    st.session_state.url_pagamento_gerada = url_mp
+                else:
+                    st.error("Erro ao gerar link.")
+            except Exception as e:
+                st.error(f"Erro no módulo: {e}")
 
-    # Rodapé informativo fixo
+        # Se a URL existe no estado da sessão, mostramos o botão azul de checkout
+        if "url_pagamento_gerada" in st.session_state:
+            st.markdown(f'''
+                <div style="text-align: center; margin-top: 10px;">
+                    <a href="{st.session_state.url_pagamento_gerada}" target="_blank" style="text-decoration: none;">
+                        <div style="background-color: #009EE3; color: white; padding: 15px; border-radius: 8px; font-weight: bold; font-size: 18px; box-shadow: 0px 4px 10px rgba(0,0,0,0.2);">
+                            ABRIR CHECKOUT SEGURO ➔
+                        </div>
+                    </a>
+                    <p style="font-size: 11px; color: #666; margin-top: 5px;">Link gerado com sucesso!</p>
+                </div>
+            ''', unsafe_allow_html=True)
+
+    # Rodapé fixo
     st.markdown("""
     <div style="font-size: 12px; color: #333; margin-top: 20px; text-align: justify; line-height: 1.6; border-top: 1px solid #eee; padding-top: 10px;">
     Sua Assinatura ORCAS BABY mensal custa R$ 19,90...
