@@ -208,26 +208,34 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
     st.write("---")
     st.subheader("💳 Finalizar Assinatura")
     
+    # Opções de antecipação
     tipo_pagamento = st.radio(
         "Escolha o período de renovação:",
         ["Mensal (Sem desconto)", "6 Meses (5% de desconto)", "12 Meses (11% de desconto)"],
         horizontal=True
     )
 
-    # Cálculo do valor
+    # Cálculo dinâmico baseado na variável v_mensal_total
     if "6 Meses" in tipo_pagamento:
         qtd_meses = 6
-        valor_base = (v_mensal_total * 6) * (1 - DESC_6_MESES)
+        valor_bruto = v_mensal_total * 6
+        valor_base_calc = valor_bruto * (1 - DESC_6_MESES)
+        label_desc = "5% OFF"
     elif "12 Meses" in tipo_pagamento:
         qtd_meses = 12
-        valor_base = (v_mensal_total * 12) * (1 - DESC_12_MESES)
+        valor_bruto = v_mensal_total * 12
+        valor_base_calc = valor_bruto * (1 - DESC_12_MESES)
+        label_desc = "11% OFF"
     else:
         qtd_meses = 1
-        valor_base = v_mensal_total
+        valor_base_calc = v_mensal_total
+        label_desc = "Valor Padrão"
 
-    # Cupom
-    cupom_input = st.text_input("Possui um Cupom?", key="cp_input_gestao").upper()
-    desc_extra = 0.0
+    # --- INSERÇÃO DO CAMPO DE CUPOM ---
+    st.write("")
+    cupom_input = st.text_input("Possui um Cupom de Desconto?", placeholder="Digite e aperte ENTER", key="cp_gestao_input").upper()
+    desconto_extra = 0.0
+
     if cupom_input:
         try:
             res_c = supabase.table("cupons").select("*").eq("codigo", cupom_input).eq("ativo", True).execute()
@@ -235,64 +243,56 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 d = res_c.data[0]
                 v_p = float(d.get('percentual_desconto', 0) or 0)
                 v_a = float(d.get('valor_desconto', 0) or 0)
-                desc_extra = valor_base * (v_p/100) if v_p > 0 else v_a
-                st.success("✅ Cupom aplicado!")
-        except: pass
+                desconto_extra = valor_base_calc * (v_p / 100) if v_p > 0 else v_a
+                st.success(f"✅ Cupom aplicado!")
+            else:
+                st.error("❌ Cupom inválido.")
+        except:
+            pass
 
-    valor_final = max(valor_base - desc_extra, 1.00)
+    valor_final = max(valor_base_calc - desconto_extra, 1.00)
 
-    # CSS SELETIVO: Pagar Agora (Verde) e Excluir (Vermelho)
+    # --- CSS PARA CORES DOS BOTÕES (Pagar Verde / Excluir Vermelho) ---
     st.markdown("""
         <style>
-        button[kind="secondary"]:has(div:contains("🚀")) {
+        div.stButton > button:has(div:contains("🚀")) {
             background-color: #28a745 !important;
             color: white !important;
+            border: none !important;
         }
-        button[kind="secondary"]:has(div:contains("Excluir")) {
+        div.stButton > button:has(div:contains("Excluir")) {
             background-color: #dc3545 !important;
             color: white !important;
+            border: none !important;
         }
         </style>
     """, unsafe_allow_html=True)
 
     col_res1, col_res2 = st.columns([2, 1])
     with col_res1:
-        st.write(f"**Total a pagar:** :green[R$ {valor_final:.2f}]")
+        st.write(f"**Resumo:** {tipo_pagamento}")
+        st.write(f"**Total a pagar:** :green[R$ {valor_final:.2f}] ({label_desc})")
     
     with col_res2:
-        # O botão agora força a execução da lógica de link
+        # Botão único e definitivo para o fluxo de pagamento
         if st.button("🚀 PAGAR AGORA", use_container_width=True):
-            import mercadopago
-            try:
-                token_mp = st.secrets.get("MP_ACCESS_TOKEN")
-                if token_mp:
-                    sdk = mercadopago.SDK(token_mp)
-                    pref_data = {
-                        "items": [{"title": f"Assinatura ORCAS - {qtd_meses} Meses", "quantity": 1, "unit_price": float(round(valor_final, 2))}],
-                        "external_reference": str(ID_USUARIO_LOGADO),
-                        "payment_methods": {"excluded_payment_methods": [{"id": "consumer_credits"}], "installments": 1},
-                        "auto_return": "approved",
-                    }
-                    res_mp = sdk.preference().create(pref_data)
-                    url_checkout = res_mp["response"].get("init_point")
-                    
-                    if url_checkout:
-                        st.session_state.url_ativa = url_checkout
-                    else:
-                        st.error("Erro na resposta do MP.")
-                else:
-                    st.error("Token não encontrado.")
-            except Exception as e:
-                st.error(f"Erro: {e}")
+            # 1. Gera o link do Mercado Pago antes do rerun para garantir que a URL exista
+            import orcas_v01_pagamentos as pag
+            desc_venda = f"Assinatura ORCAS - {qtd_meses} Meses"
+            url_gerada = pag.criar_link_final(ID_USUARIO_LOGADO, valor_final, desc_venda)
+            
+            if url_gerada:
+                st.session_state.valor_checkout = valor_final
+                st.session_state.descricao_pag = desc_venda
+                st.session_state.url_ativa = url_gerada # Salva a URL para a próxima tela
+                st.session_state.escolha = "💳 Pagamentos"
+                st.rerun()
+            else:
+                st.error("Erro ao conectar com Mercado Pago. Verifique o Token.")
 
-        # Exibição do link azul após gerar
-        if "url_ativa" in st.session_state:
-            st.markdown(f'''
-                <a href="{st.session_state.url_ativa}" target="_blank" style="text-decoration: none;">
-                    <div style="background-color: #009EE3; color: white; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center; margin-top: 10px;">
-                        ABRIR CHECKOUT ➔
-                    </div>
-                </a>
-            ''', unsafe_allow_html=True)
-
-    st.markdown('<div style="font-size: 12px; color: #333; margin-top: 20px; border-top: 1px solid #eee; padding-top: 10px;">Sua Assinatura ORCAS BABY...</div>', unsafe_allow_html=True)
+    # Rodapé informativo fixo (Mantido conforme original)
+    st.markdown("""
+    <div style="font-size: 12px; color: #333; margin-top: 20px; text-align: justify; line-height: 1.6; border-top: 1px solid #eee; padding-top: 10px;">
+    Sua Assinatura ORCAS BABY mensal custa R$ 19,90 e contempla 2 Planos de 24 meses cada um, mas se você quiser ou necessitar, é possível aumentar o período de um Plano em blocos adicionais de 12 meses tendo um acréscimo de R$ 6,40 para cada 12 meses adicionais. Para aumentar o número de Planos (Padrão - 24 meses), o valor é de R$ 12,80 por Plano adicional. Para receber um Resumo Diário das análises e pendências como, o que preciso pagar e receber hoje, o que ainda está em aberto, quanto já gastei de supermercado até hoje, quanto já gastei nessa reforma, etc de seu Plano via Whatsapp ou E-mail terá um acréscimo de R$ 9,85 por Plano.
+    </div>
+    """, unsafe_allow_html=True)
