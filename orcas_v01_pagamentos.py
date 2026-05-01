@@ -47,22 +47,19 @@ import mercadopago
 def criar_link_final(user_id, valor, descricao):
     try:
         sdk = mercadopago.SDK(st.secrets["MP_ACCESS_TOKEN"])
-        
         preference_data = {
             "items": [{"title": descricao, "quantity": 1, "unit_price": float(valor)}],
             "external_reference": str(user_id),
             "payment_methods": {
-                "excluded_payment_methods": [{"id": "consumer_credits"}], # Remove apenas o crédito do MP
-                "excluded_payment_types": [], # GARANTE que nenhum tipo (como Pix) seja excluído
-                "installments": 1
+                "excluded_payment_methods": [{"id": "consumer_credits"}],
+                "installments": 1 
             },
             "auto_return": "approved",
         }
-        
         res = sdk.preference().create(preference_data)
-        return res["response"]["init_point"]
+        return res["response"].get("init_point")
     except Exception as e:
-        st.error(f"Erro MP: {e}")
+        st.error(f"Erro técnico MP: {e}")
         return None
 
 # Você pode manter a função exibir_pagamentos vazia ou removê-la, 

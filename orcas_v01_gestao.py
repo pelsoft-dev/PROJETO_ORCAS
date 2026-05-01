@@ -208,44 +208,44 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
     st.write("---")
     st.subheader("💳 Finalizar Assinatura")
     
-    # Opções de antecipação
+    # Opções de período
     tipo_pagamento = st.radio(
         "Escolha o período de renovação:",
         ["Mensal (Sem desconto)", "6 Meses (5% de desconto)", "12 Meses (11% de desconto)"],
         horizontal=True
     )
 
-    # 1. Cálculo base de antecipação (v_mensal_total deve estar definido no seu código acima)
+    # Cálculo do valor baseado na escolha (v_mensal_total deve estar definido antes)
     if "6 Meses" in tipo_pagamento:
         qtd_meses = 6
         valor_bruto = v_mensal_total * 6
         valor_base_desc = valor_bruto * (1 - DESC_6_MESES)
-        label_base = "5% OFF (Antecipação)"
+        label_base = "5% OFF"
     elif "12 Meses" in tipo_pagamento:
         qtd_meses = 12
         valor_bruto = v_mensal_total * 12
         valor_base_desc = valor_bruto * (1 - DESC_12_MESES)
-        label_base = "11% OFF (Antecipação)"
+        label_base = "11% OFF"
     else:
         qtd_meses = 1
         valor_base_desc = v_mensal_total
         label_base = "Valor Padrão"
 
-    # 2. SISTEMA DE CUPOM (Híbrido: Percentual ou Absoluto)
+    # --- NOVO SISTEMA DE CUPOM (HÍBRIDO) ---
     st.write("")
-    cupom_input = st.text_input("Possui um Cupom de Desconto?", placeholder="Digite o código e aperte ENTER", key="cupom_gestao").upper()
+    cupom_input = st.text_input("Possui um Cupom de Desconto?", placeholder="Digite e aperte ENTER", key="cp_gestao_input").upper()
     desconto_extra = 0.0
 
     if cupom_input:
         try:
-            # Busca o cupom no banco (tabela liberada na API)
+            # Busca na tabela cupons (agora com API Enabled e Policy SELECT)
             res = supabase.table("cupons").select("*").eq("codigo", cupom_input).eq("ativo", True).execute()
             if res.data:
                 d = res.data[0]
-                v_abs = float(d.get('valor_desconto', 0) or 0)
                 v_perc = float(d.get('percentual_desconto', 0) or 0)
+                v_abs = float(d.get('valor_desconto', 0) or 0)
 
-                # Regra: Prioriza percentual se ambos existirem
+                # Regra: Se tiver percentual, ele manda. Senão, usa valor fixo.
                 if v_perc > 0:
                     desconto_extra = valor_base_desc * (v_perc / 100)
                     st.success(f"✅ Cupom de {v_perc}% aplicado!")
@@ -257,32 +257,28 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         except Exception as e:
             st.error(f"Erro ao validar cupom: {e}")
 
-    # 3. Valor Final Pós-Cupom
+    # Valor Final
     valor_final = max(valor_base_desc - desconto_extra, 1.00)
 
-    # Exibição do Resumo Financeiro
     col_res1, col_res2 = st.columns([2, 1])
     with col_res1:
         st.write(f"**Resumo:** {tipo_pagamento}")
-        if desconto_extra > 0:
-            st.write(f"**Total a pagar:** :blue[R$ {valor_final:.2f}] (Desc. Cupom aplicado)")
-        else:
-            st.write(f"**Total a pagar:** :blue[R$ {valor_final:.2f}] ({label_base})")
+        st.write(f"**Total a pagar:** :blue[R$ {valor_final:.2f}]")
     
     with col_res2:
-        # Botão Único Consolidado
+        # BOTÃO 1: Processar e Gerar Link
         if st.button("🚀 PAGAR AGORA", use_container_width=True, type="primary"):
-            with st.spinner("Conectando ao Mercado Pago..."):
+            with st.spinner("Gerando link..."):
                 import orcas_v01_pagamentos as pag
                 desc_mp = f"Assinatura ORCAS - {qtd_meses} Meses"
                 url_mp = pag.criar_link_final(ID_USUARIO_LOGADO, valor_final, desc_mp)
                 
                 if url_mp:
-                    # Exibe o botão azul de redirecionamento direto
+                    # BOTÃO 2: Abrir Checkout (Aparece após o clique no primeiro)
                     st.markdown(f'''
                         <div style="text-align: center; margin-top: 10px;">
                             <a href="{url_mp}" target="_blank" style="text-decoration: none;">
-                                <div style="background-color: #009EE3; color: white; padding: 15px; border-radius: 8px; font-weight: bold; font-size: 18px; box-shadow: 0px 4px 12px rgba(0,0,0,0.2);">
+                                <div style="background-color: #009EE3; color: white; padding: 15px; border-radius: 8px; font-weight: bold; font-size: 18px;">
                                     ABRIR CHECKOUT SEGURO ➔
                                 </div>
                             </a>
@@ -292,6 +288,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
     # Rodapé informativo fixo
     st.markdown("""
     <div style="font-size: 12px; color: #333; margin-top: 20px; text-align: justify; line-height: 1.6; border-top: 1px solid #eee; padding-top: 10px;">
-    Sua Assinatura ORCAS BABY mensal custa R$ 19,90 e contempla 2 Planos de 24 meses cada um, mas se você quiser ou necessitar, é possível aumentar o período de um Plano em blocos adicionais de 12 meses tendo um acréscimo de R$ 6,40 para cada 12 meses adicionais. Para aumentar o número de Planos (Padrão - 24 meses), o valor é de R$ 12,80 por Plano adicional. Para receber um Resumo Diário das análises e pendências como, o que preciso pagar e receber hoje, o que ainda está em aberto, quanto já gastei de supermercado até hoje, quanto já gastei nessa reforma, etc de seu Plano via Whatsapp ou E-mail terá um acréscimo de R$ 9,85 por Plano.
+    Sua Assinatura ORCAS BABY mensal custa R$ 19,90...
     </div>
     """, unsafe_allow_html=True)
