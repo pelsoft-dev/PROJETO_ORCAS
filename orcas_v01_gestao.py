@@ -214,7 +214,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         horizontal=True
     )
 
-    # Cálculos de valores (v_mensal_total, DESC_6_MESES, DESC_12_MESES devem estar definidos)
+    # Cálculo do valor
     if "6 Meses" in tipo_pagamento:
         qtd_meses = 6
         valor_base = (v_mensal_total * 6) * (1 - DESC_6_MESES)
@@ -225,11 +225,9 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         qtd_meses = 1
         valor_base = v_mensal_total
 
-    # Sistema de Cupom
-    st.write("")
+    # Cupom
     cupom_input = st.text_input("Possui um Cupom?", key="cp_input_gestao").upper()
     desc_extra = 0.0
-
     if cupom_input:
         try:
             res_c = supabase.table("cupons").select("*").eq("codigo", cupom_input).eq("ativo", True).execute()
@@ -239,53 +237,20 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 v_a = float(d.get('valor_desconto', 0) or 0)
                 desc_extra = valor_base * (v_p/100) if v_p > 0 else v_a
                 st.success("✅ Cupom aplicado!")
-            else:
-                st.error("❌ Cupom inválido.")
-        except Exception:
-            pass
+        except: pass
 
     valor_final = max(valor_base - desc_extra, 1.00)
 
-    # --- FUNÇÃO DE PAGAMENTO INTEGRADA ---
-    def gerar_checkout_mp(user_id, valor, desc):
-        import mercadopago
-        try:
-            # Tenta pegar o token dos Secrets
-            token = st.secrets.get("MP_ACCESS_TOKEN")
-            if not token:
-                st.error("ERRO: MP_ACCESS_TOKEN não encontrado no st.secrets.")
-                return None
-                
-            sdk = mercadopago.SDK(token)
-            preference_data = {
-                "items": [{"title": desc, "quantity": 1, "unit_price": float(round(valor, 2))}],
-                "external_reference": str(user_id),
-                "payment_methods": {
-                    "excluded_payment_methods": [{"id": "consumer_credits"}],
-                    "installments": 1 
-                },
-                "auto_return": "approved",
-            }
-            res = sdk.preference().create(preference_data)
-            return res["response"].get("init_point")
-        except Exception as e:
-            st.error(f"Erro técnico no Mercado Pago: {e}")
-            return None
-
-    # CSS PARA CORES DOS BOTÕES (Usando seletores específicos para não afetar tudo)
+    # CSS SELETIVO: Pagar Agora (Verde) e Excluir (Vermelho)
     st.markdown("""
         <style>
-        /* Estilo para o botão de PAGAR (usaremos a lógica de ícone para identificar) */
-        div.stButton > button:contains("🚀") {
+        button[kind="secondary"]:has(div:contains("🚀")) {
             background-color: #28a745 !important;
             color: white !important;
-            border: none !important;
         }
-        /* Estilo para o botão de EXCLUIR (vermelho) */
-        div.stButton > button:contains("Excluir") {
+        button[kind="secondary"]:has(div:contains("Excluir")) {
             background-color: #dc3545 !important;
             color: white !important;
-            border: none !important;
         }
         </style>
     """, unsafe_allow_html=True)
@@ -295,27 +260,39 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         st.write(f"**Total a pagar:** :green[R$ {valor_final:.2f}]")
     
     with col_res2:
-        # BOTÃO 1: VERDE (Pelo ícone no CSS acima)
+        # O botão agora força a execução da lógica de link
         if st.button("🚀 PAGAR AGORA", use_container_width=True):
-            descricao_venda = f"Assinatura ORCAS - {qtd_meses} Meses"
-            link = gerar_checkout_mp(ID_USUARIO_LOGADO, valor_final, descricao_venda)
-            if link:
-                st.session_state.url_ativa = link
-                st.rerun() # Força o refresh para mostrar o botão azul
+            import mercadopago
+            try:
+                token_mp = st.secrets.get("MP_ACCESS_TOKEN")
+                if token_mp:
+                    sdk = mercadopago.SDK(token_mp)
+                    pref_data = {
+                        "items": [{"title": f"Assinatura ORCAS - {qtd_meses} Meses", "quantity": 1, "unit_price": float(round(valor_final, 2))}],
+                        "external_reference": str(ID_USUARIO_LOGADO),
+                        "payment_methods": {"excluded_payment_methods": [{"id": "consumer_credits"}], "installments": 1},
+                        "auto_return": "approved",
+                    }
+                    res_mp = sdk.preference().create(pref_data)
+                    url_checkout = res_mp["response"].get("init_point")
+                    
+                    if url_checkout:
+                        st.session_state.url_ativa = url_checkout
+                    else:
+                        st.error("Erro na resposta do MP.")
+                else:
+                    st.error("Token não encontrado.")
+            except Exception as e:
+                st.error(f"Erro: {e}")
 
-        # BOTÃO 2: AZUL (Apenas se o link existir)
+        # Exibição do link azul após gerar
         if "url_ativa" in st.session_state:
             st.markdown(f'''
                 <a href="{st.session_state.url_ativa}" target="_blank" style="text-decoration: none;">
-                    <div style="background-color: #009EE3; color: white; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center; margin-top: 10px; box-shadow: 0px 4px 10px rgba(0,0,0,0.1);">
-                        CLIQUE AQUI PARA ABRIR O CHECKOUT ➔
+                    <div style="background-color: #009EE3; color: white; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center; margin-top: 10px;">
+                        ABRIR CHECKOUT ➔
                     </div>
                 </a>
             ''', unsafe_allow_html=True)
 
-    # Rodapé informativo fixo
-    st.markdown("""
-    <div style="font-size: 12px; color: #333; margin-top: 20px; text-align: justify; line-height: 1.6; border-top: 1px solid #eee; padding-top: 10px;">
-    Sua Assinatura ORCAS BABY mensal custa R$ 19,90...
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown('<div style="font-size: 12px; color: #333; margin-top: 20px; border-top: 1px solid #eee; padding-top: 10px;">Sua Assinatura ORCAS BABY...</div>', unsafe_allow_html=True)
