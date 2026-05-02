@@ -214,6 +214,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         horizontal=True
     )
 
+    # Cálculos de valor base (v_mensal_total deve estar definido acima no seu código)
     if "6 Meses" in tipo_pagamento:
         qtd_meses = 6
         v_base = (v_mensal_total * 6) * (1 - DESC_6_MESES)
@@ -227,9 +228,9 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         v_base = v_mensal_total
         label_desc = "Valor Padrão"
 
-    # Cupom
+    # Campo de Cupom
     st.write("")
-    cupom_in = st.text_input("Possui um Cupom de Desconto?", key="cp_gest_final").upper()
+    cupom_in = st.text_input("Possui um Cupom de Desconto?", key="cp_gest_final_v2").upper()
     desc_extra = 0.0
     if cupom_in:
         try:
@@ -240,15 +241,17 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 v_a = float(d.get('valor_desconto', 0) or 0)
                 desc_extra = v_base * (v_p / 100) if v_p > 0 else v_a
                 st.success("✅ Cupom aplicado!")
+            else:
+                st.error("❌ Cupom inválido.")
         except: pass
 
     valor_final = max(v_base - desc_extra, 1.00)
 
-    # CSS SELETIVO PARA CORES (Pagar Verde / Excluir Vermelho)
+    # CSS PARA CORES (Verde para Pagar, Vermelho para Excluir)
     st.markdown("""
         <style>
-        div.stButton > button:has(div:contains("🚀")) { background-color: #28a745 !important; color: white !important; }
-        div.stButton > button:has(div:contains("Excluir")) { background-color: #dc3545 !important; color: white !important; }
+        div.stButton > button:has(div:contains("🚀")) { background-color: #28a745 !important; color: white !important; border: none !important; }
+        div.stButton > button:has(div:contains("Excluir")) { background-color: #dc3545 !important; color: white !important; border: none !important; }
         </style>
     """, unsafe_allow_html=True)
 
@@ -257,40 +260,29 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         st.write(f"**Total a pagar:** :green[R$ {valor_final:.2f}] ({label_desc})")
     
     with col_res2:
-        # if st.button("🚀 PAGAR AGORA", use_container_width=True):
-        if st.button("VERIFICA ITENS E PAGAMENTOS", use_container_width=True):
-            import mercadopago
-            try:
-                mp_token = st.secrets.get("MP_ACCESS_TOKEN")
-                if not mp_token:
-                    st.error("Token não encontrado nos Secrets!")
-                else:
-                    sdk = mercadopago.SDK(mp_token)
-                    pref_data = {
-                        "items": [{"title": f"Assinatura ORCAS - {qtd_meses} Meses", "quantity": 1, "unit_price": float(round(valor_final, 2))}],
-                        "external_reference": str(ID_USUARIO_LOGADO),
-                        "payment_methods": {"excluded_payment_methods": [{"id": "consumer_credits"}], "installments": 1},
-                        "back_urls": {
-                            "success": "https://share.streamlit.io/", # URL de retorno obrigatória
-                            "failure": "https://share.streamlit.io/",
-                            "pending": "https://share.streamlit.io/"
-                        },
-                        "auto_return": "approved",
-                    }
-                    res_mp = sdk.preference().create(pref_data)
-                    
-                    if res_mp["status"] in [200, 201]:
-                        st.session_state.url_link = res_mp["response"].get("init_point")
-                    else:
-                        st.error(f"Erro MP: {res_mp['status']} - {res_mp['response'].get('message')}")
-            except Exception as e:
-                st.error(f"Erro de conexão: {e}")
+        # BOTÃO VERDE
+        if st.button("🚀 PAGAR AGORA", use_container_width=True):
+            import orcas_v01_pagamentos as pag
+            # Pegamos o e-mail do usuário logado (ajuste a variável se o nome for outro no seu código)
+            email_user = st.session_state.get('usuario_email', "cliente@email.com")
+            
+            link = pag.criar_link_final(
+                ID_USUARIO_LOGADO, 
+                valor_final, 
+                f"Assinatura ORCAS - {qtd_meses} Meses",
+                email_user
+            )
+            if link:
+                st.session_state.url_ativa = link
+            else:
+                st.error("Erro ao gerar link. Verifique o Token nos Secrets.")
 
-        if "url_link" in st.session_state:
+        # BOTÃO AZUL (Aparece logo abaixo do verde após o clique)
+        if "url_ativa" in st.session_state:
             st.markdown(f'''
-                <a href="{st.session_state.url_link}" target="_blank" style="text-decoration: none;">
-                    <div style="background-color: #009EE3; color: white; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center; margin-top: 10px; box-shadow: 0px 4px 10px rgba(0,0,0,0.1);">
-                        IR PARA PAGAMENTOS ➔
+                <a href="{st.session_state.url_ativa}" target="_blank" rel="noopener noreferrer" style="text-decoration: none;">
+                    <div style="background-color: #009EE3; color: white; padding: 14px; border-radius: 8px; font-weight: bold; text-align: center; margin-top: 10px; box-shadow: 0px 4px 10px rgba(0,0,0,0.1);">
+                        CLIQUE AQUI PARA ABRIR O CHECKOUT ➔
                     </div>
                 </a>
             ''', unsafe_allow_html=True)
