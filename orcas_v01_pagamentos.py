@@ -36,7 +36,7 @@ def criar_link_final(user_id, valor, descricao, email_usuario):
                 "pending": "https://share.streamlit.io/"
             },
             "auto_return": "approved",
-            "binary_mode": False # Permite estados pendentes (importante para Pix)
+            "binary_mode": False # Permite estados pendentes (importante para o processamento do Pix)
         }
         
         res = sdk.preference().create(preference_data)
@@ -47,8 +47,8 @@ def criar_link_final(user_id, valor, descricao, email_usuario):
         
         return None, None
         
-    except Exception as e:
-        # Log de erro silencioso para não quebrar a UI, mas retornando None
+    except Exception:
+        # Retorno seguro em caso de falha na comunicação
         return None, None
 
 def verificar_pagamento(preference_id):
@@ -60,8 +60,7 @@ def verificar_pagamento(preference_id):
         token = st.secrets.get("MP_ACCESS_TOKEN")
         sdk = mercadopago.SDK(token)
         
-        # Filtramos a busca especificamente pelo preference_id
-        # Isso evita confundir pagamentos antigos do mesmo usuário
+        # Filtramos a busca especificamente pelo preference_id (id da ordem)
         filtros = {
             "preference_id": str(preference_id)
         }
@@ -75,10 +74,11 @@ def verificar_pagamento(preference_id):
             for p in pagamentos:
                 status = p.get("status")
                 if status == "approved":
-                    return True, p.get("payment_type_id") # Retorna True e o meio (pix, credit_card)
+                    # Retorna True e o tipo de pagamento identificado
+                    return True, p.get("payment_type_id")
                     
         return False, None
         
-    except Exception as e:
-        # Se der erro na comunicação com a API
-        return False, str(e)
+    except Exception:
+        # Se houver erro na API, retorna falso para evitar liberação indevida
+        return False, None
