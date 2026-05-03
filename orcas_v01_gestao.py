@@ -252,6 +252,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         <style>
         div.stButton > button:has(div:contains("🚀")) { background-color: #28a745 !important; color: white !important; border: none !important; }
         div.stButton > button:has(div:contains("Excluir")) { background-color: #dc3545 !important; color: white !important; border: none !important; }
+        div.stButton > button:has(div:contains("🔍")) { background-color: #f0f2f6 !important; color: #31333F !important; border: 1px solid #dcdfe6 !important; }
         </style>
     """, unsafe_allow_html=True)
 
@@ -260,13 +261,13 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         st.write(f"**Total a pagar:** :green[R$ {valor_final:.2f}] ({label_desc})")
     
     with col_res2:
-        # BOTÃO VERDE
+        # BOTÃO VERDE (Gera a intenção no Mercado Pago)
         if st.button("🚀 PAGAR AGORA", use_container_width=True):
             import orcas_v01_pagamentos as pag
-            # Pegamos o e-mail do usuário logado (ajuste a variável se o nome for outro no seu código)
             email_user = st.session_state.get('usuario_email', "cliente@email.com")
             
-            link = pag.criar_link_final(
+            # Ajuste a função criar_link_final no orcas_v01_pagamentos para retornar (link, preference_id)
+            link, pref_id = pag.criar_link_final(
                 ID_USUARIO_LOGADO, 
                 valor_final, 
                 f"Assinatura ORCAS - {qtd_meses} Meses",
@@ -274,10 +275,12 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             )
             if link:
                 st.session_state.url_ativa = link
+                st.session_state.pref_id_ativa = pref_id
+                st.session_state.meses_pagos = qtd_meses
             else:
                 st.error("Erro ao gerar link. Verifique o Token nos Secrets.")
 
-        # BOTÃO AZUL (Aparece logo abaixo do verde após o clique)
+        # BOTÃO AZUL (Abre a aba do Mercado Pago)
         if "url_ativa" in st.session_state:
             st.markdown(f'''
                 <a href="{st.session_state.url_ativa}" target="_blank" rel="noopener noreferrer" style="text-decoration: none;">
@@ -286,6 +289,34 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                     </div>
                 </a>
             ''', unsafe_allow_html=True)
+            
+            st.write("")
+            # BOTÃO DE VERIFICAÇÃO (Consulta o status real)
+            if st.button("🔍 VERIFICA RETORNO DO MERCADOPAGO", use_container_width=True):
+                import orcas_v01_pagamentos as pag
+                import datetime
+                
+                pago, detalhes = pag.verificar_pagamento(st.session_state.pref_id_ativa)
+                
+                if pago:
+                    hoje = datetime.date.today()
+                    # Se 'venc_dt_objeto' não estiver definido neste escopo, certifique-se de buscá-lo do banco antes
+                    # A nova data soma os meses comprados à data atual ou ao vencimento atual (o que for maior)
+                    data_base = max(hoje, venc_dt_objeto)
+                    nova_data = data_base + datetime.timedelta(days=30 * st.session_state.meses_pagos)
+                    
+                    try:
+                        supabase.table("usuarios").update({"vencimento": str(nova_data)}).eq("id", ID_USUARIO_LOGADO).execute()
+                        st.success(f"✅ Pagamento Confirmado! Novo vencimento: {nova_data.strftime('%d/%m/%Y')}")
+                        st.balloons()
+                        # Limpa a sessão do pagamento para não repetir
+                        del st.session_state.url_ativa
+                        del st.session_state.pref_id_ativa
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Erro ao atualizar banco: {e}")
+                else:
+                    st.warning("Pagamento ainda não aprovado. Se você já pagou, aguarde o processamento (especialmente Pix) e clique novamente em instantes.")
 
     # Rodapé Original
     st.markdown("""

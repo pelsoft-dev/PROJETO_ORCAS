@@ -423,67 +423,54 @@ if st.session_state.projeto_ativo:
 with st.sidebar:
     st.markdown('<div class="logo-sidebar">🐋 ORCAS</div>', unsafe_allow_html=True)
     st.markdown(f'<div class="user-email">👤 {st.session_state.usuario}</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="venc-text">📅 EXPIRA EM: {venc_dt_objeto.strftime("%d/%m/%Y")}</div>', unsafe_allow_html=True)
+    
+    # --- LÓGICA DE AVISO DE VENCIMENTO ---
+    import datetime
+    hoje = datetime.date.today()
+    dias_para_vencer = (venc_dt_objeto - hoje).days
+    
+    # Define o estilo do texto de vencimento baseado no prazo
+    if dias_para_vencer < 0:
+        texto_venc = f"⚠️ EXPIRADO EM: {venc_dt_objeto.strftime('%d/%m/%Y')}"
+        cor_venc = "#FF0000" # Vermelho
+        bloqueado = True
+    elif dias_para_vencer <= 3:
+        texto_venc = f"⏳ EXPIRA EM: {venc_dt_objeto.strftime('%d/%m/%Y')} ({dias_para_vencer}d)"
+        cor_venc = "#FFA500" # Laranja
+        bloqueado = False
+    else:
+        texto_venc = f"📅 EXPIRA EM: {venc_dt_objeto.strftime('%d/%m/%Y')}"
+        cor_venc = "#333" # Cor padrão
+        bloqueado = False
+
+    st.markdown(f'<div style="color:{cor_venc}; font-weight:bold; font-size:13px; padding:5px 0;">{texto_venc}</div>', unsafe_allow_html=True)
     
     if st.session_state.projeto_ativo:
         st.markdown(f'<div class="project-tag-sidebar">Plano Ativo: {st.session_state.projeto_ativo}</div>', unsafe_allow_html=True)
     
     st.divider()
-    # menu_opcoes = ["🏠 Dashboard", "📑 Lançamentos", "📅 Projetar", "✅ Conciliação", "⚙️ Gestão", "📊 Admin"]
-    # Incluido em 2026-04-25 "💳 Pagamentos"
-    # menu_opcoes = ["🏠 Dashboard", "📝 Lançamentos", "🗓️ Projetar", "✅ Conciliação", "⚙️ Gestão", "📊 Admin", "💳 Pagamentos"]
-    #
-    # idx_inicial = menu_opcoes.index(st.session_state.escolha) 
-    # if st.session_state.escolha in menu_opcoes else 4
-    # 2. Lógica para manter o índice correto no rádio lateral
-    # if st.session_state.escolha in menu_opcoes:
-    #     idx_selecionado = menu_opcoes.index(st.session_state.escolha)
-    # else:
-    #     # Se estivermos em 'Pagamentos', deixamos o marcador visual na 'Gestão'
-    #     idx_selecionado = 4 
-    #
-    # escolha_sidebar = st.sidebar.radio("Menu de Navegação", menu_opcoes, index=idx_selecionado)
-    # 
-    # 4. Atualização do estado (Se o usuário clicar no menu, muda a tela)
-    # Mas ATENÇÃO: se estivermos em 'Pagamentos', só mudamos se ele clicar em algo diferente de 'Gestão'
-    # if escolha_sidebar != st.session_state.escolha:
-    #     # Se a escolha atual for Pagamentos e o rádio estiver na Gestão (índice 4), 
-    #     # não resetamos, a menos que o usuário clique em outro item.
-    #     if st.session_state.escolha == "💳 Pagamentos" and escolha_sidebar == "⚙️ Gestão":
-    #         pass 
-    #     else:
-    #         st.session_state.escolha = escolha_sidebar
-    #         st.rerun()
-    #
-    # Atualiza a escolha se o usuário clicar no menu lateral
-    # if escolha_sidebar != st.session_state.escolha and st.session_state.escolha != "💳 Pagamentos":
-    #     st.session_state.escolha = escolha_sidebar
-    #
-    # escolha_temp = st.radio("Menu de Navegação", menu_opcoes, index=idx_inicial)
-    # escolha_temp = st.sidebar.radio("Menu de Navegação", menu_opcoes, index=idx_inicial)
-    #
-    # if escolha_temp != st.session_state.escolha and st.session_state.escolha != "💳 Pagamentos":
-    #     st.session_state.escolha = escolha_temp
-    #     st.rerun
     
-    # 1. Lista de menu (Pagamentos fica fora para ser 'invisível' no menu lateral)
-    menu_opcoes = ["🏠 Dashboard", "📝 Lançamentos", "🗓️ Projetar", "✅ Conciliação", "⚙️ Gestão", "📊 Admin"]
+    # 1. Definição das opções de menu (BLOQUEIO AQUI)
+    if bloqueado:
+        # Se vencido, só pode acessar Gestão para pagar
+        menu_opcoes = ["⚙️ Gestão"]
+        st.session_state.escolha = "⚙️ Gestão"
+        st.warning("Assinatura Expirada! Acesse a Gestão para renovar.")
+    else:
+        menu_opcoes = ["🏠 Dashboard", "📝 Lançamentos", "🗓️ Projetar", "✅ Conciliação", "⚙️ Gestão", "📊 Admin"]
 
     # 2. Lógica para definir qual item do menu ficará marcado visualmente
     if st.session_state.escolha in menu_opcoes:
         idx_selecionado = menu_opcoes.index(st.session_state.escolha)
     else:
-        # Se estivermos na tela de Pagamentos (que não está na lista), 
-        # o marcador visual do menu lateral deve ficar na 'Gestão' (índice 4)
-        idx_selecionado = 4 
+        # Se estiver em pagamentos ou algo fora, foca na Gestão (que é a última ou única)
+        idx_selecionado = menu_opcoes.index("⚙️ Gestão") 
 
-    # 3. CRIAÇÃO DO MENU LATERAL (Apenas uma vez!)
+    # 3. CRIAÇÃO DO MENU LATERAL
     escolha_sidebar = st.sidebar.radio("Menu de Navegação", menu_opcoes, index=idx_selecionado)
 
     # 4. Atualização do estado e Navegação
     if escolha_sidebar != st.session_state.escolha:
-        # Se a escolha atual for Pagamentos e o rádio estiver na Gestão (índice 4), 
-        # ignoramos a mudança (a menos que o usuário clique em outro item diferente de Gestão)
         if st.session_state.escolha == "💳 Pagamentos" and escolha_sidebar == "⚙️ Gestão":
             pass 
         else:
@@ -506,24 +493,26 @@ else:
 # --- 8. ROTEAMENTO ---
 st.markdown("<div id='topo-ancora'></div>", unsafe_allow_html=True)
 
-if st.session_state.escolha == "🏠 Dashboard":
+# Lógica de Roteamento Protegida
+if st.session_state.escolha == "🏠 Dashboard" and not bloqueado:
     dash.exibir_dashboard(df, supabase, ID_USUARIO_LOGADO, s_db)
-elif st.session_state.escolha == "📝 Lançamentos":
+elif st.session_state.escolha == "📝 Lançamentos" and not bloqueado:
     lanc.exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db, format_moeda, ir_para_o_topo)
-elif st.session_state.escolha == "🗓️ Projetar":
+elif st.session_state.escolha == "🗓️ Projetar" and not bloqueado:
     proj.exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda)
-elif st.session_state.escolha == "✅ Conciliação":
+elif st.session_state.escolha == "✅ Conciliação" and not bloqueado:
     conc.exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moeda)
 elif st.session_state.escolha == "⚙️ Gestão":
+    # Gestão sempre acessível para permitir pagamento
     gestao.exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, format_moeda, parse_moeda, security)
-elif st.session_state.escolha == "📊 Admin":
+elif st.session_state.escolha == "📊 Admin" and not bloqueado:
     adm.exibir_admin(df, supabase, ID_USUARIO_LOGADO, ir_para_o_topo)
-
-# ... (Bloco de roteamento inserido -PAGAMENTOS- em 2026-04-24)
-
 elif st.session_state.escolha == "💳 Pagamentos":
     import orcas_v01_pagamentos as pag
     pag.exibir_pagamentos(supabase, ID_USUARIO_LOGADO)
+else:
+    # Caso caia em algo bloqueado por erro, força Gestão
+    gestao.exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, format_moeda, parse_moeda, security)
 
 # --- O RODAPÉ DEVE VIR ANTES DO STOP ---
 st.divider()
