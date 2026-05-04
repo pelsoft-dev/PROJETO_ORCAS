@@ -38,14 +38,12 @@ def verificar_pagamento(preference_id):
     try:
         token = st.secrets.get("MP_ACCESS_TOKEN")
         sdk = mercadopago.SDK(token)
-        
         # Busca pagamentos vinculados a este ID de preferência
         resultado = sdk.payment().search({"preference_id": str(preference_id)})
         
         if resultado["status"] == 200:
             results = resultado["response"].get("results", [])
             for p in results:
-                # Verificamos se o status é 'approved' (Aprovado)
                 if p.get("status") == "approved":
                     return True
         return False
