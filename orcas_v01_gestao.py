@@ -301,28 +301,49 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             # NOVO BOTÃO - VERIFICA RETORNO
             if st.button("🔍 VERIFICA RETORNO DO MERCADOPAGO", use_container_width=True):
                 import orcas_v01_pagamentos as pag
-                import datetime as dt_internal # RESOLVE O ERRO UNBOUNDLOCALERROR
+                import datetime as dt_lib
                 
-                # Chama a função de verificação no orcas_v01_pagamentos.py
-                pago = pag.verificar_pagamento(st.session_state.pref_id_ativa)
-                
-                if pago:
-                    hoje = dt_internal.date.today()
-                    # Garante que a data base seja a maior entre hoje e o vencimento atual
-                    data_base = max(hoje, venc_dt_objeto)
-                    nova_data = data_base + dt_internal.timedelta(days=30 * st.session_state.meses_comprados)
+                # Passamos o pref_id E o ID do usuário para a nova busca
+                if pag.verificar_pagamento(st.session_state.pref_id_ativa, ID_USUARIO_LOGADO):
+                    hoje = dt_lib.date.today()
+                    # data_base = max(hoje, venc_dt_objeto) # Se tiver a variável venc_dt_objeto
+                    nova_data = hoje + dt_lib.timedelta(days=30 * st.session_state.meses_comprados)
                     
                     try:
                         supabase.table("usuarios").update({"vencimento": str(nova_data)}).eq("id", ID_USUARIO_LOGADO).execute()
-                        st.success(f"✅ Pagamento Aprovado! Novo vencimento: {nova_data.strftime('%d/%m/%Y')}")
+                        st.success(f"✅ Pagamento Confirmado! Novo vencimento: {nova_data.strftime('%d/%m/%Y')}")
                         st.balloons()
-                        # Limpa para evitar cliques duplicados
-                        if "url_ativa" in st.session_state: del st.session_state.url_ativa
+                        del st.session_state.url_ativa
                         st.rerun()
                     except Exception as e:
                         st.error(f"Erro ao atualizar banco: {e}")
                 else:
-                    st.warning("Pagamento ainda não aprovado. Se já pagou, aguarde 1 minuto.")
+                    st.warning("O Mercado Pago ainda não reportou este pagamento como 'Aprovado'.")
+
+            # NOVO BOTÃO - VERIFICA RETORNO
+            # if st.button("🔍 VERIFICA RETORNO DO MERCADOPAGO", use_container_width=True):
+            #     import orcas_v01_pagamentos as pag
+            #     import datetime as dt_internal # RESOLVE O ERRO UNBOUNDLOCALERROR
+            #     
+            #     # Chama a função de verificação no orcas_v01_pagamentos.py
+            #     pago = pag.verificar_pagamento(st.session_state.pref_id_ativa)
+            #     
+            #     if pago:
+            #         hoje = dt_internal.date.today()
+            #         # Garante que a data base seja a maior entre hoje e o vencimento atual
+            #         data_base = max(hoje, venc_dt_objeto)
+            #         nova_data = data_base + dt_internal.timedelta(days=30 * st.session_state.meses_comprados)
+            #         
+            #         try:
+            #             supabase.table("usuarios").update({"vencimento": str(nova_data)}).eq("id", ID_USUARIO_LOGADO).execute()
+            #             st.balloons()
+            #             # Limpa para evitar cliques duplicados
+            #             if "url_ativa" in st.session_state: del st.session_state.url_ativa
+            #             st.rerun()
+            #         except Exception as e:
+            #             st.error(f"Erro ao atualizar banco: {e}")
+            #     else:
+            #         st.warning("Pagamento ainda não aprovado. Se já pagou, aguarde 1 minuto.")
 
     # Rodapé Original
     st.markdown("""
