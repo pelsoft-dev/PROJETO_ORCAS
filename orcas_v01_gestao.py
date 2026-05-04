@@ -205,8 +205,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         st.info("Por favor, selecione um plano existente ou digite um nome para iniciar a configuração.")
 
 # --- BLOCO DE SELEÇÃO DE PAGAMENTO ---
-    import datetime # IMPORTANTE: Mata o erro UnboundLocalError
-    
     st.write("---")
     st.subheader("💳 Finalizar Assinatura")
     
@@ -230,7 +228,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         v_base = v_mensal_total
         label_desc = "Valor Padrão"
 
-    # Campo de Cupom
+    # Campo de Cupom (Mantendo sua lógica original)
     st.write("")
     cupom_in = st.text_input("Possui um Cupom de Desconto?", key="cp_gest_final_v2").upper()
     desc_extra = 0.0
@@ -263,11 +261,12 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         st.write(f"**Total a pagar:** :green[R$ {valor_final:.2f}] ({label_desc})")
     
     with col_res2:
+        # BOTÃO VERDE - GERA LINK
         if st.button("🚀 PAGAR AGORA", use_container_width=True):
             import orcas_v01_pagamentos as pag
             email_user = st.session_state.get('usuario_email', "cliente@email.com")
             
-            # Chama a função e recebe o link e o ID da preferência
+            # Chama a versão que retorna (link, id)
             link, pref_id = pag.criar_link_final(
                 ID_USUARIO_LOGADO, 
                 valor_final, 
@@ -277,10 +276,11 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             if link:
                 st.session_state.url_ativa = link
                 st.session_state.pref_id_ativa = pref_id
-                st.session_state.meses_pagos = qtd_meses
+                st.session_state.meses_comprados = qtd_meses
             else:
                 st.error("Erro ao gerar link. Verifique o Token.")
 
+        # BOTÃO AZUL - ABRE MERCADO PAGO
         if "url_ativa" in st.session_state:
             st.markdown(f'''
                 <a href="{st.session_state.url_ativa}" target="_blank" rel="noopener noreferrer" style="text-decoration: none;">
@@ -291,33 +291,35 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             ''', unsafe_allow_html=True)
             
             st.write("")
+            # NOVO BOTÃO - VERIFICA RETORNO
             if st.button("🔍 VERIFICA RETORNO DO MERCADOPAGO", use_container_width=True):
                 import orcas_v01_pagamentos as pag
+                import datetime as dt_internal # RESOLVE O ERRO UNBOUNDLOCALERROR
                 
-                pago, detalhes = pag.verificar_pagamento(st.session_state.pref_id_ativa)
+                # Chama a função de verificação no orcas_v01_pagamentos.py
+                pago = pag.verificar_pagamento(st.session_state.pref_id_ativa)
                 
                 if pago:
-                    hoje = datetime.date.today()
-                    # A variável 'venc_dt_objeto' deve estar disponível no orcasapp ou ser carregada aqui
+                    hoje = dt_internal.date.today()
+                    # Garante que a data base seja a maior entre hoje e o vencimento atual
                     data_base = max(hoje, venc_dt_objeto)
-                    nova_data = data_base + datetime.timedelta(days=30 * st.session_state.meses_pagos)
+                    nova_data = data_base + dt_internal.timedelta(days=30 * st.session_state.meses_comprados)
                     
                     try:
                         supabase.table("usuarios").update({"vencimento": str(nova_data)}).eq("id", ID_USUARIO_LOGADO).execute()
-                        st.success(f"✅ Pagamento Confirmado! Novo vencimento: {nova_data.strftime('%d/%m/%Y')}")
+                        st.success(f"✅ Pagamento Aprovado! Novo vencimento: {nova_data.strftime('%d/%m/%Y')}")
                         st.balloons()
-                        # Limpa os estados de pagamento
-                        del st.session_state.url_ativa
-                        del st.session_state.pref_id_ativa
+                        # Limpa para evitar cliques duplicados
+                        if "url_ativa" in st.session_state: del st.session_state.url_ativa
                         st.rerun()
                     except Exception as e:
                         st.error(f"Erro ao atualizar banco: {e}")
                 else:
-                    st.warning("Pagamento ainda não aprovado.")
+                    st.warning("Pagamento ainda não aprovado. Se já pagou, aguarde 1 minuto.")
 
-    # Rodapé Original (Mantido)
+    # Rodapé Original
     st.markdown("""
     <div style="font-size: 12px; color: #333; margin-top: 20px; text-align: justify; line-height: 1.6; border-top: 1px solid #eee; padding-top: 10px;">
-    Sua Assinatura ORCAS BABY mensal custa R$ 19,90 e contempla 2 Planos de 24 meses cada um...
+    Sua Assinatura ORCAS BABY mensal custa R$ 19,90 e contempla 2 Planos de 24 meses cada um, mas se você quiser ou necessitar, é possível aumentar o período de um Plano em blocos adicionais de 12 meses tendo um acréscimo de R$ 6,40 para cada 12 meses adicionais. Para aumentar o número de Planos (Padrão - 24 meses), o valor é de R$ 12,80 por Plano adicional. Para receber um Resumo Diário das análises e pendências como, o que preciso pagar e receber hoje, o que ainda está em aberto, quanto já gastei de supermercado até hoje, quanto já gastei nessa reforma, etc de seu Plano via Whatsapp ou E-mail terá um acréscimo de R$ 9,85 por Plano.
     </div>
     """, unsafe_allow_html=True)
