@@ -214,7 +214,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         horizontal=True
     )
 
-    # Cálculos de valor base (v_mensal_total deve estar definido acima no seu código)
+    # Cálculos de valor base
     if "6 Meses" in tipo_pagamento:
         qtd_meses = 6
         v_base = (v_mensal_total * 6) * (1 - DESC_6_MESES)
@@ -228,7 +228,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         v_base = v_mensal_total
         label_desc = "Valor Padrão"
 
-    # Campo de Cupom
+    # Campo de Cupom (Mantendo sua lógica original)
     st.write("")
     cupom_in = st.text_input("Possui um Cupom de Desconto?", key="cp_gest_final_v2").upper()
     desc_extra = 0.0
@@ -247,11 +247,12 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
 
     valor_final = max(v_base - desc_extra, 1.00)
 
-    # CSS PARA CORES (Verde para Pagar, Vermelho para Excluir)
+    # CSS PARA CORES
     st.markdown("""
         <style>
         div.stButton > button:has(div:contains("🚀")) { background-color: #28a745 !important; color: white !important; border: none !important; }
         div.stButton > button:has(div:contains("Excluir")) { background-color: #dc3545 !important; color: white !important; border: none !important; }
+        div.stButton > button:has(div:contains("🔍")) { background-color: #f0f2f6 !important; color: #31333F !important; border: 1px solid #dcdfe6 !important; }
         </style>
     """, unsafe_allow_html=True)
 
@@ -260,13 +261,13 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         st.write(f"**Total a pagar:** :green[R$ {valor_final:.2f}] ({label_desc})")
     
     with col_res2:
-        # BOTÃO VERDE
+        # BOTÃO VERDE - GERA LINK
         if st.button("🚀 PAGAR AGORA", use_container_width=True):
             import orcas_v01_pagamentos as pag
-            # Pegamos o e-mail do usuário logado (ajuste a variável se o nome for outro no seu código)
             email_user = st.session_state.get('usuario_email', "cliente@email.com")
             
-            link = pag.criar_link_final(
+            # Chama a versão que retorna (link, id)
+            link, pref_id = pag.criar_link_final(
                 ID_USUARIO_LOGADO, 
                 valor_final, 
                 f"Assinatura ORCAS - {qtd_meses} Meses",
@@ -274,10 +275,12 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             )
             if link:
                 st.session_state.url_ativa = link
+                st.session_state.pref_id_ativa = pref_id
+                st.session_state.meses_comprados = qtd_meses
             else:
-                st.error("Erro ao gerar link. Verifique o Token nos Secrets.")
+                st.error("Erro ao gerar link. Verifique o Token.")
 
-        # BOTÃO AZUL (Aparece logo abaixo do verde após o clique)
+        # BOTÃO AZUL - ABRE MERCADO PAGO
         if "url_ativa" in st.session_state:
             st.markdown(f'''
                 <a href="{st.session_state.url_ativa}" target="_blank" rel="noopener noreferrer" style="text-decoration: none;">
@@ -286,6 +289,33 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                     </div>
                 </a>
             ''', unsafe_allow_html=True)
+            
+            st.write("")
+            # NOVO BOTÃO - VERIFICA RETORNO
+            if st.button("🔍 VERIFICA RETORNO DO MERCADOPAGO", use_container_width=True):
+                import orcas_v01_pagamentos as pag
+                import datetime as dt_internal # RESOLVE O ERRO UNBOUNDLOCALERROR
+                
+                # Chama a função de verificação no orcas_v01_pagamentos.py
+                pago = pag.verificar_pagamento(st.session_state.pref_id_ativa)
+                
+                if pago:
+                    hoje = dt_internal.date.today()
+                    # Garante que a data base seja a maior entre hoje e o vencimento atual
+                    data_base = max(hoje, venc_dt_objeto)
+                    nova_data = data_base + dt_internal.timedelta(days=30 * st.session_state.meses_comprados)
+                    
+                    try:
+                        supabase.table("usuarios").update({"vencimento": str(nova_data)}).eq("id", ID_USUARIO_LOGADO).execute()
+                        st.success(f"✅ Pagamento Aprovado! Novo vencimento: {nova_data.strftime('%d/%m/%Y')}")
+                        st.balloons()
+                        # Limpa para evitar cliques duplicados
+                        if "url_ativa" in st.session_state: del st.session_state.url_ativa
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Erro ao atualizar banco: {e}")
+                else:
+                    st.warning("Pagamento ainda não aprovado. Se já pagou, aguarde 1 minuto.")
 
     # Rodapé Original
     st.markdown("""
