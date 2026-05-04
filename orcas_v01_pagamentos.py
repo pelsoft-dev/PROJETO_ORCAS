@@ -38,14 +38,25 @@ def verificar_pagamento(preference_id):
     try:
         token = st.secrets.get("MP_ACCESS_TOKEN")
         sdk = mercadopago.SDK(token)
-        # Busca pagamentos vinculados a este ID de preferência
-        resultado = sdk.payment().search({"preference_id": str(preference_id)})
+        
+        # Em vez de buscar pelo ID da preferência, vamos buscar pelos 
+        # pagamentos mais recentes e ver se algum bate com o que queremos
+        filtros = {
+            "sort": "date_created",
+            "order": "desc",
+            "limit": 10
+        }
+        
+        resultado = sdk.payment().search(filtros)
         
         if resultado["status"] == 200:
-            results = resultado["response"].get("results", [])
-            for p in results:
-                if p.get("status") == "approved":
-                    return True
+            pagamentos = resultado["response"].get("results", [])
+            for p in pagamentos:
+                # Verificamos se o preference_id bate OU se o status é aprovado
+                # O MP vincula o preference_id dentro do objeto de pagamento
+                if str(p.get("preference_id")) == str(preference_id):
+                    if p.get("status") == "approved":
+                        return True
         return False
     except Exception:
         return False

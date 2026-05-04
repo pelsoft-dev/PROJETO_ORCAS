@@ -291,6 +291,13 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             ''', unsafe_allow_html=True)
             
             st.write("")
+
+            # Linha temporária para debug
+            if "pref_id_ativa" in st.session_state:
+                st.caption(f"ID para conferência: {st.session_state.pref_id_ativa}")
+            else:
+                st.caption("⚠️ Nenhum ID de pagamento pendente na sessão.")
+
             # NOVO BOTÃO - VERIFICA RETORNO
             if st.button("🔍 VERIFICA RETORNO DO MERCADOPAGO", use_container_width=True):
                 import orcas_v01_pagamentos as pag
