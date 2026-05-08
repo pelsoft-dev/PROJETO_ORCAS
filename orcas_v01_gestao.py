@@ -205,149 +205,119 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         st.info("Por favor, selecione um plano existente ou digite um nome para iniciar a configuração.")
 
 # --- BLOCO DE SELEÇÃO DE PAGAMENTO ---
-    st.write("---")
-    st.subheader("💳 Finalizar Assinatura")
-    
-    tipo_pagamento = st.radio(
-        "Escolha o período de renovação:",
-        ["Mensal (Sem desconto)", "6 Meses (5% de desconto)", "12 Meses (11% de desconto)"],
-        horizontal=True
-    )
+st.write("---")
+st.subheader("💳 Finalizar Assinatura")
 
-    # Cálculos de valor base
-    if "6 Meses" in tipo_pagamento:
-        qtd_meses = 6
-        v_base = (v_mensal_total * 6) * (1 - DESC_6_MESES)
-        label_desc = "5% OFF"
-    elif "12 Meses" in tipo_pagamento:
-        qtd_meses = 12
-        v_base = (v_mensal_total * 12) * (1 - DESC_12_MESES)
-        label_desc = "11% OFF"
-    else:
-        qtd_meses = 1
-        v_base = v_mensal_total
-        label_desc = "Valor Padrão"
+tipo_pagamento = st.radio(
+    "Escolha o período de renovação:",
+    ["Mensal (Sem desconto)", "6 Meses (5% de desconto)", "12 Meses (11% de desconto)"],
+    horizontal=True
+)
 
-    # Campo de Cupom (Mantendo sua lógica original)
-    st.write("")
-    cupom_in = st.text_input("Possui um Cupom de Desconto?", key="cp_gest_final_v2").upper()
-    desc_extra = 0.0
-    if cupom_in:
-        try:
-            res_c = supabase.table("cupons").select("*").eq("codigo", cupom_in).eq("ativo", True).execute()
-            if res_c.data:
-                d = res_c.data[0]
-                v_p = float(d.get('percentual_desconto', 0) or 0)
-                v_a = float(d.get('valor_desconto', 0) or 0)
-                desc_extra = v_base * (v_p / 100) if v_p > 0 else v_a
-                st.success("✅ Cupom aplicado!")
-            else:
-                st.error("❌ Cupom inválido.")
-        except: pass
+# Cálculos de valor base (Mantenha suas variáveis v_mensal_total, DESC_6_MESES, etc. definidas antes)
+if "6 Meses" in tipo_pagamento:
+    qtd_meses = 6
+    v_base = (v_mensal_total * 6) * (1 - DESC_6_MESES)
+    label_desc = "5% OFF"
+elif "12 Meses" in tipo_pagamento:
+    qtd_meses = 12
+    v_base = (v_mensal_total * 12) * (1 - DESC_12_MESES)
+    label_desc = "11% OFF"
+else:
+    qtd_meses = 1
+    v_base = v_mensal_total
+    label_desc = "Valor Padrão"
 
-    valor_final = max(v_base - desc_extra, 1.00)
+# Campo de Cupom
+st.write("")
+cupom_in = st.text_input("Possui um Cupom de Desconto?", key="cp_gest_final_v2").upper()
+desc_extra = 0.0
+if cupom_in:
+    try:
+        res_c = supabase.table("cupons").select("*").eq("codigo", cupom_in).eq("ativo", True).execute()
+        if res_c.data:
+            d = res_c.data[0]
+            v_p = float(d.get('percentual_desconto', 0) or 0)
+            v_a = float(d.get('valor_desconto', 0) or 0)
+            desc_extra = v_base * (v_p / 100) if v_p > 0 else v_a
+            st.success("✅ Cupom aplicado!")
+        else:
+            st.error("❌ Cupom inválido.")
+    except: pass
 
-    # CSS PARA CORES
-    st.markdown("""
-        <style>
-        div.stButton > button:has(div:contains("🚀")) { background-color: #28a745 !important; color: white !important; border: none !important; }
-        div.stButton > button:has(div:contains("Excluir")) { background-color: #dc3545 !important; color: white !important; border: none !important; }
-        div.stButton > button:has(div:contains("🔍")) { background-color: #f0f2f6 !important; color: #31333F !important; border: 1px solid #dcdfe6 !important; }
-        </style>
-    """, unsafe_allow_html=True)
+valor_final = max(v_base - desc_extra, 1.00)
 
-    col_res1, col_res2 = st.columns([2, 1])
-    with col_res1:
-        st.write(f"**Total a pagar:** :green[R$ {valor_final:.2f}] ({label_desc})")
-    
-    with col_res2:
-        # BOTÃO VERDE - GERA LINK
-        if st.button("🚀 PAGAR AGORA", use_container_width=True):
-            import orcas_v01_pagamentos as pag
-            email_user = st.session_state.get('usuario_email', "cliente@email.com")
-            
-            # Chama a versão que retorna (link, id)
-            link, pref_id = pag.criar_link_final(
-                ID_USUARIO_LOGADO, 
-                valor_final, 
-                f"Assinatura ORCAS - {qtd_meses} Meses",
-                email_user
-            )
-            if link:
-                st.session_state.url_ativa = link
-                st.session_state.pref_id_ativa = pref_id
-                st.session_state.meses_comprados = qtd_meses
-            else:
-                st.error("Erro ao gerar link. Verifique o Token.")
+# CSS PARA CORES
+st.markdown("""
+    <style>
+    div.stButton > button:has(div:contains("🚀")) { background-color: #28a745 !important; color: white !important; border: none !important; }
+    div.stButton > button:has(div:contains("CLIQUE")) { background-color: #009EE3 !important; color: white !important; border: none !important; font-weight: bold !important; }
+    div.stButton > button:has(div:contains("🔍")) { background-color: #f0f2f6 !important; color: #31333F !important; border: 1px solid #dcdfe6 !important; }
+    </style>
+""", unsafe_allow_html=True)
 
-        # BOTÃO AZUL - ABRE MERCADO PAGO
-        if "url_ativa" in st.session_state:
-            st.markdown(f'''
-                <a href="{st.session_state.url_ativa}" target="_blank" rel="noopener noreferrer" style="text-decoration: none;">
-                    <div style="background-color: #009EE3; color: white; padding: 14px; border-radius: 8px; font-weight: bold; text-align: center; margin-top: 10px; box-shadow: 0px 4px 10px rgba(0,0,0,0.1);">
-                        CLIQUE AQUI PARA ABRIR O CHECKOUT ➔
-                    </div>
-                </a>
-            ''', unsafe_allow_html=True)
-            
-            st.write("")
+col_res1, col_res2 = st.columns([2, 1])
+with col_res1:
+    st.write(f"**Total a pagar:** :green[R$ {valor_final:.2f}] ({label_desc})")
 
-            # Linha temporária para debug
-            if "pref_id_ativa" in st.session_state:
-                st.caption(f"ID para conferência: {st.session_state.pref_id_ativa}")
-            else:
-                st.caption("⚠️ Nenhum ID de pagamento pendente na sessão.")
+with col_res2:
+    # BOTÃO VERDE - GERA LINK
+    if st.button("🚀 PAGAR AGORA", use_container_width=True):
+        import orcas_v01_pagamentos as pag
+        email_user = st.session_state.get('usuario_email', "cliente@email.com")
+        
+        # O ID_USUARIO_LOGADO é enviado para o external_reference que o Make usará
+        link, pref_id = pag.criar_link_final(
+            ID_USUARIO_LOGADO, 
+            valor_final, 
+            f"Assinatura ORCAS - {qtd_meses} Meses",
+            email_user,
+            qtd_meses
+        )
+        if link:
+            st.session_state.url_ativa = link
+            st.session_state.meses_comprados = qtd_meses
+            st.toast("Link gerado com sucesso!")
+        else:
+            st.error("Erro ao gerar link. Verifique o Token.")
 
-            # NOVO BOTÃO - VERIFICA RETORNO
-            if st.button("🔍 VERIFICA RETORNO DO MERCADOPAGO", use_container_width=True):
-                import orcas_v01_pagamentos as pag
-                import datetime as dt_lib
-                
-                # Passamos o pref_id E o ID do usuário para a nova busca
-                if pag.verificar_pagamento(st.session_state.pref_id_ativa, ID_USUARIO_LOGADO):
-                    hoje = dt_lib.date.today()
-                    # data_base = max(hoje, venc_dt_objeto) # Se tiver a variável venc_dt_objeto
-                    nova_data = hoje + dt_lib.timedelta(days=30 * st.session_state.meses_comprados)
+    # BOTÃO AZUL (Convertido para Botão Streamlit para melhor controle)
+    if "url_ativa" in st.session_state:
+        st.link_button("🔵 CLIQUE PARA PAGAR (MERCADO PAGO)", st.session_state.url_ativa, use_container_width=True)
+        
+        st.write("")
+
+        # NOVO BOTÃO - VERIFICA SE O MAKE JÁ ATUALIZOU O BANCO
+        if st.button("🔍 JÁ PAGUEI! VERIFICAR STATUS", use_container_width=True):
+            with st.spinner("Consultando confirmação do banco..."):
+                try:
+                    # Consultamos o banco para ver se a data_ult_assinat mudou para hoje
+                    from datetime import date
+                    res_banco = supabase.table("usuarios").select("data_ult_assinat").eq("id", ID_USUARIO_LOGADO).execute()
                     
-                    try:
-                        supabase.table("usuarios").update({"vencimento": str(nova_data)}).eq("id", ID_USUARIO_LOGADO).execute()
-                        st.success(f"✅ Pagamento Confirmado! Novo vencimento: {nova_data.strftime('%d/%m/%Y')}")
-                        st.balloons()
-                        del st.session_state.url_ativa
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Erro ao atualizar banco: {e}")
-                else:
-                    st.warning("O Mercado Pago ainda não reportou este pagamento como 'Aprovado'.")
+                    if res_banco.data:
+                        data_gravada = res_banco.data[0].get("data_ult_assinat")
+                        hoje_str = str(date.today())
+                        
+                        # Se a data no banco for hoje, significa que o Make já fez o trabalho dele!
+                        if data_gravada == hoje_str:
+                            st.success(f"✅ Pagamento Confirmado via Automação!")
+                            st.balloons()
+                            
+                            # Limpa o link da sessão para não pagar duas vezes
+                            if "url_ativa" in st.session_state:
+                                del st.session_state.url_ativa
+                                
+                            st.info("Sua assinatura foi renovada com sucesso. Reiniciando o app...")
+                            st.rerun()
+                        else:
+                            st.warning("Ainda não recebemos a confirmação. Se você já pagou, aguarde 30 segundos e clique novamente.")
+                except Exception as e:
+                    st.error(f"Erro ao verificar no banco: {e}")
 
-            # NOVO BOTÃO - VERIFICA RETORNO
-            # if st.button("🔍 VERIFICA RETORNO DO MERCADOPAGO", use_container_width=True):
-            #     import orcas_v01_pagamentos as pag
-            #     import datetime as dt_internal # RESOLVE O ERRO UNBOUNDLOCALERROR
-            #     
-            #     # Chama a função de verificação no orcas_v01_pagamentos.py
-            #     pago = pag.verificar_pagamento(st.session_state.pref_id_ativa)
-            #     
-            #     if pago:
-            #         hoje = dt_internal.date.today()
-            #         # Garante que a data base seja a maior entre hoje e o vencimento atual
-            #         data_base = max(hoje, venc_dt_objeto)
-            #         nova_data = data_base + dt_internal.timedelta(days=30 * st.session_state.meses_comprados)
-            #         
-            #         try:
-            #             supabase.table("usuarios").update({"vencimento": str(nova_data)}).eq("id", ID_USUARIO_LOGADO).execute()
-            #             st.balloons()
-            #             # Limpa para evitar cliques duplicados
-            #             if "url_ativa" in st.session_state: del st.session_state.url_ativa
-            #             st.rerun()
-            #         except Exception as e:
-            #             st.error(f"Erro ao atualizar banco: {e}")
-            #     else:
-            #         st.warning("Pagamento ainda não aprovado. Se já pagou, aguarde 1 minuto.")
-
-    # Rodapé Original
-    st.markdown("""
-    <div style="font-size: 12px; color: #333; margin-top: 20px; text-align: justify; line-height: 1.6; border-top: 1px solid #eee; padding-top: 10px;">
-    Sua Assinatura ORCAS BABY mensal custa R$ 19,90 e contempla 2 Planos de 24 meses cada um, mas se você quiser ou necessitar, é possível aumentar o período de um Plano em blocos adicionais de 12 meses tendo um acréscimo de R$ 6,40 para cada 12 meses adicionais. Para aumentar o número de Planos (Padrão - 24 meses), o valor é de R$ 12,80 por Plano adicional. Para receber um Resumo Diário das análises e pendências como, o que preciso pagar e receber hoje, o que ainda está em aberto, quanto já gastei de supermercado até hoje, quanto já gastei nessa reforma, etc de seu Plano via Whatsapp ou E-mail terá um acréscimo de R$ 9,85 por Plano.
-    </div>
-    """, unsafe_allow_html=True)
+# Rodapé Original
+st.markdown("""
+<div style="font-size: 12px; color: #333; margin-top: 20px; text-align: justify; line-height: 1.6; border-top: 1px solid #eee; padding-top: 10px;">
+Sua Assinatura ORCAS BABY mensal custa R$ 19,90 e contempla 2 Planos de 24 meses cada um, mas se você quiser ou necessitar... (seu texto original)
+</div>
+""", unsafe_allow_html=True)
