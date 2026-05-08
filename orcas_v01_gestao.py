@@ -208,13 +208,24 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
 st.write("---")
 st.subheader("💳 Finalizar Assinatura")
 
+# --- GARANTIA DE VARIÁVEIS (Para evitar o NameError) ---
+# Se o seu código já tiver esses valores acima, ele usará os de lá. 
+# Se não tiver, ele usa estes padrões abaixo para não travar o App.
+if 'v_mensal_total' not in locals() and 'v_mensal_total' not in globals():
+    v_mensal_total = 19.90  # Valor padrão da assinatura
+
+DESC_6_MESES = 0.05
+DESC_12_MESES = 0.11
+# -------------------------------------------------------
+
 tipo_pagamento = st.radio(
     "Escolha o período de renovação:",
     ["Mensal (Sem desconto)", "6 Meses (5% de desconto)", "12 Meses (11% de desconto)"],
+    index=0,
     horizontal=True
 )
 
-# Cálculos de valor base (Mantenha suas variáveis v_mensal_total, DESC_6_MESES, etc. definidas antes)
+# Cálculos de valor base
 if "6 Meses" in tipo_pagamento:
     qtd_meses = 6
     v_base = (v_mensal_total * 6) * (1 - DESC_6_MESES)
@@ -243,11 +254,12 @@ if cupom_in:
             st.success("✅ Cupom aplicado!")
         else:
             st.error("❌ Cupom inválido.")
-    except: pass
+    except: 
+        pass
 
 valor_final = max(v_base - desc_extra, 1.00)
 
-# CSS PARA CORES
+# CSS PARA CORES DOS BOTÕES
 st.markdown("""
     <style>
     div.stButton > button:has(div:contains("🚀")) { background-color: #28a745 !important; color: white !important; border: none !important; }
@@ -266,7 +278,7 @@ with col_res2:
         import orcas_v01_pagamentos as pag
         email_user = st.session_state.get('usuario_email', "cliente@email.com")
         
-        # O ID_USUARIO_LOGADO é enviado para o external_reference que o Make usará
+        # O ID_USUARIO_LOGADO deve ser o ID numérico da sua tabela Supabase
         link, pref_id = pag.criar_link_final(
             ID_USUARIO_LOGADO, 
             valor_final, 
@@ -281,43 +293,38 @@ with col_res2:
         else:
             st.error("Erro ao gerar link. Verifique o Token.")
 
-    # BOTÃO AZUL (Convertido para Botão Streamlit para melhor controle)
+    # BOTÃO AZUL - ABRE MERCADO PAGO
     if "url_ativa" in st.session_state:
         st.link_button("🔵 CLIQUE PARA PAGAR (MERCADO PAGO)", st.session_state.url_ativa, use_container_width=True)
         
         st.write("")
 
-        # NOVO BOTÃO - VERIFICA SE O MAKE JÁ ATUALIZOU O BANCO
+        # BOTÃO DE VERIFICAÇÃO - OLHA DIRETO NO SUPABASE SE O MAKE JÁ ATUALIZOU
         if st.button("🔍 JÁ PAGUEI! VERIFICAR STATUS", use_container_width=True):
-            with st.spinner("Consultando confirmação do banco..."):
+            with st.spinner("Consultando confirmação no banco de dados..."):
                 try:
-                    # Consultamos o banco para ver se a data_ult_assinat mudou para hoje
                     from datetime import date
+                    # Consultamos a data_ult_assinat que o Make preenche via PATCH
                     res_banco = supabase.table("usuarios").select("data_ult_assinat").eq("id", ID_USUARIO_LOGADO).execute()
                     
                     if res_banco.data:
                         data_gravada = res_banco.data[0].get("data_ult_assinat")
                         hoje_str = str(date.today())
                         
-                        # Se a data no banco for hoje, significa que o Make já fez o trabalho dele!
                         if data_gravada == hoje_str:
                             st.success(f"✅ Pagamento Confirmado via Automação!")
                             st.balloons()
-                            
-                            # Limpa o link da sessão para não pagar duas vezes
                             if "url_ativa" in st.session_state:
                                 del st.session_state.url_ativa
-                                
-                            st.info("Sua assinatura foi renovada com sucesso. Reiniciando o app...")
                             st.rerun()
                         else:
-                            st.warning("Ainda não recebemos a confirmação. Se você já pagou, aguarde 30 segundos e clique novamente.")
+                            st.warning("Ainda não recebemos a confirmação do Mercado Pago. Aguarde alguns segundos e clique novamente.")
                 except Exception as e:
-                    st.error(f"Erro ao verificar no banco: {e}")
+                    st.error(f"Erro ao acessar o banco: {e}")
 
-# Rodapé Original
+# Rodapé Informativo
 st.markdown("""
 <div style="font-size: 12px; color: #333; margin-top: 20px; text-align: justify; line-height: 1.6; border-top: 1px solid #eee; padding-top: 10px;">
-Sua Assinatura ORCAS BABY mensal custa R$ 19,90 e contempla 2 Planos de 24 meses cada um, mas se você quiser ou necessitar... (seu texto original)
+Sua Assinatura ORCAS BABY mensal custa R$ 19,90 e contempla 2 Planos de 24 meses cada um, mas se você quiser ou necessitar, é possível aumentar o período de um Plano em blocos adicionais de 12 meses tendo um acréscimo de R$ 6,40 para cada 12 meses adicionais.
 </div>
 """, unsafe_allow_html=True)
