@@ -4,7 +4,7 @@ import mercadopago
 def criar_link_final(user_id, valor, descricao, email_usuario, qtd_meses):
     """
     Cria a preferência de pagamento no Mercado Pago.
-    O 'external_reference' leva o ID do usuário que o Make usará no PATCH.
+    O 'external_reference' leva o ID do usuário para vincular a transação.
     """
     try:
         token = st.secrets.get("MP_ACCESS_TOKEN")
@@ -16,20 +16,20 @@ def criar_link_final(user_id, valor, descricao, email_usuario, qtd_meses):
         
         preference_data = {
             "items": [{
-                "id": str(qtd_meses), # Quantidade de meses para possível uso futuro
+                "id": str(qtd_meses),
                 "title": descricao,
                 "quantity": 1,
                 "unit_price": float(round(valor, 2))
             }],
             "payer": {"email": email_usuario},
-            # CRUCIAL: O user_id enviado aqui deve ser o mesmo ID (int4) da tabela usuarios
+            # Vincula o ID do usuário (ex: 1) à transação
             "external_reference": str(user_id), 
             "back_urls": {
-                "success": "https://share.streamlit.io/", # Altere para a URL real do seu app se desejar
+                "success": "https://share.streamlit.io/",
                 "pending": "https://share.streamlit.io/",
                 "failure": "https://share.streamlit.io/",
             },
-            "notification_url": "https://hook.us2.make.com/youbq3bhry3422tjjahaqqmyrsr2o81e", # COLOQUE AQUI O LINK DO MAKE
+            "notification_url": "https://hook.us2.make.com/youbq3bhry3422tjjahaqqmyrsr2o81e",
             "auto_return": "approved"
         }
         
@@ -46,36 +46,38 @@ def criar_link_final(user_id, valor, descricao, email_usuario, qtd_meses):
         st.error(f"Erro ao criar link de pagamento: {e}")
         return None, None
 
-# --- NOVA FUNÇÃO PARA CONSULTA DIRETA QUE RESOLVE O PROBLEMA DO BOTÃO ---
-def consultar_pagamento_mp(preference_id):
+def consultar_pagamento_mp(user_id):
     """
-    Consulta o Mercado Pago para saber se existe algum pagamento 
-    aprovado para esta preferência específica.
+    Consulta o Mercado Pago buscando pelo external_reference (ID do usuário).
+    Busca ampla nos últimos pagamentos aprovados para evitar erros de indexação.
     """
     import requests
     try:
         token = st.secrets.get("MP_ACCESS_TOKEN")
         headers = {"Authorization": f"Bearer {token}"}
-        # Buscamos pagamentos aprovados vinculados a esta preferência
-        url = f"https://api.mercadopago.com/v1/payments/search?status=approved&preference_id={preference_id}"
+        
+        # Buscamos os últimos 10 pagamentos aprovados na conta
+        # Filtrar por external_reference diretamente na URL às vezes falha no Pix, 
+        # por isso buscamos os recentes e conferimos no código.
+        url = "https://api.mercadopago.com/v1/payments/search?status=approved&sort=date_created&criteria=desc&limit=10"
         res = requests.get(url, headers=headers).json()
         
         if res.get('results'):
-            # Retorna o valor do primeiro pagamento aprovado encontrado
-            return res['results'][0].get('transaction_amount')
+            for pag in res['results']:
+                # Verifica se o ID do usuário (external_reference) bate com o que buscamos
+                if str(pag.get('external_reference')) == str(user_id):
+                    return pag.get('transaction_amount')
         return None
-    except:
+    except Exception:
         return None
 
 def verificar_pagamento_no_banco(user_id, supabase_client):
     """
-    Em vez de perguntar ao Mercado Pago, perguntamos ao nosso banco 
-    se o Make já fez o trabalho dele.
+    Verifica no Supabase se a data da última assinatura foi atualizada hoje.
     """
     try:
         res = supabase_client.table("usuarios").select("data_ult_assinat").eq("id", user_id).execute()
         if res.data:
-            # Retorna a data gravada pelo Make para conferência no orcas_v01_gestao.py
             return res.data[0].get("data_ult_assinat")
         return None
     except Exception:
