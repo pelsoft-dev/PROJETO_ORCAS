@@ -284,7 +284,8 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                         from datetime import date
                         
                         # 1. CONSULTA DIRETA AO MERCADO PAGO (Via função no orcas_v01_pagamentos.py)
-                        confirmado_valor = pag.consultar_pagamento_mp(st.session_state.pref_id_ativa)
+                        # confirmado_valor = pag.consultar_pagamento_mp(st.session_state.pref_id_ativa)
+                        confirmado_valor = pag.consultar_pagamento_mp(ID_USUARIO_LOGADO)
                         
                         if confirmado_valor:
                             # 2. SE APROVADO, ATUALIZA O SUPABASE NA HORA
