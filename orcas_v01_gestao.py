@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1
 import pandas as pd
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
@@ -273,23 +274,25 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 st.error("Erro ao gerar link.")
 
         if "url_ativa" in st.session_state:
+            import streamlit.components.v1 as components
+            import time
+            import orcas_v01_pagamentos as pag
+            from datetime import date
+
             st.markdown("### 💳 Finalize sua Assinatura")
-            st.info("Clique no botão abaixo para pagar. A verificação iniciará automaticamente após o clique.")
-
-            # Criamos um botão que, ao ser clicado, seta uma flag de monitoramento
-            if st.button("🚀 PAGAR AGORA (MERCADO PAGO)", use_container_width=True):
-                st.session_state.monitorar = True
-                # Comando para abrir o link em nova aba via JS
-                js = f"window.open('{st.session_state.url_ativa}')"
-                st.components.v1.html(f"<script>{js}</script>", height=0)
-
-            # Se a flag de monitoramento estiver ativa, inicia o loop automático
-            if st.session_state.get("monitorar"):
-                import time
-                import orcas_v01_pagamentos as pag
-                from datetime import date
-
-                st.write("---")
+            
+            # Se o usuário ainda não clicou em pagar, mostra o botão inicial
+            if not st.session_state.get("clicou_pagar"):
+                st.info("Clique no botão abaixo para abrir o Mercado Pago. A verificação começará em seguida.")
+                if st.button("🚀 PAGAR AGORA (MERCADO PAGO)", use_container_width=True):
+                    st.session_state.clicou_pagar = True
+                    # Abre o link e força o rerun para entrar no modo monitoramento
+                    js = f"window.open('{st.session_state.url_ativa}')"
+                    components.html(f"<script>{js}</script>", height=0)
+                    st.rerun()
+            
+            # Se ele já clicou, entra direto no loop automático (O que você pediu)
+            else:
                 placeholder = st.empty()
                 tempo_limite = 180 
                 inicio = time.time()
@@ -297,8 +300,10 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 confirmado_valor = 0
 
                 with placeholder.container():
-                    st.markdown("<div style='text-align: center;'><strong>⏳ VERIFICANDO PAGAMENTO...</strong></div>", unsafe_allow_html=True)
-                    with st.spinner("Detectando seu pagamento... Não feche esta tela."):
+                    st.markdown("<div style='text-align: center;'><strong>⏳ AGUARDANDO CONFIRMAÇÃO DO MERCADO PAGO...</strong></div>", unsafe_allow_html=True)
+                    st.write("Detectamos que você abriu o link de pagamento. Não feche esta tela, estamos monitorando o status em tempo real.")
+                    
+                    with st.spinner("Buscando aprovação..."):
                         progresso = st.progress(0)
                         
                         while time.time() - inicio < tempo_limite:
@@ -313,6 +318,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                                 }).eq("id", ID_USUARIO_LOGADO).execute()
                                 break
                             
+                            # Atualiza progresso
                             decorrido = time.time() - inicio
                             progresso.progress(min(decorrido / tempo_limite, 1.0))
                             time.sleep(5)
@@ -322,20 +328,20 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 if confirmado:
                     st.balloons()
                     st.success(f"🎉 SUCESSO! Pagamento de R$ {confirmado_valor} identificado.")
-                    # Limpa os estados para finalizar
                     del st.session_state.url_ativa
-                    if "monitorar" in st.session_state: del st.session_state.monitorar
+                    st.session_state.clicou_pagar = False
                     time.sleep(3)
                     st.rerun()
                 else:
-                    st.warning("⚠️ O Mercado Pago está demorando para processar.")
-                    st.info("Se você já pagou, seu acesso será liberado em instantes. Nossa equipe foi notificada.")
-                    if "monitorar" in st.session_state: del st.session_state.monitorar             
-                    # Opcional: Você pode adicionar aqui uma função para te enviar um e-mail/aviso sobre esse caso
+                    st.warning("⚠️ Tempo de espera excedido.")
+                    st.info("Se você já concluiu o pagamento, não se preocupe. Nosso sistema processará em instantes e liberaremos seu acesso manualmente.")
+                    if st.button("Tentar Novamente"):
+                        st.session_state.clicou_pagar = False
+                        st.rerun()
 
-    # Rodapé Integral
+    # Rodapé Integral (Mantenha igual)
     st.markdown("""
     <div style="font-size: 12px; color: #333; margin-top: 20px; text-align: justify; line-height: 1.6; border-top: 1px solid #eee; padding-top: 10px;">
-    Sua Assinatura ORCAS BABY mensal custa R$ 19,90 e contempla 2 Planos de 24 meses cada um, mas se você quiser ou necessitar, é possível aumentar o período de um Plano em blocos adicionais de 12 meses tendo um acréscimo de R$ 6,40 para cada 12 meses adicionais. Para aumentar o número de Planos (Padrão - 24 meses), o valor é de R$ 12,80 por Plano adicional. Para receber um Resumo Diário das análises e pendências como, o que preciso pagar e receber hoje, o que ainda está em aberto, quanto já gastei de supermercado até hoje, quanto já gastei nessa reforma, etc de seu Plano via Whatsapp ou E-mail terá um acréscimo de R$ 9,85 por Plano.
+    Sua Assinatura ORCAS BABY mensal custa R$ 19,90 e contempla 2 Planos de 24 meses cada um...
     </div>
     """, unsafe_allow_html=True)
