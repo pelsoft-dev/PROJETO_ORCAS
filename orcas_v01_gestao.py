@@ -278,34 +278,32 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             st.write("")
 
             if st.button("🔍 JÁ PAGUEI! VERIFICAR STATUS", use_container_width=True):
-                with st.spinner("Verificando pagamento diretamente no Mercado Pago..."):
+                with st.spinner("Consultando Mercado Pago..."):
                     try:
-                        import requests
+                        import orcas_v01_pagamentos as pag
                         from datetime import date
                         
-                        # 1. CONSULTA DIRETA AO MERCADO PAGO (Substituindo o Make)
-                        headers_mp = {"Authorization": f"Bearer {st.secrets['MP_ACCESS_TOKEN']}"}
-                        # Buscamos o pagamento mais recente desta preferência
-                        url_mp = f"https://api.mercadopago.com/v1/payments/search?status=approved&preference_id={st.session_state.pref_id_ativa}"
-                        res_mp = requests.get(url_mp, headers=headers_mp).json()
+                        # 1. CONSULTA DIRETA AO MERCADO PAGO (Via função no orcas_v01_pagamentos.py)
+                        confirmado_valor = pag.consultar_pagamento_mp(st.session_state.pref_id_ativa)
                         
-                        if res_mp.get('results'):
-                            dados_pag = res_mp['results'][0]
-                            valor_pago_real = dados_pag.get('transaction_amount')
-                            
+                        if confirmado_valor:
                             # 2. SE APROVADO, ATUALIZA O SUPABASE NA HORA
                             hoje = str(date.today())
                             supabase.table("usuarios").update({
                                 "data_ult_assinat": hoje,
-                                "valor_pago": valor_pago_real
+                                "valor_pago": confirmado_valor
                             }).eq("id", ID_USUARIO_LOGADO).execute()
                             
-                            st.success(f"✅ Pagamento de R$ {valor_pago_real} Confirmado!")
+                            st.success(f"✅ Pagamento de R$ {confirmado_valor} Confirmado!")
                             st.balloons()
-                            if "url_ativa" in st.session_state: del st.session_state.url_ativa
+                            
+                            # Limpa a URL da sessão para resetar o estado de pagamento
+                            if "url_ativa" in st.session_state: 
+                                del st.session_state.url_ativa
+                            
                             st.rerun()
                         else:
-                            st.warning("O Mercado Pago ainda não confirmou o recebimento. Se você já pagou, aguarde 1 minuto e tente novamente.")
+                            st.warning("O Mercado Pago ainda não confirmou o recebimento. Se você já pagou, aguarde 30 segundos e tente novamente.")
                             
                     except Exception as e:
                         st.error(f"Erro na verificação direta: {e}")

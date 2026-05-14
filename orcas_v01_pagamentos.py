@@ -46,9 +46,27 @@ def criar_link_final(user_id, valor, descricao, email_usuario, qtd_meses):
         st.error(f"Erro ao criar link de pagamento: {e}")
         return None, None
 
-# NOTA: A função verificar_pagamento abaixo tornou-se opcional, pois o Make
-# atualiza o banco de forma assíncrona. O seu app deve agora consultar 
-# o Supabase para saber se o status mudou.
+# --- NOVA FUNÇÃO PARA CONSULTA DIRETA QUE RESOLVE O PROBLEMA DO BOTÃO ---
+def consultar_pagamento_mp(preference_id):
+    """
+    Consulta o Mercado Pago para saber se existe algum pagamento 
+    aprovado para esta preferência específica.
+    """
+    import requests
+    try:
+        token = st.secrets.get("MP_ACCESS_TOKEN")
+        headers = {"Authorization": f"Bearer {token}"}
+        # Buscamos pagamentos aprovados vinculados a esta preferência
+        url = f"https://api.mercadopago.com/v1/payments/search?status=approved&preference_id={preference_id}"
+        res = requests.get(url, headers=headers).json()
+        
+        if res.get('results'):
+            # Retorna o valor do primeiro pagamento aprovado encontrado
+            return res['results'][0].get('transaction_amount')
+        return None
+    except:
+        return None
+
 def verificar_pagamento_no_banco(user_id, supabase_client):
     """
     Em vez de perguntar ao Mercado Pago, perguntamos ao nosso banco 
