@@ -275,39 +275,71 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         if "url_ativa" in st.session_state:
             st.link_button("🔵 CLIQUE PARA PAGAR (MERCADO PAGO)", st.session_state.url_ativa, use_container_width=True)
             
-            st.write("")
-            st.write(f"DEBUG: Meu ID é {ID_USUARIO_LOGADO}")
-            if st.button("🔍 JÁ PAGUEI! VERIFICAR STATUS", use_container_width=True):
-                with st.spinner("Consultando Mercado Pago..."):
-                    try:
-                        import orcas_v01_pagamentos as pag
-                        from datetime import date
-                        
-                        # 1. CONSULTA DIRETA AO MERCADO PAGO (Via função no orcas_v01_pagamentos.py)
-                        # confirmado_valor = pag.consultar_pagamento_mp(st.session_state.pref_id_ativa)
-                        confirmado_valor = pag.consultar_pagamento_mp(ID_USUARIO_LOGADO)
+            st.write("---")
+            st.info("💡 Após concluir o pagamento no Mercado Pago, clique no botão abaixo para ativar a verificação automática e liberar seu acesso.")
+            
+            if st.button("🔍 JÁ PAGUEI! INICIAR VERIFICAÇÃO", use_container_width=True):
+                import time
+                import orcas_v01_pagamentos as pag
+                from datetime import date
+                
+                # Criamos um espaço vazio na tela para exibir o progresso
+                placeholder = st.empty()
+                tempo_limite = 120  # 2 minutos de tentativa
+                inicio = time.time()
+                confirmado = False
+                confirmado_valor = 0
 
-                        if confirmado_valor:
-                            # 2. SE APROVADO, ATUALIZA O SUPABASE NA HORA
-                            hoje = str(date.today())
+                with placeholder.container():
+                    st.markdown("### ⏳ Verificando seu pagamento...")
+                    st.write("Estamos em contato com o Mercado Pago para confirmar o recebimento. Por favor, aguarde nesta tela.")
+                    progresso = st.progress(0)
+
+                # Início do Loop de verificação automática
+                while time.time() - inicio < tempo_limite:
+                    # Tenta consultar o pagamento usando o ID do usuário (Referência Externa)
+                    confirmado_valor = pag.consultar_pagamento_mp(ID_USUARIO_LOGADO)
+                    
+                    if confirmado_valor:
+                        confirmado = True
+                        # Se confirmado, atualiza o Supabase imediatamente
+                        hoje = str(date.today())
+                        try:
                             supabase.table("usuarios").update({
                                 "data_ult_assinat": hoje,
                                 "valor_pago": confirmado_valor
                             }).eq("id", ID_USUARIO_LOGADO).execute()
-                            
-                            st.success(f"✅ Pagamento de R$ {confirmado_valor} Confirmado!")
-                            st.balloons()
-                            
-                            # Limpa a URL da sessão para resetar o estado de pagamento
-                            if "url_ativa" in st.session_state: 
-                                del st.session_state.url_ativa
-                            
-                            st.rerun()
-                        else:
-                            st.warning("O Mercado Pago ainda não confirmou o recebimento. Se você já pagou, aguarde 30 segundos e tente novamente.")
-                            
-                    except Exception as e:
-                        st.error(f"Erro na verificação direta: {e}")
+                        except:
+                            pass # Evita travar se houver erro momentâneo de rede
+                        break
+                    
+                    # Atualiza a barra de progresso visualmente
+                    decorrido = time.time() - inicio
+                    percentual = min(decorrido / tempo_limite, 1.0)
+                    progresso.progress(percentual)
+                    
+                    # Aguarda 5 segundos antes da próxima tentativa para não sobrecarregar a API
+                    time.sleep(5)
+
+                # Limpa o aviso de "Verificando..." para mostrar o resultado final
+                placeholder.empty()
+
+                if confirmado:
+                    st.success(f"✅ Pagamento de R$ {confirmado_valor} Confirmado com sucesso!")
+                    st.balloons()
+                    
+                    # Limpa o link da sessão pois o pagamento já foi resolvido
+                    if "url_ativa" in st.session_state:
+                        del st.session_state.url_ativa
+                    
+                    time.sleep(3)
+                    st.rerun()
+                else:
+                    # Mensagem de acolhimento caso o tempo esgote
+                    st.warning("⚠️ Ocorreu algum problema na identificação automática do seu pagamento, mas não se preocupe!")
+                    st.info("O seu app será liberado manualmente. Nós mesmos verificaremos o que ocorreu e entraremos em contato com você o mais breve possível.")
+                    
+                    # Opcional: Você pode adicionar aqui uma função para te enviar um e-mail/aviso sobre esse caso
 
     # Rodapé Integral
     st.markdown("""
