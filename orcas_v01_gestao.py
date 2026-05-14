@@ -276,7 +276,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             st.link_button("🔵 CLIQUE PARA PAGAR (MERCADO PAGO)", st.session_state.url_ativa, use_container_width=True)
             
             st.write("")
-
+            st.write(f"DEBUG: Meu ID é {ID_USUARIO_LOGADO}")
             if st.button("🔍 JÁ PAGUEI! VERIFICAR STATUS", use_container_width=True):
                 with st.spinner("Consultando Mercado Pago..."):
                     try:
@@ -286,7 +286,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                         # 1. CONSULTA DIRETA AO MERCADO PAGO (Via função no orcas_v01_pagamentos.py)
                         # confirmado_valor = pag.consultar_pagamento_mp(st.session_state.pref_id_ativa)
                         confirmado_valor = pag.consultar_pagamento_mp(ID_USUARIO_LOGADO)
-                        
+
                         if confirmado_valor:
                             # 2. SE APROVADO, ATUALIZA O SUPABASE NA HORA
                             hoje = str(date.today())
