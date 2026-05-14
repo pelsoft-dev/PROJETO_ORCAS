@@ -273,72 +273,72 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 st.error("Erro ao gerar link.")
 
         if "url_ativa" in st.session_state:
-            st.link_button("🔵 CLIQUE PARA PAGAR (MERCADO PAGO)", st.session_state.url_ativa, use_container_width=True)
+            # 1. BOTÃO ÚNICO: Gera o pagamento e inicia a espera
+            st.markdown("### 💳 Finalize sua Assinatura")
+            st.info("Clique no botão abaixo para pagar. Após o pagamento, basta voltar aqui e aguardar a ativação automática.")
             
+            # O link abre em uma nova aba, mas o script continua rodando abaixo
+            st.link_button("🚀 PAGAR AGORA (MERCADO PAGO)", st.session_state.url_ativa, use_container_width=True)
+            
+            # 2. MONITORAMENTO AUTOMÁTICO (Inicia assim que o link é gerado)
+            import time
+            import orcas_v01_pagamentos as pag
+            from datetime import date
+
             st.write("---")
-            st.info("💡 Após concluir o pagamento no Mercado Pago, clique no botão abaixo para ativar a verificação automática e liberar seu acesso.")
+            # Container visual para o "Gantt" / Progresso
+            placeholder = st.empty()
             
-            if st.button("🔍 JÁ PAGUEI! INICIAR VERIFICAÇÃO", use_container_width=True):
-                import time
-                import orcas_v01_pagamentos as pag
-                from datetime import date
-                
-                # Criamos um espaço vazio na tela para exibir o progresso
-                placeholder = st.empty()
-                tempo_limite = 120  # 2 minutos de tentativa
-                inicio = time.time()
-                confirmado = False
-                confirmado_valor = 0
+            tempo_limite = 180  # Vamos dar 3 minutos (Pix é rápido, mas processamento varia)
+            inicio = time.time()
+            confirmado = False
+            confirmado_valor = 0
 
-                with placeholder.container():
-                    st.markdown("### ⏳ Verificando seu pagamento...")
-                    st.write("Estamos em contato com o Mercado Pago para confirmar o recebimento. Por favor, aguarde nesta tela.")
+            with placeholder.container():
+                st.markdown("<div style='text-align: center;'><strong>⏳ AGUARDANDO CONFIRMAÇÃO...</strong></div>", unsafe_allow_html=True)
+                # O spinner cria o efeito de "algo girando" que você pediu
+                with st.spinner("Detectando seu pagamento automaticamente... Não feche esta tela."):
                     progresso = st.progress(0)
-
-                # Início do Loop de verificação automática
-                while time.time() - inicio < tempo_limite:
-                    # Tenta consultar o pagamento usando o ID do usuário (Referência Externa)
-                    confirmado_valor = pag.consultar_pagamento_mp(ID_USUARIO_LOGADO)
                     
-                    if confirmado_valor:
-                        confirmado = True
-                        # Se confirmado, atualiza o Supabase imediatamente
-                        hoje = str(date.today())
-                        try:
+                    while time.time() - inicio < tempo_limite:
+                        # Consulta o MP usando o ID do usuário (Referência Externa)
+                        confirmado_valor = pag.consultar_pagamento_mp(ID_USUARIO_LOGADO)
+                        
+                        if confirmado_valor:
+                            confirmado = True
+                            # Atualiza o banco de dados
+                            hoje = str(date.today())
                             supabase.table("usuarios").update({
                                 "data_ult_assinat": hoje,
                                 "valor_pago": confirmado_valor
                             }).eq("id", ID_USUARIO_LOGADO).execute()
-                        except:
-                            pass # Evita travar se houver erro momentâneo de rede
-                        break
-                    
-                    # Atualiza a barra de progresso visualmente
-                    decorrido = time.time() - inicio
-                    percentual = min(decorrido / tempo_limite, 1.0)
-                    progresso.progress(percentual)
-                    
-                    # Aguarda 5 segundos antes da próxima tentativa para não sobrecarregar a API
-                    time.sleep(5)
+                            break
+                        
+                        # Atualiza a barra de progresso (simulando o tempo de espera)
+                        decorrido = time.time() - inicio
+                        percentual = min(decorrido / tempo_limite, 1.0)
+                        progresso.progress(percentual)
+                        
+                        # Verifica a cada 5 segundos
+                        time.sleep(5)
 
-                # Limpa o aviso de "Verificando..." para mostrar o resultado final
-                placeholder.empty()
+            # 3. RESULTADO FINAL AUTOMÁTICO
+            placeholder.empty()
 
-                if confirmado:
-                    st.success(f"✅ Pagamento de R$ {confirmado_valor} Confirmado com sucesso!")
-                    st.balloons()
-                    
-                    # Limpa o link da sessão pois o pagamento já foi resolvido
-                    if "url_ativa" in st.session_state:
-                        del st.session_state.url_ativa
-                    
-                    time.sleep(3)
-                    st.rerun()
-                else:
-                    # Mensagem de acolhimento caso o tempo esgote
-                    st.warning("⚠️ Ocorreu algum problema na identificação automática do seu pagamento, mas não se preocupe!")
-                    st.info("O seu app será liberado manualmente. Nós mesmos verificaremos o que ocorreu e entraremos em contato com você o mais breve possível.")
-                    
+            if confirmado:
+                st.balloons()
+                st.success(f"🎉 SUCESSO! Pagamento de R$ {confirmado_valor} identificado.")
+                if "url_ativa" in st.session_state:
+                    del st.session_state.url_ativa
+                time.sleep(3)
+                st.rerun()
+            else:
+                # Mensagem de acolhimento se passar dos 3 minutos
+                st.warning("⚠️ O Mercado Pago está demorando um pouco mais que o normal.")
+                st.info("""
+                **Não se preocupe!** Se você já concluiu o pagamento, seu acesso será liberado em instantes. 
+                Nossa equipe também foi notificada e garantiremos sua assinatura manualmente se necessário.
+                """)                    
                     # Opcional: Você pode adicionar aqui uma função para te enviar um e-mail/aviso sobre esse caso
 
     # Rodapé Integral
