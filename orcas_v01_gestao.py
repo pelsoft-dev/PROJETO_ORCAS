@@ -198,7 +198,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         # Alteração 2: Apenas um aviso, mas o código continua para o bloco de pagamento
         st.info("💡 Selecione um plano acima para editar ou digite um novo nome para configurar.")
 
-    # --- BLOCO DE SELEÇÃO DE PAGAMENTO (Agora fora da condição principal para aparecer sempre) ---
+# --- BLOCO DE SELEÇÃO DE PAGAMENTO (Agora fora da condição principal para aparecer sempre) ---
     st.write("---")
     st.subheader("💳 Finalizar Assinatura")
     
@@ -266,6 +266,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             )
             if link:
                 st.session_state.url_ativa = link
+                st.session_state.pref_id_ativa = pref_id # Salva o ID da preferência para consulta
                 st.session_state.meses_comprados = qtd_meses
                 st.toast("Link gerado com sucesso!")
             else:
@@ -277,20 +278,37 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             st.write("")
 
             if st.button("🔍 JÁ PAGUEI! VERIFICAR STATUS", use_container_width=True):
-                with st.spinner("Verificando banco de dados..."):
+                with st.spinner("Verificando pagamento diretamente no Mercado Pago..."):
                     try:
-                        # Alteração 3: Agora verifica a coluna que o Make atualiza
+                        import requests
                         from datetime import date
-                        res_banco = supabase.table("usuarios").select("data_ult_assinat").eq("id", ID_USUARIO_LOGADO).execute()
-                        if res_banco.data and res_banco.data[0].get("data_ult_assinat") == str(date.today()):
-                            st.success(f"✅ Pagamento Confirmado via Automação!")
+                        
+                        # 1. CONSULTA DIRETA AO MERCADO PAGO (Substituindo o Make)
+                        headers_mp = {"Authorization": f"Bearer {st.secrets['MP_ACCESS_TOKEN']}"}
+                        # Buscamos o pagamento mais recente desta preferência
+                        url_mp = f"https://api.mercadopago.com/v1/payments/search?status=approved&preference_id={st.session_state.pref_id_ativa}"
+                        res_mp = requests.get(url_mp, headers=headers_mp).json()
+                        
+                        if res_mp.get('results'):
+                            dados_pag = res_mp['results'][0]
+                            valor_pago_real = dados_pag.get('transaction_amount')
+                            
+                            # 2. SE APROVADO, ATUALIZA O SUPABASE NA HORA
+                            hoje = str(date.today())
+                            supabase.table("usuarios").update({
+                                "data_ult_assinat": hoje,
+                                "valor_pago": valor_pago_real
+                            }).eq("id", ID_USUARIO_LOGADO).execute()
+                            
+                            st.success(f"✅ Pagamento de R$ {valor_pago_real} Confirmado!")
                             st.balloons()
                             if "url_ativa" in st.session_state: del st.session_state.url_ativa
                             st.rerun()
                         else:
-                            st.warning("Confirmação ainda não recebida. Aguarde 30 segundos e tente novamente.")
+                            st.warning("O Mercado Pago ainda não confirmou o recebimento. Se você já pagou, aguarde 1 minuto e tente novamente.")
+                            
                     except Exception as e:
-                        st.error(f"Erro ao acessar banco: {e}")
+                        st.error(f"Erro na verificação direta: {e}")
 
     # Rodapé Integral
     st.markdown("""
