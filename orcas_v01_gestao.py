@@ -273,72 +273,64 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 st.error("Erro ao gerar link.")
 
         if "url_ativa" in st.session_state:
-            # 1. BOTÃO ÚNICO: Gera o pagamento e inicia a espera
             st.markdown("### 💳 Finalize sua Assinatura")
-            st.info("Clique no botão abaixo para pagar. Após o pagamento, basta voltar aqui e aguardar a ativação automática.")
-            
-            # O link abre em uma nova aba, mas o script continua rodando abaixo
-            st.link_button("🚀 PAGAR AGORA (MERCADO PAGO)", st.session_state.url_ativa, use_container_width=True)
-            
-            # 2. MONITORAMENTO AUTOMÁTICO (Inicia assim que o link é gerado)
-            import time
-            import orcas_v01_pagamentos as pag
-            from datetime import date
+            st.info("Clique no botão abaixo para pagar. A verificação iniciará automaticamente após o clique.")
 
-            st.write("---")
-            # Container visual para o "Gantt" / Progresso
-            placeholder = st.empty()
-            
-            tempo_limite = 180  # Vamos dar 3 minutos (Pix é rápido, mas processamento varia)
-            inicio = time.time()
-            confirmado = False
-            confirmado_valor = 0
+            # Criamos um botão que, ao ser clicado, seta uma flag de monitoramento
+            if st.button("🚀 PAGAR AGORA (MERCADO PAGO)", use_container_width=True):
+                st.session_state.monitorar = True
+                # Comando para abrir o link em nova aba via JS
+                js = f"window.open('{st.session_state.url_ativa}')"
+                st.components.v1.html(f"<script>{js}</script>", height=0)
 
-            with placeholder.container():
-                st.markdown("<div style='text-align: center;'><strong>⏳ AGUARDANDO CONFIRMAÇÃO...</strong></div>", unsafe_allow_html=True)
-                # O spinner cria o efeito de "algo girando" que você pediu
-                with st.spinner("Detectando seu pagamento automaticamente... Não feche esta tela."):
-                    progresso = st.progress(0)
-                    
-                    while time.time() - inicio < tempo_limite:
-                        # Consulta o MP usando o ID do usuário (Referência Externa)
-                        confirmado_valor = pag.consultar_pagamento_mp(ID_USUARIO_LOGADO)
+            # Se a flag de monitoramento estiver ativa, inicia o loop automático
+            if st.session_state.get("monitorar"):
+                import time
+                import orcas_v01_pagamentos as pag
+                from datetime import date
+
+                st.write("---")
+                placeholder = st.empty()
+                tempo_limite = 180 
+                inicio = time.time()
+                confirmado = False
+                confirmado_valor = 0
+
+                with placeholder.container():
+                    st.markdown("<div style='text-align: center;'><strong>⏳ VERIFICANDO PAGAMENTO...</strong></div>", unsafe_allow_html=True)
+                    with st.spinner("Detectando seu pagamento... Não feche esta tela."):
+                        progresso = st.progress(0)
                         
-                        if confirmado_valor:
-                            confirmado = True
-                            # Atualiza o banco de dados
-                            hoje = str(date.today())
-                            supabase.table("usuarios").update({
-                                "data_ult_assinat": hoje,
-                                "valor_pago": confirmado_valor
-                            }).eq("id", ID_USUARIO_LOGADO).execute()
-                            break
-                        
-                        # Atualiza a barra de progresso (simulando o tempo de espera)
-                        decorrido = time.time() - inicio
-                        percentual = min(decorrido / tempo_limite, 1.0)
-                        progresso.progress(percentual)
-                        
-                        # Verifica a cada 5 segundos
-                        time.sleep(5)
+                        while time.time() - inicio < tempo_limite:
+                            confirmado_valor = pag.consultar_pagamento_mp(ID_USUARIO_LOGADO)
+                            
+                            if confirmado_valor:
+                                confirmado = True
+                                hoje = str(date.today())
+                                supabase.table("usuarios").update({
+                                    "data_ult_assinat": hoje,
+                                    "valor_pago": confirmado_valor
+                                }).eq("id", ID_USUARIO_LOGADO).execute()
+                                break
+                            
+                            decorrido = time.time() - inicio
+                            progresso.progress(min(decorrido / tempo_limite, 1.0))
+                            time.sleep(5)
 
-            # 3. RESULTADO FINAL AUTOMÁTICO
-            placeholder.empty()
+                placeholder.empty()
 
-            if confirmado:
-                st.balloons()
-                st.success(f"🎉 SUCESSO! Pagamento de R$ {confirmado_valor} identificado.")
-                if "url_ativa" in st.session_state:
+                if confirmado:
+                    st.balloons()
+                    st.success(f"🎉 SUCESSO! Pagamento de R$ {confirmado_valor} identificado.")
+                    # Limpa os estados para finalizar
                     del st.session_state.url_ativa
-                time.sleep(3)
-                st.rerun()
-            else:
-                # Mensagem de acolhimento se passar dos 3 minutos
-                st.warning("⚠️ O Mercado Pago está demorando um pouco mais que o normal.")
-                st.info("""
-                **Não se preocupe!** Se você já concluiu o pagamento, seu acesso será liberado em instantes. 
-                Nossa equipe também foi notificada e garantiremos sua assinatura manualmente se necessário.
-                """)                    
+                    if "monitorar" in st.session_state: del st.session_state.monitorar
+                    time.sleep(3)
+                    st.rerun()
+                else:
+                    st.warning("⚠️ O Mercado Pago está demorando para processar.")
+                    st.info("Se você já pagou, seu acesso será liberado em instantes. Nossa equipe foi notificada.")
+                    if "monitorar" in st.session_state: del st.session_state.monitorar             
                     # Opcional: Você pode adicionar aqui uma função para te enviar um e-mail/aviso sobre esse caso
 
     # Rodapé Integral
