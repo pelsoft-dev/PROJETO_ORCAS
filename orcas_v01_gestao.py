@@ -279,73 +279,74 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             import orcas_v01_pagamentos as pag
             from datetime import date
 
-            # 1. ESTADO INICIAL: Só mostra o botão de pagar
-            if not st.session_state.get("processo_pagamento_ativo"):
-                st.write("---")
-                # Botão que dispara tudo
-                if st.button("🚀 PAGAR AGORA (MERCADO PAGO)", use_container_width=True):
-                    # Registra que o usuário foi para o MP
-                    st.session_state.processo_pagamento_ativo = True
-                    # Abre o link em nova aba imediatamente
-                    js = f"window.open('{st.session_state.url_ativa}', '_blank').focus();"
-                    components.html(f"<script>{js}</script>", height=0)
-                    # Força a atualização da tela para sumir o botão e aparecer o "giro"
-                    st.rerun()
-            
-            # 2. ESTADO DE ESPAERA: O usuário já clicou e abriu a aba do MP
-            else:
-                placeholder = st.empty()
-                tempo_limite = 180 # 3 minutos
-                inicio = time.time()
-                confirmado = False
-                confirmado_valor = 0
+            # Centralizamos tudo em um container para controlar o que some e o que aparece
+            container_pag = st.container()
 
-                with placeholder.container():
-                    st.markdown("<br><div style='text-align: center;'><h3>⏳ PROCESSANDO SEU PAGAMENTO...</h3>", unsafe_allow_html=True)
-                    st.info("Conclua a transação na aba do Mercado Pago. Esta tela será liberada automaticamente assim que recebermos a confirmação.")
+            # Lógica de Controle: Se clicou, monitora. Se não, mostra o botão.
+            if not st.session_state.get("monitorando_agora"):
+                with container_pag:
+                    st.write("---")
+                    st.subheader("💳 Finalizar Pagamento")
+                    st.info("Ao clicar no botão abaixo, o Mercado Pago abrirá em uma nova aba e esta tela iniciará a verificação automática.")
                     
-                    # O "desenho girando" e a evolução que você pediu
-                    with st.spinner("Comunicando com o Mercado Pago..."):
-                        progresso = st.progress(0)
+                    if st.button("🚀 PAGAR AGORA (MERCADO PAGO)", use_container_width=True):
+                        # 1. Ativa o monitoramento interno
+                        st.session_state.monitorando_agora = True
+                        # 2. Comando JS para abrir a aba (o _blank garante nova aba)
+                        js_code = f"window.open('{st.session_state.url_ativa}', '_blank');"
+                        components.html(f"<script>{js_code}</script>", height=0)
+                        # 3. Força o Streamlit a limpar o botão da tela e rodar o 'else'
+                        st.rerun()
+            
+            else:
+                # O BOTÃO SUMIU. Agora só existe o desenho girando e a barra.
+                with container_pag:
+                    placeholder = st.empty()
+                    tempo_limite = 180 
+                    inicio = time.time()
+                    confirmado = False
+
+                    with placeholder.container():
+                        st.markdown("<br><h3 style='text-align: center;'>⏳ PROCESSANDO SEU PAGAMENTO...</h3>", unsafe_allow_html=True)
+                        st.write("Detectamos seu clique. Estamos aguardando a confirmação do Mercado Pago enquanto você finaliza a transação na outra aba.")
                         
-                        while time.time() - inicio < tempo_limite:
-                            # Tenta validar o pagamento
-                            confirmado_valor = pag.consultar_pagamento_mp(ID_USUARIO_LOGADO)
+                        with st.spinner("Verificando status real..."):
+                            progresso = st.progress(0)
                             
-                            if confirmado_valor:
-                                confirmado = True
-                                # Atualiza o banco de dados
-                                hoje = str(date.today())
-                                supabase.table("usuarios").update({
-                                    "data_ult_assinat": hoje,
-                                    "valor_pago": confirmado_valor
-                                }).eq("id", ID_USUARIO_LOGADO).execute()
-                                break
-                            
-                            # Evolução visual na tela
-                            decorrido = time.time() - inicio
-                            progresso.progress(min(decorrido / tempo_limite, 1.0))
-                            time.sleep(5)
+                            while time.time() - inicio < tempo_limite:
+                                # Chama a função que varre os últimos pagamentos do ID 1
+                                confirmado_valor = pag.consultar_pagamento_mp(ID_USUARIO_LOGADO)
+                                
+                                if confirmado_valor:
+                                    confirmado = True
+                                    hoje = str(date.today())
+                                    supabase.table("usuarios").update({
+                                        "data_ult_assinat": hoje,
+                                        "valor_pago": confirmado_valor
+                                    }).eq("id", ID_USUARIO_LOGADO).execute()
+                                    break
+                                
+                                # Atualiza a evolução visual (o seu Gantt/Progresso)
+                                decorrido = time.time() - inicio
+                                progresso.progress(min(decorrido / tempo_limite, 1.0))
+                                time.sleep(5)
 
-                placeholder.empty()
+                    placeholder.empty()
 
-                if confirmado:
-                    st.balloons()
-                    st.success(f"🎉 SUCESSO! Pagamento de R$ {confirmado_valor} confirmado.")
-                    # Limpa os estados para não entrar em loop no futuro
-                    del st.session_state.url_ativa
-                    st.session_state.processo_pagamento_ativo = False
-                    time.sleep(3)
-                    st.rerun()
-                else:
-                    # Se falhar/demorar, dá a opção de tentar novamente ou esperar manual
-                    st.warning("⚠️ O Mercado Pago ainda não enviou a confirmação.")
-                    st.info("Se você já pagou, não se preocupe! O sistema liberará seu acesso em instantes. Caso queira tentar a verificação automática de novo, clique abaixo:")
-                    if st.button("🔄 REPETIR VERIFICAÇÃO"):
+                    if confirmado:
+                        st.balloons()
+                        st.success(f"🎉 SUCESSO! Pagamento identificado.")
+                        del st.session_state.url_ativa
+                        st.session_state.monitorando_agora = False
+                        time.sleep(3)
                         st.rerun()
-                    if st.button("❌ CANCELAR E VOLTAR"):
-                        st.session_state.processo_pagamento_ativo = False
-                        st.rerun()
+                    else:
+                        st.warning("⚠️ O tempo de verificação expirou.")
+                        if st.button("🔄 Tentar verificar novamente"):
+                            st.rerun()
+                        if st.button("❌ Voltar ao início"):
+                            st.session_state.monitorando_agora = False
+                            st.rerun()
 
     # Rodapé Integral (Mantenha igual)
     st.markdown("""
