@@ -279,19 +279,20 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             import orcas_v01_pagamentos as pag
             from datetime import date
 
-            st.markdown("### 💳 Finalize sua Assinatura")
-            
-            # Se o usuário ainda não clicou em pagar, mostra o botão inicial
+            # Se ainda não clicou, mostra apenas o botão de pagamento principal
             if not st.session_state.get("clicou_pagar"):
-                st.info("Clique no botão abaixo para abrir o Mercado Pago. A verificação começará em seguida.")
+                st.write("---")
                 if st.button("🚀 PAGAR AGORA (MERCADO PAGO)", use_container_width=True):
+                    # 1. Marca que o usuário saiu para pagar
                     st.session_state.clicou_pagar = True
-                    # Abre o link e força o rerun para entrar no modo monitoramento
-                    js = f"window.open('{st.session_state.url_ativa}')"
+                    # 2. Abre o Mercado Pago em uma nova aba
+                    js = f"window.open('{st.session_state.url_ativa}', '_blank').focus();"
                     components.html(f"<script>{js}</script>", height=0)
+                    # 3. Dá um pequeno tempo para o clique processar e recarrega para iniciar o giro
+                    time.sleep(1)
                     st.rerun()
             
-            # Se ele já clicou, entra direto no loop automático (O que você pediu)
+            # Se já clicou, entra DIRETO no modo de espera (sem botões extras)
             else:
                 placeholder = st.empty()
                 tempo_limite = 180 
@@ -300,13 +301,14 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 confirmado_valor = 0
 
                 with placeholder.container():
-                    st.markdown("<div style='text-align: center;'><strong>⏳ AGUARDANDO CONFIRMAÇÃO DO MERCADO PAGO...</strong></div>", unsafe_allow_html=True)
-                    st.write("Detectamos que você abriu o link de pagamento. Não feche esta tela, estamos monitorando o status em tempo real.")
+                    st.markdown("<br><div style='text-align: center;'><h3>⏳ AGUARDANDO PAGAMENTO...</h3>", unsafe_allow_html=True)
+                    st.write("Conclua o pagamento na aba que foi aberta. Esta tela será atualizada automaticamente assim que o Mercado Pago confirmar.")
                     
-                    with st.spinner("Buscando aprovação..."):
+                    with st.spinner("Monitorando status em tempo real..."):
                         progresso = st.progress(0)
                         
                         while time.time() - inicio < tempo_limite:
+                            # Busca o pagamento aprovado
                             confirmado_valor = pag.consultar_pagamento_mp(ID_USUARIO_LOGADO)
                             
                             if confirmado_valor:
@@ -318,7 +320,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                                 }).eq("id", ID_USUARIO_LOGADO).execute()
                                 break
                             
-                            # Atualiza progresso
                             decorrido = time.time() - inicio
                             progresso.progress(min(decorrido / tempo_limite, 1.0))
                             time.sleep(5)
@@ -328,14 +329,15 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 if confirmado:
                     st.balloons()
                     st.success(f"🎉 SUCESSO! Pagamento de R$ {confirmado_valor} identificado.")
+                    # Limpa tudo para o usuário entrar no app liberado
                     del st.session_state.url_ativa
                     st.session_state.clicou_pagar = False
                     time.sleep(3)
                     st.rerun()
                 else:
-                    st.warning("⚠️ Tempo de espera excedido.")
-                    st.info("Se você já concluiu o pagamento, não se preocupe. Nosso sistema processará em instantes e liberaremos seu acesso manualmente.")
-                    if st.button("Tentar Novamente"):
+                    st.warning("⚠️ O tempo de verificação automática expirou.")
+                    st.info("Se você pagou e a tela não mudou, recarregue a página ou aguarde um instante.")
+                    if st.button("Tentar novamente"):
                         st.session_state.clicou_pagar = False
                         st.rerun()
 
