@@ -1,203 +1,3 @@
-import streamlit as st
-import pandas as pd
-from datetime import datetime, timedelta
-from dateutil.relativedelta import relativedelta
-
-def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, format_moeda, parse_moeda, security):
-    """
-    Sub-rotina da Tela Gestão - Controle de Planos, Saldos e Assinatura.
-    """
-    st.markdown('<div class="titulo-tela">Gestão de Planos e Assinaturas</div>', unsafe_allow_html=True)
-    
-    hoje = datetime.now().date()
-    uid_gestao = ID_USUARIO_LOGADO
-
-    # Alteração 1: Valor padrão para evitar NameError
-    v_mensal_total = 19.90 
-
-    # --- REGRAS DE NEGÓCIO CENTRALIZADAS ---
-    DESC_6_MESES = 0.05  # 5%
-    DESC_12_MESES = 0.11 # 11%
-
-    if st.session_state.get('msg_sucesso'):
-        st.success(st.session_state.msg_sucesso)
-        st.session_state.msg_sucesso = None
-
-    col_l1_1, col_l1_2 = st.columns(2)
-    lista_gestao = [""] + projs
-    
-    plano_sel = col_l1_1.selectbox("Selecione um Plano já existente:", lista_gestao)
-    
-    if plano_sel != "" and plano_sel != st.session_state.get('projeto_ativo'):
-        st.session_state.projeto_ativo = plano_sel
-        st.session_state.escolha = "⚙️ Gestão" 
-        if 'tmp_fim_plano' in st.session_state: del st.session_state.tmp_fim_plano
-        st.rerun()
-
-    nome_plano_input = col_l1_2.text_input(
-        "Nome do Plano carregado ou Nome para criação de um novo Plano", 
-        value=st.session_state.projeto_ativo if st.session_state.projeto_ativo else ""
-    )
-
-    # Bloco de configuração de plano (Mantido integralmente)
-    if nome_plano_input and nome_plano_input.strip() != "":
-        col_l2_1, col_l2_2 = st.columns(2)
-        
-        data_inicio_padrao = d_ini_db if d_ini_db else hoje.replace(day=1)
-        if not d_fim_db:
-            data_fim_padrao = (data_inicio_padrao + relativedelta(months=23)).replace(day=1) + relativedelta(months=1, days=-1)
-        else:
-            data_fim_padrao = d_fim_db
-
-        if 'tmp_fim_plano' not in st.session_state:
-            st.session_state.tmp_fim_plano = data_fim_padrao
-
-        d_ini_g = col_l2_1.date_input("Data de Início:", value=data_inicio_padrao, format="DD/MM/YYYY")
-        
-        col_fim, col_btn_per = col_l2_2.columns(2)
-        
-        diff_edit = relativedelta(st.session_state.tmp_fim_plano, d_ini_g)
-        meses_atuais = (diff_edit.years * 12) + diff_edit.months + 1
-        if meses_atuais not in [24, 36, 48, 60]:
-            meses_atuais = 24
-
-        with col_btn_per:
-            periodo_slider = st.select_slider(
-                "Aumentar Período (em 12 meses)",
-                options=[24, 36, 48, 60],
-                value=meses_atuais
-            )
-            nova_data_fim = (d_ini_g + relativedelta(months=periodo_slider - 1))
-            nova_data_fim = (nova_data_fim.replace(day=1) + relativedelta(months=1, days=-1))
-            st.session_state.tmp_fim_plano = nova_data_fim
-
-        d_fim_g = col_fim.date_input("Data de Término:", value=st.session_state.tmp_fim_plano, format="DD/MM/YYYY", disabled=True)
-
-        col_l3_1, col_l3_2 = st.columns(2)
-        valor_saldo_exibir = format_moeda(s_db) if s_db is not None else "0,00"
-        saldo_input = col_l3_1.text_input("Saldo Inicial:", value=valor_saldo_exibir)
-        
-        meses_total_edit = (st.session_state.tmp_fim_plano.year - d_ini_g.year) * 12 + (st.session_state.tmp_fim_plano.month - d_ini_g.month) + 1
-        col_l3_2.text_input("Período do Plano:", value=f"{meses_total_edit} meses", disabled=True)
-
-        col_l4_1, col_l4_2 = st.columns(2)
-        
-        res_cfg_plano = supabase.table("config_projetos").select("*").eq("projeto_id", nome_plano_input).eq("usuario_id", uid_gestao).execute()
-        zap_plano_db = res_cfg_plano.data[0].get('zap_ativo', 0) if res_cfg_plano.data else 0
-        email_plano_db = res_cfg_plano.data[0].get('email_ativo', 0) if res_cfg_plano.data else 0
-        
-        with col_l4_1:
-            st.write("") 
-            st.write("") 
-            ativar_zap_atual = st.checkbox("Adicionar o Resumo Diário ORCAS via Whatsapp", value=(zap_plano_db == 1))
-            ativar_email_atual = st.checkbox("Adicionar o Resumo Diário ORCAS via E-mail", value=(email_plano_db == 1))
-        
-        res_all = supabase.table("config_projetos").select("*").eq("usuario_id", uid_gestao).execute()
-        dados_db = res_all.data if res_all.data else []
-        
-        planos_consolidar = {}
-        relatorios_consolidar = {}
-        
-        for p in dados_db:
-            d1 = datetime.strptime(p['data_ini'], '%Y-%m-%d').date()
-            d2 = datetime.strptime(p['data_fim'], '%Y-%m-%d').date()
-            duracao = (d2.year - d1.year) * 12 + (d2.month - d1.month) + 1
-            planos_consolidar[p['projeto_id']] = duracao
-            rel_ativo = 1 if (p.get('zap_ativo', 0) == 1 or p.get('email_ativo', 0) == 1) else 0
-            relatorios_consolidar[p['projeto_id']] = rel_ativo
-
-        planos_consolidar[nome_plano_input] = meses_total_edit
-        relatorios_consolidar[nome_plano_input] = 1 if (ativar_zap_atual or ativar_email_atual) else 0
-
-        qtd_total_planos = len(planos_consolidar)
-        qtd_relatorios_totais = sum(relatorios_consolidar.values())
-        
-        c24 = sum(1 for m in planos_consolidar.values() if m <= 24)
-        c36 = sum(1 for m in planos_consolidar.values() if m == 36)
-        c48 = sum(1 for m in planos_consolidar.values() if m == 48)
-        c60 = sum(1 for m in planos_consolidar.values() if m >= 60)
-        
-        base_baby = 19.90 
-        custo_relatorio_total = qtd_relatorios_totais * 9.85
-        add_planos_extra = (qtd_total_planos - 2) * 12.80 if qtd_total_planos > 2 else 0.00
-        
-        v_p36 = c36 * 6.40
-        v_p48 = c48 * 12.80
-        v_p60 = c60 * 19.20
-        
-        v_mensal_total = base_baby + custo_relatorio_total + add_planos_extra + v_p36 + v_p48 + v_p60
-        v_6meses = (v_mensal_total * 6) * 0.95
-        v_12meses = (v_mensal_total * 12) * 0.89 
-
-        resumo_html = f"""
-        <div style="background-color: #87CEFA; padding: 15px; border-radius: 5px; color: black; font-family: sans-serif; border: 1px solid #1E90FF;">
-            <div style="font-weight: bold; font-size: 16px; margin-bottom: 10px;">Valor da Assinatura Mensal: R$ {format_moeda(v_mensal_total)}</div>
-            <div style="margin-left: 20px; font-size: 14px;">
-                Assinatura do Orcas Baby: <span style="float: right;">19,90</span><br>
-                {qtd_relatorios_totais} Resumo(s) Diário(s) via Whatsapp / E-mail: <span style="float: right;">{format_moeda(custo_relatorio_total)}</span><br>
-                Usuário com {qtd_total_planos} Planos: <span style="float: right;">{format_moeda(add_planos_extra)}</span><br>
-                {c24} Plano(s) com 24 meses: <span style="float: right;">0,00</span><br>
-                {c36} Plano(s) com 36 meses: <span style="float: right;">{format_moeda(v_p36)}</span><br>
-                {c48} Plano(s) com 48 meses: <span style="float: right;">{format_moeda(v_p48)}</span><br>
-                {c60} Plano(s) com 60 meses: <span style="float: right;">{format_moeda(v_p60)}</span>
-            </div>
-            <div style="margin-top: 15px; font-weight: bold; border-top: 1px solid #5f9ea0; padding-top: 10px;">
-                PROMOÇÃO:<br>
-                Valor da Assinatura p/ 6 meses (-5%): R$ {format_moeda(v_6meses)}<br>
-                Valor da Assinatura p/ 12 meses (-11%): R$ {format_moeda(v_12meses)}
-            </div>
-        </div>
-        """
-        col_l4_2.markdown(resumo_html, unsafe_allow_html=True)
-
-        st.divider()
-
-        btn_col1, btn_col2 = st.columns(2)
-        if btn_col1.button("Salvar alterações ou Criar o novo Plano", use_container_width=True):
-            dados_p = {
-                "projeto_id": nome_plano_input, 
-                "usuario_id": uid_gestao, 
-                "saldo_inicial": parse_moeda(saldo_input),
-                "data_ini": d_ini_g.strftime('%Y-%m-%d'), 
-                "data_fim": st.session_state.tmp_fim_plano.strftime('%Y-%m-%d'),
-                "zap_ativo": 1 if ativar_zap_atual else 0,
-                "email_ativo": 1 if ativar_email_atual else 0
-            }
-            res_p = supabase.table("config_projetos").select("id").eq("projeto_id", nome_plano_input).eq("usuario_id", uid_gestao).execute()
-            if res_p.data: dados_p["id"] = res_p.data[0]["id"]
-            
-            supabase.table("config_projetos").upsert(dados_p).execute()
-            supabase.table("lancamentos")\
-                .delete()\
-                .eq("projeto_id", nome_plano_input)\
-                .eq("usuario_id", uid_gestao)\
-                .gt("data", st.session_state.tmp_fim_plano.strftime('%Y-%m-%d'))\
-                .execute()
-            if 'tmp_fim_plano' in st.session_state: del st.session_state.tmp_fim_plano
-            st.session_state.projeto_ativo = nome_plano_input
-            st.session_state.msg_sucesso = "Configurações salvas com sucesso!"
-            st.rerun()
-
-        if st.session_state.get('projeto_ativo'):
-            if btn_col2.button("Excluir Plano", type="primary", use_container_width=True):
-                st.session_state.confirmar_exclusao_plano = True
-
-        if st.session_state.get('confirmar_exclusao_plano', False):
-            st.error(f"Deseja mesmo excluir o plano {st.session_state.projeto_ativo}?")
-            ce1, ce2 = st.columns(2)
-            if ce1.button("CONFIRMAR EXCLUSÃO"):
-                supabase.table("lancamentos").delete().eq("projeto_id", st.session_state.projeto_ativo).eq("usuario_id", uid_gestao).execute()
-                supabase.table("config_projetos").delete().eq("projeto_id", st.session_state.projeto_ativo).eq("usuario_id", uid_gestao).execute()
-                st.session_state.projeto_ativo = None
-                st.session_state.confirmar_exclusao_plano = False
-                st.rerun()
-            if ce2.button("CANCELAR"):
-                st.session_state.confirmar_exclusao_plano = False
-                st.rerun()
-    else:
-        # Alteração 2: Apenas um aviso, mas o código continua para o bloco de pagamento
-        st.info("💡 Selecione um plano acima para editar ou digite um novo nome para configurar.")
-
 # --- BLOCO DE SELEÇÃO DE PAGAMENTO (Agora fora da condição principal para aparecer sempre) ---
     st.write("---")
     st.subheader("💳 Finalizar Assinatura")
@@ -275,71 +75,39 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         if "url_ativa" in st.session_state:
             st.link_button("🔵 CLIQUE PARA PAGAR (MERCADO PAGO)", st.session_state.url_ativa, use_container_width=True)
             
-            st.write("---")
-            st.info("💡 Após concluir o pagamento no Mercado Pago, clique no botão abaixo para ativar a verificação automática e liberar seu acesso.")
-            
-            if st.button("🔍 JÁ PAGUEI! INICIAR VERIFICAÇÃO", use_container_width=True):
-                import time
-                import orcas_v01_pagamentos as pag
-                from datetime import date
-                
-                # Criamos um espaço vazio na tela para exibir o progresso
-                placeholder = st.empty()
-                tempo_limite = 120  # 2 minutos de tentativa
-                inicio = time.time()
-                confirmado = False
-                confirmado_valor = 0
+            st.write("")
 
-                with placeholder.container():
-                    st.markdown("### ⏳ Verificando seu pagamento...")
-                    st.write("Estamos em contato com o Mercado Pago para confirmar o recebimento. Por favor, aguarde nesta tela.")
-                    progresso = st.progress(0)
-
-                # Início do Loop de verificação automática
-                while time.time() - inicio < tempo_limite:
-                    # Tenta consultar o pagamento usando o ID do usuário (Referência Externa)
-                    confirmado_valor = pag.consultar_pagamento_mp(ID_USUARIO_LOGADO)
-                    
-                    if confirmado_valor:
-                        confirmado = True
-                        # Se confirmado, atualiza o Supabase imediatamente
-                        hoje = str(date.today())
-                        try:
+            if st.button("🔍 JÁ PAGUEI! VERIFICAR STATUS", use_container_width=True):
+                with st.spinner("Consultando Mercado Pago..."):
+                    try:
+                        import orcas_v01_pagamentos as pag
+                        from datetime import date
+                        
+                        # 1. CONSULTA DIRETA AO MERCADO PAGO (Via função no orcas_v01_pagamentos.py)
+                        # confirmado_valor = pag.consultar_pagamento_mp(st.session_state.pref_id_ativa)
+                        confirmado_valor = pag.consultar_pagamento_mp(ID_USUARIO_LOGADO)
+                        
+                        if confirmado_valor:
+                            # 2. SE APROVADO, ATUALIZA O SUPABASE NA HORA
+                            hoje = str(date.today())
                             supabase.table("usuarios").update({
                                 "data_ult_assinat": hoje,
                                 "valor_pago": confirmado_valor
                             }).eq("id", ID_USUARIO_LOGADO).execute()
-                        except:
-                            pass # Evita travar se houver erro momentâneo de rede
-                        break
-                    
-                    # Atualiza a barra de progresso visualmente
-                    decorrido = time.time() - inicio
-                    percentual = min(decorrido / tempo_limite, 1.0)
-                    progresso.progress(percentual)
-                    
-                    # Aguarda 5 segundos antes da próxima tentativa para não sobrecarregar a API
-                    time.sleep(5)
-
-                # Limpa o aviso de "Verificando..." para mostrar o resultado final
-                placeholder.empty()
-
-                if confirmado:
-                    st.success(f"✅ Pagamento de R$ {confirmado_valor} Confirmado com sucesso!")
-                    st.balloons()
-                    
-                    # Limpa o link da sessão pois o pagamento já foi resolvido
-                    if "url_ativa" in st.session_state:
-                        del st.session_state.url_ativa
-                    
-                    time.sleep(3)
-                    st.rerun()
-                else:
-                    # Mensagem de acolhimento caso o tempo esgote
-                    st.warning("⚠️ Ocorreu algum problema na identificação automática do seu pagamento, mas não se preocupe!")
-                    st.info("O seu app será liberado manualmente. Nós mesmos verificaremos o que ocorreu e entraremos em contato com você o mais breve possível.")
-                    
-                    # Opcional: Você pode adicionar aqui uma função para te enviar um e-mail/aviso sobre esse caso
+                            
+                            st.success(f"✅ Pagamento de R$ {confirmado_valor} Confirmado!")
+                            st.balloons()
+                            
+                            # Limpa a URL da sessão para resetar o estado de pagamento
+                            if "url_ativa" in st.session_state: 
+                                del st.session_state.url_ativa
+                            
+                            st.rerun()
+                        else:
+                            st.warning("O Mercado Pago ainda não confirmou o recebimento. Se você já pagou, aguarde 30 segundos e tente novamente.")
+                            
+                    except Exception as e:
+                        st.error(f"Erro na verificação direta: {e}")
 
     # Rodapé Integral
     st.markdown("""

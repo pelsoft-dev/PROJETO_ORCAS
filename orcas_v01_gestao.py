@@ -199,7 +199,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         # Alteração 2: Apenas um aviso, mas o código continua para o bloco de pagamento
         st.info("💡 Selecione um plano acima para editar ou digite um novo nome para configurar.")
 
-# --- BLOCO DE SELEÇÃO DE PAGAMENTO ---
+# --- BLOCO DE SELEÇÃO DE PAGAMENTO (Agora fora da condição principal para aparecer sempre) ---
     st.write("---")
     st.subheader("💳 Finalizar Assinatura")
     
@@ -222,13 +222,30 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         v_base = v_mensal_total
         label_desc = "Valor Padrão"
 
-    valor_final = max(v_base - (st.session_state.get('desc_extra', 0)), 1.00)
+    st.write("")
+    cupom_in = st.text_input("Possui um Cupom de Desconto?", key="cp_gest_final_v3").upper()
+    desc_extra = 0.0
+    if cupom_in:
+        try:
+            res_c = supabase.table("cupons").select("*").eq("codigo", cupom_in).eq("ativo", True).execute()
+            if res_c.data:
+                d = res_c.data[0]
+                v_p = float(d.get('percentual_desconto', 0) or 0)
+                v_a = float(d.get('valor_desconto', 0) or 0)
+                desc_extra = v_base * (v_p / 100) if v_p > 0 else v_a
+                st.success("✅ Cupom aplicado!")
+            else:
+                st.error("❌ Cupom inválido.")
+        except: pass
+
+    valor_final = max(v_base - desc_extra, 1.00)
 
     # CSS PARA CORES
     st.markdown("""
         <style>
         div.stButton > button:has(div:contains("🚀")) { background-color: #28a745 !important; color: white !important; border: none !important; }
-        div.stButton > button:has(div:contains("MERCADO PAGO")) { background-color: #009EE3 !important; color: white !important; border: none !important; font-weight: bold !important; }
+        div.stButton > button:has(div:contains("CLIQUE")) { background-color: #009EE3 !important; color: white !important; border: none !important; font-weight: bold !important; }
+        div.stButton > button:has(div:contains("🔍")) { background-color: #f0f2f6 !important; color: #31333F !important; border: 1px solid #dcdfe6 !important; }
         </style>
     """, unsafe_allow_html=True)
 
@@ -241,95 +258,57 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             import orcas_v01_pagamentos as pag
             email_user = st.session_state.get('usuario_email', "cliente@email.com")
             
-            link, pref_id = pag.criar_link_final(ID_USUARIO_LOGADO, valor_final, f"Assinatura ORCAS", email_user, qtd_meses)
+            link, pref_id = pag.criar_link_final(
+                ID_USUARIO_LOGADO, 
+                valor_final, 
+                f"Assinatura ORCAS - {qtd_meses} Meses",
+                email_user,
+                qtd_meses
+            )
             if link:
                 st.session_state.url_ativa = link
-                st.session_state.monitorando_agora = False
-                st.toast("Link gerado! Use o botão azul.")
+                st.session_state.pref_id_ativa = pref_id # Salva o ID da preferência para consulta
+                st.session_state.meses_comprados = qtd_meses
+                st.toast("Link gerado com sucesso!")
             else:
                 st.error("Erro ao gerar link.")
 
-    if "url_ativa" in st.session_state:
-        import streamlit.components.v1 as components
-        import time
-        import orcas_v01_pagamentos as pag
-        from datetime import date
-        import requests
+        if "url_ativa" in st.session_state:
+            st.link_button("🔵 CLIQUE PARA PAGAR (MERCADO PAGO)", st.session_state.url_ativa, use_container_width=True)
+            
+            st.write("")
 
-        if not st.session_state.get("monitorando_agora"):
-            st.write("---")
-            if st.button("🔵 CLIQUE PARA PAGAR (MERCADO PAGO)", use_container_width=True):
-                # ANTES DE TUDO: Descobrimos qual foi o último pagamento que o usuário já fez
-                # para o sistema não se confundir com o passado
-                try:
-                    token = st.secrets["MP_ACCESS_TOKEN"]
-                    headers = {"Authorization": f"Bearer {token}"}
-                    url = f"https://api.mercadopago.com/v1/payments/search?status=approved&external_reference={ID_USUARIO_LOGADO}&sort=date_created&criteria=desc"
-                    res = requests.get(url, headers=headers).json()
-                    # Guardamos o ID do último pagamento aprovado na sessão
-                    if res.get('results'):
-                        st.session_state.ultimo_id_pago = res['results'][0].get('id')
-                    else:
-                        st.session_state.ultimo_id_pago = 0
-                except:
-                    st.session_state.ultimo_id_pago = 0
-
-                st.session_state.monitorando_agora = True
-                js_code = f"window.open('{st.session_state.url_ativa}', '_blank');"
-                components.html(f"<script>{js_code}</script>", height=0)
-                st.rerun()
-        
-        else:
-            placeholder = st.empty()
-            tempo_limite = 180 
-            inicio = time.time()
-            confirmado = False
-
-            with placeholder.container():
-                st.markdown("<br><h3 style='text-align: center;'>⏳ AGUARDANDO NOVO PAGAMENTO...</h3>", unsafe_allow_html=True)
-                st.write("Por favor, finalize o pagamento na aba do Mercado Pago.")
-                
-                with st.spinner("Buscando nova confirmação..."):
-                    progresso = st.progress(0)
-                    while time.time() - inicio < tempo_limite:
-                        # BUSCA AMPLA DIRETO NA API
-                        token = st.secrets["MP_ACCESS_TOKEN"]
-                        headers = {"Authorization": f"Bearer {token}"}
-                        url = f"https://api.mercadopago.com/v1/payments/search?status=approved&external_reference={ID_USUARIO_LOGADO}&sort=date_created&criteria=desc"
-                        res = requests.get(url, headers=headers).json()
+            if st.button("🔍 JÁ PAGUEI! VERIFICAR STATUS", use_container_width=True):
+                with st.spinner("Consultando Mercado Pago..."):
+                    try:
+                        import orcas_v01_pagamentos as pag
+                        from datetime import date
                         
-                        if res.get('results'):
-                            pagamento_atual = res['results'][0]
-                            id_transacao = pagamento_atual.get('id')
+                        # 1. CONSULTA DIRETA AO MERCADO PAGO (Via função no orcas_v01_pagamentos.py)
+                        # confirmado_valor = pag.consultar_pagamento_mp(st.session_state.pref_id_ativa)
+                        confirmado_valor = pag.consultar_pagamento_mp(ID_USUARIO_LOGADO)
+                        
+                        if confirmado_valor:
+                            # 2. SE APROVADO, ATUALIZA O SUPABASE NA HORA
+                            hoje = str(date.today())
+                            supabase.table("usuarios").update({
+                                "data_ult_assinat": hoje,
+                                "valor_pago": confirmado_valor
+                            }).eq("id", ID_USUARIO_LOGADO).execute()
                             
-                            # SÓ ACEITA SE O ID FOR DIFERENTE DO ÚLTIMO QUE JÁ ESTAVA LÁ
-                            if id_transacao != st.session_state.get('ultimo_id_pago'):
-                                confirmado_valor = pagamento_atual.get('transaction_amount')
-                                confirmado = True
-                                hoje = str(date.today())
-                                supabase.table("usuarios").update({
-                                    "data_ult_assinat": hoje,
-                                    "valor_pago": confirmado_valor
-                                }).eq("id", ID_USUARIO_LOGADO).execute()
-                                break
-                        
-                        decorrido = time.time() - inicio
-                        progresso.progress(min(decorrido / tempo_limite, 1.0))
-                        time.sleep(5)
-
-            placeholder.empty()
-            if confirmado:
-                st.balloons()
-                st.success("🎉 Pagamento NOVO identificado!")
-                del st.session_state.url_ativa
-                st.session_state.monitorando_agora = False
-                time.sleep(3)
-                st.rerun()
-            else:
-                st.warning("⚠️ Tempo esgotado ou pagamento não detectado.")
-                if st.button("🔄 Tentar Novamente"):
-                    st.session_state.monitorando_agora = False
-                    st.rerun()
+                            st.success(f"✅ Pagamento de R$ {confirmado_valor} Confirmado!")
+                            st.balloons()
+                            
+                            # Limpa a URL da sessão para resetar o estado de pagamento
+                            if "url_ativa" in st.session_state: 
+                                del st.session_state.url_ativa
+                            
+                            st.rerun()
+                        else:
+                            st.warning("O Mercado Pago ainda não confirmou o recebimento. Se você já pagou, aguarde 30 segundos e tente novamente.")
+                            
+                    except Exception as e:
+                        st.error(f"Erro na verificação direta: {e}")
 
     # Rodapé Integral
     st.markdown("""
