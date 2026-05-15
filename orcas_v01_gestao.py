@@ -254,31 +254,31 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         st.write(f"**Total a pagar:** :green[R$ {valor_final:.2f}] ({label_desc})")
     
     with col_res2:
-        if st.button("🚀 PAGAR AGORA", use_container_width=True):
-            import orcas_v01_pagamentos as pag
-            email_user = st.session_state.get('usuario_email', "cliente@email.com")
+        # if st.button("🚀 PAGAR AGORA", use_container_width=True):
+        import orcas_v01_pagamentos as pag
+        email_user = st.session_state.get('usuario_email', "cliente@email.com")
             
-            link, pref_id = pag.criar_link_final(
-                ID_USUARIO_LOGADO, 
-                valor_final, 
-                f"Assinatura ORCAS - {qtd_meses} Meses",
-                email_user,
-                qtd_meses
-            )
-            if link:
-                st.session_state.url_ativa = link
-                st.session_state.pref_id_ativa = pref_id # Salva o ID da preferência para consulta
-                st.session_state.meses_comprados = qtd_meses
-                st.toast("Link gerado com sucesso!")
-            else:
-                st.error("Erro ao gerar link.")
+        link, pref_id = pag.criar_link_final(
+            ID_USUARIO_LOGADO, 
+            valor_final, 
+            f"Assinatura ORCAS - {qtd_meses} Meses",
+            email_user,
+            qtd_meses
+        )
+        if link:
+            st.session_state.url_ativa = link
+            st.session_state.pref_id_ativa = pref_id # Salva o ID da preferência para consulta
+            st.session_state.meses_comprados = qtd_meses
+            st.toast("Link gerado com sucesso!")
+        else:
+            st.error("Erro ao gerar link.")
 
         if "url_ativa" in st.session_state:
-            st.link_button("🔵 CLIQUE PARA PAGAR (MERCADO PAGO)", st.session_state.url_ativa, use_container_width=True)
+            st.link_button("🔵 PAGAR AGORA (MERCADO PAGO)", st.session_state.url_ativa, use_container_width=True)
             
             st.write("")
 
-            if st.button("🔍 JÁ PAGUEI! VERIFICAR STATUS", use_container_width=True):
+            if st.button("🔍 VERIFICAR SE PAGTO OK", use_container_width=True):
                 with st.spinner("Consultando Mercado Pago..."):
                     try:
                         import orcas_v01_pagamentos as pag
