@@ -244,7 +244,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
     st.markdown("""
         <style>
         div.stButton > button:has(div:contains("🚀")) { background-color: #28a745 !important; color: white !important; border: none !important; }
-        div.stButton > button:has(div:contains("CLIQUE")) { background-color: #009EE3 !important; color: white !important; border: none !important; font-weight: bold !important; }
+        div.stButton > button:has(div:contains("MERCADO PAGO")) { background-color: #009EE3 !important; color: white !important; border: none !important; font-weight: bold !important; }
         div.stButton > button:has(div:contains("🔍")) { background-color: #f0f2f6 !important; color: #31333F !important; border: 1px solid #dcdfe6 !important; }
         </style>
     """, unsafe_allow_html=True)
@@ -254,6 +254,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         st.write(f"**Total a pagar:** :green[R$ {valor_final:.2f}] ({label_desc})")
     
     with col_res2:
+        # BOTÃO 1: GERA O LINK
         if st.button("🚀 PAGAR AGORA", use_container_width=True):
             import orcas_v01_pagamentos as pag
             email_user = st.session_state.get('usuario_email', "cliente@email.com")
@@ -267,88 +268,82 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             )
             if link:
                 st.session_state.url_ativa = link
-                st.session_state.pref_id_ativa = pref_id # Salva o ID da preferência para consulta
-                st.session_state.meses_comprados = qtd_meses
-                st.toast("Link gerado com sucesso!")
+                st.session_state.pref_id_ativa = pref_id 
+                st.session_state.monitorando_agora = False # Garante que não comece a girar sozinho
+                st.toast("Link gerado! Clique no botão azul para pagar.")
             else:
                 st.error("Erro ao gerar link.")
 
-        if "url_ativa" in st.session_state:
-            import streamlit.components.v1 as components
-            import time
-            import orcas_v01_pagamentos as pag
-            from datetime import date
+    if "url_ativa" in st.session_state:
+        import streamlit.components.v1 as components
+        import time
+        import orcas_v01_pagamentos as pag
+        from datetime import date
 
-            # Centralizamos tudo em um container para controlar o que some e o que aparece
-            container_pag = st.container()
+        # Container para os botões e o monitoramento
+        container_pag = st.container()
 
-            # Lógica de Controle: Se clicou, monitora. Se não, mostra o botão.
-            if not st.session_state.get("monitorando_agora"):
-                with container_pag:
-                    st.write("---")
-                    st.subheader("💳 Finalizar Pagamento")
-                    st.info("Ao clicar no botão abaixo, o Mercado Pago abrirá em uma nova aba e esta tela iniciará a verificação automática.")
+        # Só mostra o botão azul se o monitoramento NÃO estiver ativo
+        if not st.session_state.get("monitorando_agora"):
+            with container_pag:
+                st.write("---")
+                if st.button("🔵 CLIQUE PARA PAGAR (MERCADO PAGO)", use_container_width=True):
+                    # AGORA SIM: Ativa o monitoramento e abre o MP ao mesmo tempo
+                    st.session_state.monitorando_agora = True
+                    js_code = f"window.open('{st.session_state.url_ativa}', '_blank');"
+                    components.html(f"<script>{js_code}</script>", height=0)
+                    st.rerun() # Recarrega para entrar no 'else' e começar a girar
+        
+        else:
+            # ESTADO DE MONITORAMENTO: O botão azul sumiu e o giro começou
+            with container_pag:
+                placeholder = st.empty()
+                tempo_limite = 180 
+                inicio = time.time()
+                confirmado = False
+
+                with placeholder.container():
+                    st.markdown("<br><h3 style='text-align: center;'>⏳ PROCESSANDO SEU PAGAMENTO...</h3>", unsafe_allow_html=True)
+                    st.write("Aguardando confirmação do Mercado Pago. Não feche esta tela.")
                     
-                    if st.button("🚀 PAGAR AGORA (MERCADO PAGO)", use_container_width=True):
-                        # 1. Ativa o monitoramento interno
-                        st.session_state.monitorando_agora = True
-                        # 2. Comando JS para abrir a aba (o _blank garante nova aba)
-                        js_code = f"window.open('{st.session_state.url_ativa}', '_blank');"
-                        components.html(f"<script>{js_code}</script>", height=0)
-                        # 3. Força o Streamlit a limpar o botão da tela e rodar o 'else'
-                        st.rerun()
-            
-            else:
-                # O BOTÃO SUMIU. Agora só existe o desenho girando e a barra.
-                with container_pag:
-                    placeholder = st.empty()
-                    tempo_limite = 180 
-                    inicio = time.time()
-                    confirmado = False
-
-                    with placeholder.container():
-                        st.markdown("<br><h3 style='text-align: center;'>⏳ PROCESSANDO SEU PAGAMENTO...</h3>", unsafe_allow_html=True)
-                        st.write("Detectamos seu clique. Estamos aguardando a confirmação do Mercado Pago enquanto você finaliza a transação na outra aba.")
+                    with st.spinner("Verificando status real..."):
+                        progresso = st.progress(0)
                         
-                        with st.spinner("Verificando status real..."):
-                            progresso = st.progress(0)
+                        while time.time() - inicio < tempo_limite:
+                            confirmado_valor = pag.consultar_pagamento_mp(ID_USUARIO_LOGADO)
                             
-                            while time.time() - inicio < tempo_limite:
-                                # Chama a função que varre os últimos pagamentos do ID 1
-                                confirmado_valor = pag.consultar_pagamento_mp(ID_USUARIO_LOGADO)
-                                
-                                if confirmado_valor:
-                                    confirmado = True
-                                    hoje = str(date.today())
-                                    supabase.table("usuarios").update({
-                                        "data_ult_assinat": hoje,
-                                        "valor_pago": confirmado_valor
-                                    }).eq("id", ID_USUARIO_LOGADO).execute()
-                                    break
-                                
-                                # Atualiza a evolução visual (o seu Gantt/Progresso)
-                                decorrido = time.time() - inicio
-                                progresso.progress(min(decorrido / tempo_limite, 1.0))
-                                time.sleep(5)
+                            if confirmado_valor:
+                                confirmado = True
+                                hoje = str(date.today())
+                                supabase.table("usuarios").update({
+                                    "data_ult_assinat": hoje,
+                                    "valor_pago": confirmado_valor
+                                }).eq("id", ID_USUARIO_LOGADO).execute()
+                                break
+                            
+                            decorrido = time.time() - inicio
+                            progresso.progress(min(decorrido / tempo_limite, 1.0))
+                            time.sleep(5)
 
-                    placeholder.empty()
+                placeholder.empty()
 
-                    if confirmado:
-                        st.balloons()
-                        st.success(f"🎉 SUCESSO! Pagamento identificado.")
-                        del st.session_state.url_ativa
-                        st.session_state.monitorando_agora = False
-                        time.sleep(3)
+                if confirmado:
+                    st.balloons()
+                    st.success(f"🎉 SUCESSO! Pagamento identificado.")
+                    del st.session_state.url_ativa
+                    st.session_state.monitorando_agora = False
+                    time.sleep(3)
+                    st.rerun()
+                else:
+                    st.warning("⚠️ Tempo de verificação expirou.")
+                    st.info("Se já pagou, o sistema liberará seu acesso em breve.")
+                    if st.button("🔄 Tentar novamente"):
                         st.rerun()
-                    else:
-                        st.warning("⚠️ O tempo de verificação expirou.")
-                        if st.button("🔄 Tentar verificar novamente"):
-                            st.rerun()
-                        if st.button("❌ Voltar ao início"):
-                            st.session_state.monitorando_agora = False
-                            st.rerun()
+                    if st.button("❌ Voltar"):
+                        st.session_state.monitorando_agora = False
+                        st.rerun()
 
-    # Rodapé Integral (Mantenha igual)
+    # Rodapé Integral
     st.markdown("""
     <div style="font-size: 12px; color: #333; margin-top: 20px; text-align: justify; line-height: 1.6; border-top: 1px solid #eee; padding-top: 10px;">
     Sua Assinatura ORCAS BABY mensal custa R$ 19,90 e contempla 2 Planos de 24 meses cada um, mas se você quiser ou necessitar, é possível aumentar o período de um Plano em blocos adicionais de 12 meses tendo um acréscimo de R$ 6,40 para cada 12 meses adicionais. Para aumentar o número de Planos (Padrão - 24 meses), o valor é de R$ 12,80 por Plano adicional. Para receber um Resumo Diário das análises e pendências como, o que preciso pagar e receber hoje, o que ainda está em aberto, quanto já gastei de supermercado até hoje, quanto já gastei nessa reforma, etc de seu Plano via Whatsapp ou E-mail terá um acréscimo de R$ 9,85 por Plano.
