@@ -278,7 +278,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             
             st.write("")
 
-            if st.button("🔍 VERIFICAR SE PAGTO OK", use_container_width=True):
+            if st.button("🔍 VERIFICAR SE PAGAMENTO OK", use_container_width=True):
                 with st.spinner("Consultando Mercado Pago..."):
                     try:
                         import orcas_v01_pagamentos as pag
