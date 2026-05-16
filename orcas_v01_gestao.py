@@ -236,7 +236,8 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 st.success("✅ Cupom aplicado!")
             else:
                 st.error("❌ Cupom inválido.")
-        except: pass
+        except:
+            pass
 
     valor_final = max(v_base - desc_extra, 1.00)
 
@@ -257,7 +258,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         email_user = st.session_state.get('usuario_email', "cliente@email.com")
 
         # Captura a URL atual para retorno
-        url_origem = "https://seuapp.streamlit.app/gestao"  # ajuste para sua rota real
+        url_origem = "https://orcas-planejamento-financeiro.streamlit.app/gestao"  # ajuste conforme sua rota real
 
         link, pref_id = pag.criar_link_final(
             ID_USUARIO_LOGADO, 
@@ -278,37 +279,33 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         if "url_ativa" in st.session_state:
             st.link_button("🔵 PAGAR AGORA (MERCADO PAGO)", st.session_state.url_ativa, use_container_width=True)
 
-            st.write("")
-            st.info("⏳ Aguardando confirmação do Mercado Pago...")
+            # Verifica se o usuário retornou do Mercado Pago
+            status_retorno = st.query_params.get("status", [None])[0]
 
-            import time
-            from datetime import date
+            if status_retorno == "success":
+                st.write("")
+                st.info("⏳ Confirmando pagamento com o Mercado Pago...")
 
-            confirmado_valor = None
-            tentativas = 0
-            with st.spinner("Consultando Mercado Pago..."):
-                while not confirmado_valor and tentativas < 6:
-                    confirmado_valor = pag.consultar_pagamento_mp(ID_USUARIO_LOGADO)
-                    if not confirmado_valor:
-                        st.progress((tentativas+1)/6)
-                        time.sleep(5)
-                        tentativas += 1
+                from datetime import date
+                confirmado_valor = pag.consultar_pagamento_mp(ID_USUARIO_LOGADO)
 
-            if confirmado_valor:
-                hoje = str(date.today())
-                supabase.table("usuarios").update({
-                    "data_ult_assinat": hoje,
-                    "valor_pago": confirmado_valor
-                }).eq("id", ID_USUARIO_LOGADO).execute()
+                if confirmado_valor:
+                    hoje = str(date.today())
+                    supabase.table("usuarios").update({
+                        "data_ult_assinat": hoje,
+                        "valor_pago": confirmado_valor
+                    }).eq("id", ID_USUARIO_LOGADO).execute()
 
-                st.success(f"✅ Pagamento de R$ {confirmado_valor} Confirmado!")
-                st.balloons()
+                    st.success(f"✅ Pagamento de R$ {confirmado_valor} Confirmado!")
+                    st.balloons()
 
-                if "url_ativa" in st.session_state:
-                    del st.session_state.url_ativa
-                st.rerun()
+                    if "url_ativa" in st.session_state:
+                        del st.session_state.url_ativa
+                    st.rerun()
+                else:
+                    st.warning("O Mercado Pago ainda não confirmou o pagamento. Aguarde alguns segundos e recarregue.")
             else:
-                st.warning("O Mercado Pago ainda não confirmou. Se você já pagou, aguarde alguns minutos e recarregue.")
+                st.info("Clique em 'PAGAR AGORA' para abrir o Mercado Pago e finalizar o pagamento.")
 
     # Rodapé Integral
     st.markdown("""
