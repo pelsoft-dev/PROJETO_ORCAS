@@ -1,6 +1,7 @@
 import streamlit as st
 import mercadopago
 import requests
+from datetime import datetime, timedelta
 
 def criar_link_final(user_id, valor, descricao, email_usuario, qtd_meses, url_origem):
     """
@@ -46,15 +47,12 @@ def criar_link_final(user_id, valor, descricao, email_usuario, qtd_meses, url_or
         st.error(f"Erro ao criar link de pagamento: {e}")
         return None, None
 
-def consultar_pagamento_mp(user_id, pref_id=None):
+def consultar_pagamento_mp(user_id, pref_id=None, valor_esperado=None):
     """
-    Consulta o Mercado Pago buscando pelo external_reference (ID do usuário)
-    e, opcionalmente, pela preferência atual (pref_id).
-    Retorna o valor apenas se o pagamento for aprovado e recente.
+    Consulta o Mercado Pago buscando pelo external_reference (ID do usuário),
+    pela preferência atual (pref_id) e pelo valor esperado.
+    Só retorna se o pagamento for aprovado, recente e com o valor correto.
     """
-    import requests
-    from datetime import datetime, timedelta
-
     try:
         token = st.secrets.get("MP_ACCESS_TOKEN")
         headers = {"Authorization": f"Bearer {token}"}
@@ -64,13 +62,18 @@ def consultar_pagamento_mp(user_id, pref_id=None):
         if res.get('results'):
             for pag in res['results']:
                 if str(pag.get('external_reference')) == str(user_id):
-                    # Verifica se é da preferência atual
+                    # Se foi passada a preferência, valida
                     if pref_id and pag.get('order', {}).get('id') != pref_id:
                         continue
-                    # Verifica se é recente (últimas 24h)
+                    # Só aceita pagamentos das últimas 24h
                     data_pag = datetime.strptime(pag['date_created'][:19], "%Y-%m-%dT%H:%M:%S")
-                    if datetime.utcnow() - data_pag < timedelta(hours=24):
-                        return pag.get('transaction_amount')
+                    if datetime.utcnow() - data_pag > timedelta(hours=24):
+                        continue
+                    # Valida o valor
+                    valor_pago = pag.get('transaction_amount')
+                    if valor_esperado and round(valor_pago, 2) != round(valor_esperado, 2):
+                        continue
+                    return valor_pago
         return None
     except Exception:
         return None
