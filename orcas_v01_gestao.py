@@ -199,7 +199,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         # Alteração 2: Apenas um aviso, mas o código continua para o bloco de pagamento
         st.info("💡 Selecione um plano acima para editar ou digite um novo nome para configurar.")
 
-# --- BLOCO DE SELEÇÃO DE PAGAMENTO (Agora fora da condição principal para aparecer sempre) ---
+# --- BLOCO DE SELEÇÃO DE PAGAMENTO ---
     st.write("---")
     st.subheader("💳 Finalizar Assinatura")
     
@@ -245,7 +245,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         <style>
         div.stButton > button:has(div:contains("🚀")) { background-color: #28a745 !important; color: white !important; border: none !important; }
         div.stButton > button:has(div:contains("CLIQUE")) { background-color: #009EE3 !important; color: white !important; border: none !important; font-weight: bold !important; }
-        div.stButton > button:has(div:contains("🔍")) { background-color: #f0f2f6 !important; color: #31333F !important; border: 1px solid #dcdfe6 !important; }
         </style>
     """, unsafe_allow_html=True)
 
@@ -254,20 +253,23 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         st.write(f"**Total a pagar:** :green[R$ {valor_final:.2f}] ({label_desc})")
     
     with col_res2:
-        # if st.button("🚀 PAGAR AGORA", use_container_width=True):
         import orcas_v01_pagamentos as pag
         email_user = st.session_state.get('usuario_email', "cliente@email.com")
-            
+
+        # Captura a URL atual para retorno
+        url_origem = "https://seuapp.streamlit.app/gestao"  # ajuste para sua rota real
+
         link, pref_id = pag.criar_link_final(
             ID_USUARIO_LOGADO, 
             valor_final, 
             f"Assinatura ORCAS - {qtd_meses} Meses",
             email_user,
-            qtd_meses
+            qtd_meses,
+            url_origem
         )
         if link:
             st.session_state.url_ativa = link
-            st.session_state.pref_id_ativa = pref_id # Salva o ID da preferência para consulta
+            st.session_state.pref_id_ativa = pref_id
             st.session_state.meses_comprados = qtd_meses
             st.toast("Link gerado com sucesso!")
         else:
@@ -275,40 +277,38 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
 
         if "url_ativa" in st.session_state:
             st.link_button("🔵 PAGAR AGORA (MERCADO PAGO)", st.session_state.url_ativa, use_container_width=True)
-            
-            st.write("")
 
-            if st.button("🔍 VERIFICAR SE PAGAMENTO OK", use_container_width=True):
-                with st.spinner("Consultando Mercado Pago..."):
-                    try:
-                        import orcas_v01_pagamentos as pag
-                        from datetime import date
-                        
-                        # 1. CONSULTA DIRETA AO MERCADO PAGO (Via função no orcas_v01_pagamentos.py)
-                        # confirmado_valor = pag.consultar_pagamento_mp(st.session_state.pref_id_ativa)
-                        confirmado_valor = pag.consultar_pagamento_mp(ID_USUARIO_LOGADO)
-                        
-                        if confirmado_valor:
-                            # 2. SE APROVADO, ATUALIZA O SUPABASE NA HORA
-                            hoje = str(date.today())
-                            supabase.table("usuarios").update({
-                                "data_ult_assinat": hoje,
-                                "valor_pago": confirmado_valor
-                            }).eq("id", ID_USUARIO_LOGADO).execute()
-                            
-                            st.success(f"✅ Pagamento de R$ {confirmado_valor} Confirmado!")
-                            st.balloons()
-                            
-                            # Limpa a URL da sessão para resetar o estado de pagamento
-                            if "url_ativa" in st.session_state: 
-                                del st.session_state.url_ativa
-                            
-                            st.rerun()
-                        else:
-                            st.warning("O Mercado Pago ainda não confirmou o recebimento. Se você já pagou, aguarde 30 segundos e tente novamente.")
-                            
-                    except Exception as e:
-                        st.error(f"Erro na verificação direta: {e}")
+            st.write("")
+            st.info("⏳ Aguardando confirmação do Mercado Pago...")
+
+            import time
+            from datetime import date
+
+            confirmado_valor = None
+            tentativas = 0
+            with st.spinner("Consultando Mercado Pago..."):
+                while not confirmado_valor and tentativas < 6:
+                    confirmado_valor = pag.consultar_pagamento_mp(ID_USUARIO_LOGADO)
+                    if not confirmado_valor:
+                        st.progress((tentativas+1)/6)
+                        time.sleep(5)
+                        tentativas += 1
+
+            if confirmado_valor:
+                hoje = str(date.today())
+                supabase.table("usuarios").update({
+                    "data_ult_assinat": hoje,
+                    "valor_pago": confirmado_valor
+                }).eq("id", ID_USUARIO_LOGADO).execute()
+
+                st.success(f"✅ Pagamento de R$ {confirmado_valor} Confirmado!")
+                st.balloons()
+
+                if "url_ativa" in st.session_state:
+                    del st.session_state.url_ativa
+                st.rerun()
+            else:
+                st.warning("O Mercado Pago ainda não confirmou. Se você já pagou, aguarde alguns minutos e recarregue.")
 
     # Rodapé Integral
     st.markdown("""
