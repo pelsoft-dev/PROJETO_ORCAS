@@ -46,22 +46,31 @@ def criar_link_final(user_id, valor, descricao, email_usuario, qtd_meses, url_or
         st.error(f"Erro ao criar link de pagamento: {e}")
         return None, None
 
-def consultar_pagamento_mp(user_id):
+def consultar_pagamento_mp(user_id, pref_id=None):
     """
-    Consulta o Mercado Pago buscando pelo external_reference (ID do usuário).
-    Busca ampla nos últimos pagamentos aprovados para evitar erros de indexação.
+    Consulta o Mercado Pago buscando pelo external_reference (ID do usuário)
+    e, opcionalmente, pela preferência atual (pref_id).
+    Retorna o valor apenas se o pagamento for aprovado e recente.
     """
+    import requests
+    from datetime import datetime, timedelta
+
     try:
         token = st.secrets.get("MP_ACCESS_TOKEN")
         headers = {"Authorization": f"Bearer {token}"}
-        
         url = "https://api.mercadopago.com/v1/payments/search?status=approved&sort=date_created&criteria=desc&limit=10"
         res = requests.get(url, headers=headers).json()
-        
+
         if res.get('results'):
             for pag in res['results']:
                 if str(pag.get('external_reference')) == str(user_id):
-                    return pag.get('transaction_amount')
+                    # Verifica se é da preferência atual
+                    if pref_id and pag.get('order', {}).get('id') != pref_id:
+                        continue
+                    # Verifica se é recente (últimas 24h)
+                    data_pag = datetime.strptime(pag['date_created'][:19], "%Y-%m-%dT%H:%M:%S")
+                    if datetime.utcnow() - data_pag < timedelta(hours=24):
+                        return pag.get('transaction_amount')
         return None
     except Exception:
         return None

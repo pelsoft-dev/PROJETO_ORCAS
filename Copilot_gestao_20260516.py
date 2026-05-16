@@ -199,7 +199,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         # Alteração 2: Apenas um aviso, mas o código continua para o bloco de pagamento
         st.info("💡 Selecione um plano acima para editar ou digite um novo nome para configurar.")
 
-# --- BLOCO DE SELEÇÃO DE PAGAMENTO (Agora fora da condição principal para aparecer sempre) ---
+# --- BLOCO DE SELEÇÃO DE PAGAMENTO ---
     st.write("---")
     st.subheader("💳 Finalizar Assinatura")
     
@@ -246,7 +246,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         <style>
         div.stButton > button:has(div:contains("🚀")) { background-color: #28a745 !important; color: white !important; border: none !important; }
         div.stButton > button:has(div:contains("CLIQUE")) { background-color: #009EE3 !important; color: white !important; border: none !important; font-weight: bold !important; }
-        div.stButton > button:has(div:contains("🔍")) { background-color: #f0f2f6 !important; color: #31333F !important; border: 1px solid #dcdfe6 !important; }
         </style>
     """, unsafe_allow_html=True)
 
@@ -288,7 +287,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 st.info("⏳ Confirmando pagamento com o Mercado Pago...")
 
                 from datetime import date
-                confirmado_valor = pag.consultar_pagamento_mp(ID_USUARIO_LOGADO, st.session_state.pref_id_ativa)
+                confirmado_valor = pag.consultar_pagamento_mp(ID_USUARIO_LOGADO)
 
                 if confirmado_valor:
                     hoje = str(date.today())
