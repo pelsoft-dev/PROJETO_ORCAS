@@ -24,12 +24,19 @@ def criar_link_final(user_id, valor, descricao, email_usuario, qtd_meses, url_or
                 "unit_price": float(round(valor, 2))
             }],
             "payer": {"email": email_usuario},
-            "external_reference": str(user_id), 
+            "external_reference": str(user_id),
+
             "back_urls": {
-                "success": f"{url_origem}?status=success",
-                "pending": f"{url_origem}?status=pending",
-                "failure": f"{url_origem}?status=failure",
+                "success": "https://orcas-planejamento-financeiro.streamlit.app/orcas_v01_gestao?status=success",
+                "pending": "https://orcas-planejamento-financeiro.streamlit.app/orcas_v01_gestao?status=pending",
+                "failure": "https://orcas-planejamento-financeiro.streamlit.app/orcas_v01_gestao?status=failure",
             },
+
+            # "back_urls": {
+            #     "success": f"{url_origem}?status=success",
+            #     "pending": f"{url_origem}?status=pending",
+            #     "failure": f"{url_origem}?status=failure",
+            # },
             "notification_url": "https://hook.us2.make.com/youbq3bhry3422tjjahaqqmyrsr2o81e",
             "auto_return": "approved"
         }
@@ -49,9 +56,11 @@ def criar_link_final(user_id, valor, descricao, email_usuario, qtd_meses, url_or
 
 def consultar_pagamento_mp(user_id, pref_id=None, valor_esperado=None):
     """
-    Consulta o Mercado Pago buscando pelo external_reference (ID do usuário),
-    pela preferência atual (pref_id) e pelo valor esperado.
-    Só retorna se o pagamento for aprovado, recente e com o valor correto.
+    Consulta o Mercado Pago e retorna o valor pago apenas se:
+    - for do usuário correto,
+    - corresponder à preferência atual,
+    - tiver sido criado nas últimas 24h,
+    - e o valor for exatamente o esperado.
     """
     try:
         token = st.secrets.get("MP_ACCESS_TOKEN")
@@ -61,19 +70,21 @@ def consultar_pagamento_mp(user_id, pref_id=None, valor_esperado=None):
 
         if res.get('results'):
             for pag in res['results']:
-                if str(pag.get('external_reference')) == str(user_id):
-                    # Se foi passada a preferência, valida
-                    if pref_id and pag.get('order', {}).get('id') != pref_id:
-                        continue
-                    # Só aceita pagamentos das últimas 24h
-                    data_pag = datetime.strptime(pag['date_created'][:19], "%Y-%m-%dT%H:%M:%S")
-                    if datetime.utcnow() - data_pag > timedelta(hours=24):
-                        continue
-                    # Valida o valor
-                    valor_pago = pag.get('transaction_amount')
-                    if valor_esperado and round(valor_pago, 2) != round(valor_esperado, 2):
-                        continue
-                    return valor_pago
+                # 1. Usuário correto
+                if str(pag.get('external_reference')) != str(user_id):
+                    continue
+                # 2. Preferência correta
+                if pref_id and pag.get('order', {}).get('id') != pref_id:
+                    continue
+                # 3. Pagamento recente
+                data_pag = datetime.strptime(pag['date_created'][:19], "%Y-%m-%dT%H:%M:%S")
+                if datetime.utcnow() - data_pag > timedelta(hours=24):
+                    continue
+                # 4. Valor correto
+                valor_pago = pag.get('transaction_amount')
+                if valor_esperado is not None and round(valor_pago, 2) != round(valor_esperado, 2):
+                    continue
+                return valor_pago
         return None
     except Exception:
         return None

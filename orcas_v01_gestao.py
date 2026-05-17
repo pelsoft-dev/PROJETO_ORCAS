@@ -241,14 +241,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
 
     valor_final = max(v_base - desc_extra, 1.00)
 
-    # CSS PARA CORES
-    st.markdown("""
-        <style>
-        div.stButton > button:has(div:contains("🚀")) { background-color: #28a745 !important; color: white !important; border: none !important; }
-        div.stButton > button:has(div:contains("CLIQUE")) { background-color: #009EE3 !important; color: white !important; border: none !important; font-weight: bold !important; }
-        </style>
-    """, unsafe_allow_html=True)
-
     col_res1, col_res2 = st.columns([2, 1])
     with col_res1:
         st.write(f"**Total a pagar:** :green[R$ {valor_final:.2f}] ({label_desc})")
@@ -270,7 +262,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         if link:
             st.session_state.url_ativa = link
             st.session_state.pref_id_ativa = pref_id
-            st.session_state.valor_esperado = valor_final
+            st.session_state.valor_esperado = valor_final  # guarda o valor exato
             st.session_state.meses_comprados = qtd_meses
             st.toast("Link gerado com sucesso!")
         else:
@@ -282,14 +274,13 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             status_retorno = st.query_params.get("status", [None])[0]
 
             if status_retorno == "success":
-                st.write("")
                 st.info("⏳ Confirmando pagamento com o Mercado Pago...")
 
                 from datetime import date
                 confirmado_valor = pag.consultar_pagamento_mp(
                     ID_USUARIO_LOGADO,
                     st.session_state.pref_id_ativa,
-                    st.session_state.valor_esperado
+                    st.session_state.valor_esperado   # compara o valor esperado
                 )
 
                 if confirmado_valor:
@@ -306,7 +297,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                         del st.session_state.url_ativa
                     st.rerun()
                 else:
-                    st.warning("O Mercado Pago ainda não confirmou o pagamento. Aguarde alguns segundos e recarregue.")
+                    st.warning("O Mercado Pago ainda não confirmou o pagamento ou o valor não confere. Aguarde alguns segundos e recarregue.")
             else:
                 st.info("Clique em 'PAGAR AGORA' para abrir o Mercado Pago e finalizar o pagamento.")
 
