@@ -268,12 +268,15 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             st.toast("Link gerado com sucesso!")
 
             # --- SALVA REGISTRO TEMPORÁRIO ---
-            supabase.table("pagamentos_temp").upsert({
-                "usuario_id": ID_USUARIO_LOGADO,
-                "pref_id": pref_id,
-                "valor": valor_final,
-                "status": "aguardando"
-            }).execute()
+            try:
+                supabase.table("pagamentos_temp").upsert({
+                    "usuario_id": ID_USUARIO_LOGADO,
+                    "pref_id": pref_id,
+                    "valor": valor_final,
+                    "status": "aguardando"
+                }).execute()
+            except Exception as e:
+                st.error(f"Erro ao registrar pagamento temporário: {e}")
         else:
             st.error("Erro ao gerar link.")
 
