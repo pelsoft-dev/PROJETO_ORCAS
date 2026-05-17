@@ -27,9 +27,9 @@ def criar_link_final(user_id, valor, descricao, email_usuario, qtd_meses, url_or
             "external_reference": str(user_id),
 
             "back_urls": {
-                "success": "https://orcas-planejamento-financeiro.streamlit.app/orcas_v01_gestao?status=success",
-                "pending": "https://orcas-planejamento-financeiro.streamlit.app/orcas_v01_gestao?status=pending",
-                "failure": "https://orcas-planejamento-financeiro.streamlit.app/orcas_v01_gestao?status=failure",
+                "success": "https://orcas-planejamento-financeiro.streamlit.app/?status=success",
+                "pending": "https://orcas-planejamento-financeiro.streamlit.app/?status=pending",
+                "failure": "https://orcas-planejamento-financeiro.streamlit.app/?status=failure",
             },
 
             # "back_urls": {

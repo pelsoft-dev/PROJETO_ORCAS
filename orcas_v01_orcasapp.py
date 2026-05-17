@@ -210,6 +210,20 @@ def parse_moeda(t):
     except:
         return 0.0
 
+# INÍCIO INSERÇÃO DIA 16/05/2026
+# --- DEFINE ID DO USUÁRIO LOGADO ---
+# Recupera o identificador salvo na sessão durante o login
+ID_USUARIO_LOGADO = str(st.session_state.get('CHAVE_MESTRA_UUID', ''))
+
+# --- INTERCEPTAÇÃO DE RETORNO DO MERCADO PAGO ---
+import orcas_v01_retornodomp as retornodomp
+
+status_retorno = st.query_params.get("status", [None])[0]
+if status_retorno and ID_USUARIO_LOGADO:
+    retornodomp.tratar_retorno(supabase, ID_USUARIO_LOGADO)
+    st.stop()
+# FIM INSERÇÃO DIA 16/06/2026
+
 # --- 4. LOGIN ---
 if 'logado' not in st.session_state:
     st.session_state.logado = False
