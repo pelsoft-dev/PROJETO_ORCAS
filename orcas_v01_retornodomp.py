@@ -2,50 +2,49 @@ import streamlit as st
 from datetime import date
 import orcas_v01_pagamentos as pag
 
-def tratar_retorno(supabase, ID_USUARIO_LOGADO):
-    """
-    Módulo de interceptação do retorno do Mercado Pago.
-    Deve ser chamado antes da seção de login no orcasapp.py.
-    """
+def tratar_retorno(supabase, _):
     status_retorno = st.query_params.get("status", [None])[0]
+    pref_id = st.query_params.get("preference_id", [None])[0]
 
     if not status_retorno:
-        return  # nada a fazer
+        return
+
+    # Recupera o usuário e o valor esperado
+    res = supabase.table("pagamentos_temp").select("usuario_id, valor").eq("pref_id", pref_id).execute()
+    if not res.data:
+        st.error("Não foi possível identificar o usuário do pagamento.")
+        st.stop()
+
+    usuario_id = res.data[0]["usuario_id"]
+    valor_esperado = res.data[0]["valor"]
 
     if status_retorno == "success":
-        st.info("⏳ Confirmando pagamento com o Mercado Pago...")
+        st.info("⏳ Confirmando pagamento com o Mercado Pago...")
 
-        confirmado_valor = pag.consultar_pagamento_mp(
-            ID_USUARIO_LOGADO,
-            st.session_state.get("pref_id_ativa"),
-            st.session_state.get("valor_esperado")
-        )
+        confirmado_valor = pag.consultar_pagamento_mp(usuario_id, pref_id, valor_esperado)
 
         if confirmado_valor:
             hoje = str(date.today())
             supabase.table("usuarios").update({
                 "data_ult_assinat": hoje,
                 "valor_pago": confirmado_valor
-            }).eq("id", ID_USUARIO_LOGADO).execute()
+            }).eq("id", usuario_id).execute()
 
-            st.success(f"✅ Pagamento de R$ {confirmado_valor:.2f} Confirmado!")
+            supabase.table("pagamentos_temp").update({"status": "confirmado"}).eq("pref_id", pref_id).execute()
+
+            st.success(f"✅ Pagamento de R$ {confirmado_valor:.2f} confirmado!")
             st.balloons()
-
-            # Limpa flags de sessão
-            if "url_ativa" in st.session_state:
-                del st.session_state.url_ativa
-            if "status_mp" in st.session_state:
-                del st.session_state.status_mp
-
             st.stop()
         else:
-            st.warning("O Mercado Pago ainda não confirmou o pagamento ou o valor não confere. Aguarde alguns segundos e recarregue.")
+            st.warning("O Mercado Pago ainda não confirmou o pagamento. Aguarde alguns segundos e recarregue.")
             st.stop()
 
     elif status_retorno == "pending":
+        supabase.table("pagamentos_temp").update({"status": "pendente"}).eq("pref_id", pref_id).execute()
         st.info("Pagamento ainda está pendente. Aguarde a confirmação.")
         st.stop()
 
     elif status_retorno == "failure":
+        supabase.table("pagamentos_temp").update({"status": "falhou"}).eq("pref_id", pref_id).execute()
         st.error("O pagamento não foi concluído. Tente novamente.")
         st.stop()

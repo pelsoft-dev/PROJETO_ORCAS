@@ -219,8 +219,8 @@ ID_USUARIO_LOGADO = str(st.session_state.get('CHAVE_MESTRA_UUID', ''))
 import orcas_v01_retornodomp as retornodomp
 
 status_retorno = st.query_params.get("status", [None])[0]
-if status_retorno and ID_USUARIO_LOGADO:
-    retornodomp.tratar_retorno(supabase, ID_USUARIO_LOGADO)
+if status_retorno:
+    retornodomp.tratar_retorno(supabase, None)
     st.stop()
 # FIM INSERÇÃO DIA 16/06/2026
 

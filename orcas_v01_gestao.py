@@ -259,12 +259,21 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             qtd_meses,
             url_origem
         )
+
         if link:
             st.session_state.url_ativa = link
             st.session_state.pref_id_ativa = pref_id
-            st.session_state.valor_esperado = valor_final  # guarda o valor exato
+            st.session_state.valor_esperado = valor_final
             st.session_state.meses_comprados = qtd_meses
             st.toast("Link gerado com sucesso!")
+
+            # --- SALVA REGISTRO TEMPORÁRIO ---
+            supabase.table("pagamentos_temp").upsert({
+                "usuario_id": ID_USUARIO_LOGADO,
+                "pref_id": pref_id,
+                "valor": valor_final,
+                "status": "aguardando"
+            }).execute()
         else:
             st.error("Erro ao gerar link.")
 
