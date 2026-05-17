@@ -200,118 +200,92 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         st.info("💡 Selecione um plano acima para editar ou digite um novo nome para configurar.")
 
 # --- BLOCO DE SELEÇÃO DE PAGAMENTO ---
-    st.write("---")
-    st.subheader("💳 Finalizar Assinatura")
-    
-    tipo_pagamento = st.radio(
-        "Escolha o período de renovação:",
-        ["Mensal (Sem desconto)", "6 Meses (5% de desconto)", "12 Meses (11% de desconto)"],
-        horizontal=True, key="radio_pag_final_v5"
+st.write("---")
+st.subheader("💳 Finalizar Assinatura")
+
+tipo_pagamento = st.radio(
+    "Escolha o período de renovação:",
+    ["Mensal (Sem desconto)", "6 Meses (5% de desconto)", "12 Meses (11% de desconto)"],
+    horizontal=True, key="radio_pag_final_v5"
+)
+
+if "6 Meses" in tipo_pagamento:
+    qtd_meses = 6
+    v_base = (v_mensal_total * 6) * (1 - DESC_6_MESES)
+    label_desc = "5% OFF"
+elif "12 Meses" in tipo_pagamento:
+    qtd_meses = 12
+    v_base = (v_mensal_total * 12) * (1 - DESC_12_MESES)
+    label_desc = "11% OFF"
+else:
+    qtd_meses = 1
+    v_base = v_mensal_total
+    label_desc = "Valor Padrão"
+
+st.write("")
+cupom_in = st.text_input("Possui um Cupom de Desconto?", key="cp_gest_final_v3").upper()
+desc_extra = 0.0
+if cupom_in:
+    try:
+        res_c = supabase.table("cupons").select("*").eq("codigo", cupom_in).eq("ativo", True).execute()
+        if res_c.data:
+            d = res_c.data[0]
+            v_p = float(d.get('percentual_desconto', 0) or 0)
+            v_a = float(d.get('valor_desconto', 0) or 0)
+            desc_extra = v_base * (v_p / 100) if v_p > 0 else v_a
+            st.success("✅ Cupom aplicado!")
+        else:
+            st.error("❌ Cupom inválido.")
+    except:
+        pass
+
+valor_final = max(v_base - desc_extra, 1.00)
+
+col_res1, col_res2 = st.columns([2, 1])
+with col_res1:
+    st.write(f"**Total a pagar:** :green[R$ {valor_final:.2f}] ({label_desc})")
+
+with col_res2:
+    import orcas_v01_pagamentos as pag
+    email_user = st.session_state.get('usuario_email', "cliente@email.com")
+
+    # URL principal do app (sem submódulo)
+    url_origem = "https://orcas-planejamento-financeiro.streamlit.app/"
+
+    # Cria link de pagamento final
+    link, pref_id = pag.criar_link_final(
+        ID_USUARIO_LOGADO,
+        valor_final,
+        f"Assinatura ORCAS - {qtd_meses} Meses",
+        email_user,
+        qtd_meses,
+        url_origem
     )
 
-    if "6 Meses" in tipo_pagamento:
-        qtd_meses = 6
-        v_base = (v_mensal_total * 6) * (1 - DESC_6_MESES)
-        label_desc = "5% OFF"
-    elif "12 Meses" in tipo_pagamento:
-        qtd_meses = 12
-        v_base = (v_mensal_total * 12) * (1 - DESC_12_MESES)
-        label_desc = "11% OFF"
-    else:
-        qtd_meses = 1
-        v_base = v_mensal_total
-        label_desc = "Valor Padrão"
+    if link and pref_id:
+        st.session_state.url_ativa = link
+        st.session_state.pref_id_ativa = pref_id
+        st.session_state.valor_esperado = valor_final
+        st.session_state.meses_comprados = qtd_meses
+        st.toast("Link gerado com sucesso!")
 
-    st.write("")
-    cupom_in = st.text_input("Possui um Cupom de Desconto?", key="cp_gest_final_v3").upper()
-    desc_extra = 0.0
-    if cupom_in:
+        # --- SALVA REGISTRO TEMPORÁRIO (apenas o valor final) ---
         try:
-            res_c = supabase.table("cupons").select("*").eq("codigo", cupom_in).eq("ativo", True).execute()
-            if res_c.data:
-                d = res_c.data[0]
-                v_p = float(d.get('percentual_desconto', 0) or 0)
-                v_a = float(d.get('valor_desconto', 0) or 0)
-                desc_extra = v_base * (v_p / 100) if v_p > 0 else v_a
-                st.success("✅ Cupom aplicado!")
-            else:
-                st.error("❌ Cupom inválido.")
-        except:
-            pass
+            supabase.table("pagamentos_temp").upsert({
+                "usuario_id": ID_USUARIO_LOGADO,
+                "pref_id": str(pref_id),
+                "valor": float(valor_final),
+                "status": "aguardando"
+            }).execute()
+        except Exception as e:
+            st.error(f"Erro ao registrar pagamento temporário: {e}")
+    else:
+        st.error("Erro ao gerar link.")
 
-    valor_final = max(v_base - desc_extra, 1.00)
-
-    col_res1, col_res2 = st.columns([2, 1])
-    with col_res1:
-        st.write(f"**Total a pagar:** :green[R$ {valor_final:.2f}] ({label_desc})")
-    
-    with col_res2:
-        import orcas_v01_pagamentos as pag
-        email_user = st.session_state.get('usuario_email', "cliente@email.com")
-
-        url_origem = "https://orcas-planejamento-financeiro.streamlit.app/gestao"  # ajuste conforme sua rota real
-
-        link, pref_id = pag.criar_link_final(
-            ID_USUARIO_LOGADO, 
-            valor_final, 
-            f"Assinatura ORCAS - {qtd_meses} Meses",
-            email_user,
-            qtd_meses,
-            url_origem
-        )
-
-        if link:
-            st.session_state.url_ativa = link
-            st.session_state.pref_id_ativa = pref_id
-            st.session_state.valor_esperado = valor_final
-            st.session_state.meses_comprados = qtd_meses
-            st.toast("Link gerado com sucesso!")
-
-            # --- SALVA REGISTRO TEMPORÁRIO ---
-            try:
-                supabase.table("pagamentos_temp").upsert({
-                    "usuario_id": ID_USUARIO_LOGADO,
-                    "pref_id": pref_id,
-                    "valor": valor_final,
-                    "status": "aguardando"
-                }).execute()
-            except Exception as e:
-                st.error(f"Erro ao registrar pagamento temporário: {e}")
-        else:
-            st.error("Erro ao gerar link.")
-
-        if "url_ativa" in st.session_state:
-            st.link_button("🔵 PAGAR AGORA (MERCADO PAGO)", st.session_state.url_ativa, use_container_width=True)
-
-            status_retorno = st.query_params.get("status", [None])[0]
-
-            if status_retorno == "success":
-                st.info("⏳ Confirmando pagamento com o Mercado Pago...")
-
-                from datetime import date
-                confirmado_valor = pag.consultar_pagamento_mp(
-                    ID_USUARIO_LOGADO,
-                    st.session_state.pref_id_ativa,
-                    st.session_state.valor_esperado   # compara o valor esperado
-                )
-
-                if confirmado_valor:
-                    hoje = str(date.today())
-                    supabase.table("usuarios").update({
-                        "data_ult_assinat": hoje,
-                        "valor_pago": confirmado_valor
-                    }).eq("id", ID_USUARIO_LOGADO).execute()
-
-                    st.success(f"✅ Pagamento de R$ {confirmado_valor:.2f} Confirmado!")
-                    st.balloons()
-
-                    if "url_ativa" in st.session_state:
-                        del st.session_state.url_ativa
-                    st.rerun()
-                else:
-                    st.warning("O Mercado Pago ainda não confirmou o pagamento ou o valor não confere. Aguarde alguns segundos e recarregue.")
-            else:
-                st.info("Clique em 'PAGAR AGORA' para abrir o Mercado Pago e finalizar o pagamento.")
+    # --- BOTÃO DE PAGAMENTO ---
+    if "url_ativa" in st.session_state:
+        st.link_button("🔵 PAGAR AGORA (MERCADO PAGO)", st.session_state.url_ativa, use_container_width=True)
+        st.info("Clique em 'PAGAR AGORA' para abrir o Mercado Pago e finalizar o pagamento.")
 
     # Rodapé Integral
     st.markdown("""
