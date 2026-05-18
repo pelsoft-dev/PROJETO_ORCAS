@@ -18,7 +18,7 @@ from email.mime.text import MIMEText # Adicione este
 import os
 
 # --- 1. IMPORTAÇÃO DOS MÓDULOS EXTERNOS ---
-import orcas_v01_gestao as gestao
+#  import orcas_v01_gestao as gestao  - Está sendo importado depois do LOGIN
 import orcas_v01_dashboard as dash
 import orcas_v01_lancamentos as lanc
 import orcas_v01_projetar as proj
@@ -416,6 +416,9 @@ if not st.session_state.logado:
     st.stop()
 
 # --- 5. ESTADO E DADOS ---
+
+import orcas_v01_gestao as gestao
+
 ID_USUARIO_LOGADO = str(st.session_state.get('CHAVE_MESTRA_UUID', ''))
 vencimento_str = st.session_state.get('vencimento', '2026-01-01')
 venc_dt_objeto = datetime.strptime(vencimento_str, '%Y-%m-%d').date()
