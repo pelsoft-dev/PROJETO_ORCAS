@@ -5,7 +5,13 @@ from datetime import datetime, timedelta
 import hashlib
 import plotly.graph_objects as go
 import streamlit.components.v1 as components
-from supabase import Client
+
+# import orcas_v01_retornodomp as retornodomp
+
+# from supabase import Client
+
+from supabase import create_client, Client
+
 import random
 import smtplib  # Adicione este
 from email.mime.text import MIMEText # Adicione este
@@ -222,6 +228,7 @@ status_retorno = st.query_params.get("status", [None])[0]
 if status_retorno:
     retornodomp.tratar_retorno(supabase, None)
     st.stop()
+
 # FIM INSERÇÃO DIA 16/06/2026
 
 # --- 4. LOGIN ---
