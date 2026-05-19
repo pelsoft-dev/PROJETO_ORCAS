@@ -219,7 +219,7 @@ def parse_moeda(t):
 # INÍCIO INSERÇÃO DIA 16/05/2026
 # --- DEFINE ID DO USUÁRIO LOGADO ---
 # Recupera o identificador salvo na sessão durante o login
-ID_USUARIO_LOGADO = str(st.session_state.get('CHAVE_MESTRA_UUID', ''))
+# ID_USUARIO_LOGADO = str(st.session_state.get('CHAVE_MESTRA_UUID', ''))
 
 # --- INTERCEPTAÇÃO DE RETORNO DO MERCADO PAGO ---
 import orcas_v01_retornodomp as retornodomp
@@ -228,6 +228,9 @@ status_retorno = st.query_params.get("status", [None])[0]
 if status_retorno:
     retornodomp.tratar_retorno(supabase, None)
     st.stop()
+
+if not st.session_state.get('CHAVE_MESTRA_UUID'):
+    st.session_state['CHAVE_MESTRA_UUID'] = ''
 
 # FIM INSERÇÃO DIA 16/06/2026
 
@@ -417,7 +420,14 @@ if not st.session_state.logado:
 
 # --- 5. ESTADO E DADOS ---
 
-import orcas_v01_gestao as gestao
+# INÍCIO INSERÇÃO DIA 16/05/2026
+# --- SEÇÃO DE GESTÃO ---
+if st.session_state.get("logado"):
+    import orcas_v01_gestao as gestao
+    gestao.exibir_gestao(supabase, ID_USUARIO_LOGADO)
+else:
+    st.warning("Faça login para acessar a tela de gestão.")
+# FIM INSERÇÃO DIA 16/05/2026
 
 ID_USUARIO_LOGADO = str(st.session_state.get('CHAVE_MESTRA_UUID', ''))
 vencimento_str = st.session_state.get('vencimento', '2026-01-01')
