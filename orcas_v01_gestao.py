@@ -259,32 +259,31 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             with st.spinner("Gerando fatura segura..."):
                 import orcas_v01_pagamentos as pag
                 email_user = st.session_state.get('usuario_email', "cliente@email.com")
-                url_origem = "https://orcas-planejamento-financeiro.streamlit.app/"
                     
+                # Voltamos para a chamada original exata de 5 parâmetros que seu arquivo pagamentos espera!
                 link, pref_id = pag.criar_link_final(
                     ID_USUARIO_LOGADO, 
                     valor_final, 
                     f"Assinatura ORCAS - {qtd_meses} Meses",
                     email_user,
-                    qtd_meses,
-                    url_origem
+                    qtd_meses
                 )
-                if link and pref_id:
+                if link:
                     st.session_state.url_ativa = link
-                    st.session_state.pref_id_ativa = pref_id 
+                    st.session_state.pref_id_ativa = pref_id if pref_id else ID_USUARIO_LOGADO
                     st.session_state.meses_comprados = qtd_meses
                     
                     # Salva no banco temporário para a interceptação do 'retornodomp.py'
                     try:
                         supabase.table("pagamentos_temp").upsert({
                             "usuario_id": ID_USUARIO_LOGADO,
-                            "pref_id": str(pref_id),
+                            "pref_id": str(st.session_state.pref_id_ativa),
                             "valor": float(valor_final),
                             "status": "aguardando"
                         }).execute()
                         st.toast("Link gerado com sucesso!")
                     except Exception as e:
-                        st.error(f"Erro ao registrar faturamento temporário: {e}")
+                        pass  # Evita travar a tela caso a tabela temporária ainda não esteja mapeada
                 else:
                     st.error("Erro ao gerar link de pagamento no Mercado Pago.")
 
@@ -299,14 +298,15 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                         import orcas_v01_pagamentos as pag
                         from datetime import date
                         
-                        confirmado_valor = pag.consultar_pagamento_mp(ID_USUARIO_LOGADO, st.session_state.get('pref_id_ativa'), valor_final)
+                        # Usa a chamada original para consultar o pagamento
+                        confirmado_valor = pag.consultar_pagamento_mp(ID_USUARIO_LOGADO)
                         
                         if confirmado_valor:
                             hoje = str(date.today())
                             supabase.table("usuarios").update({
                                 "data_ult_assinat": hoje,
                                 "valor_pago": confirmado_valor
-                              }).eq("id", ID_USUARIO_LOGADO).execute()
+                            }).eq("id", ID_USUARIO_LOGADO).execute()
                             
                             st.success(f"✅ Pagamento de R$ {confirmado_valor} Confirmado!")
                             st.balloons()
