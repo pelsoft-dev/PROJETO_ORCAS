@@ -56,27 +56,31 @@ def criar_link_final(user_id, valor, descricao, email_usuario, qtd_meses, url_or
 
 def consultar_pagamento_mp(user_id, pref_id=None, valor_esperado=None):
     """
-    Consulta o Mercado Pago e retorna o valor pago validando metadados importantes.
+    Consulta o Mercado Pago e retorna o valor pago apenas se:
+    - for do usuário correto,
+    - corresponder à preferência atual,
+    - tiver sido criado nas últimas 24h,
+    - e o valor for exatamente o esperado.
     """
     try:
         token = st.secrets.get("MP_ACCESS_TOKEN")
         headers = {"Authorization": f"Bearer {token}"}
-        url = "https://api.mercadopago.com/v1/payments/search?status=approved&sort=date_created&criteria=desc&limit=15"
+        url = "https://api.mercadopago.com/v1/payments/search?status=approved&sort=date_created&criteria=desc&limit=10"
         res = requests.get(url, headers=headers).json()
 
         if res.get('results'):
             for pag in res['results']:
-                # 1. Valida Usuário (External Reference)
+                # 1. Usuário correto
                 if str(pag.get('external_reference')) != str(user_id):
                     continue
-                # 2. Valida Preferência de forma correta usando o campo nativo da API de busca
-                if pref_id and str(pag.get('preference_id')) != str(pref_id):
+                # 2. Preferência correta
+                if pref_id and pag.get('order', {}).get('id') != pref_id:
                     continue
-                # 3. Pagamento recente (Últimas 24h)
+                # 3. Pagamento recente
                 data_pag = datetime.strptime(pag['date_created'][:19], "%Y-%m-%dT%H:%M:%S")
                 if datetime.utcnow() - data_pag > timedelta(hours=24):
                     continue
-                # 4. Valida Valor Esperado
+                # 4. Valor correto
                 valor_pago = pag.get('transaction_amount')
                 if valor_esperado is not None and round(valor_pago, 2) != round(valor_esperado, 2):
                     continue

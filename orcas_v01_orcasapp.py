@@ -217,22 +217,20 @@ def parse_moeda(t):
         return 0.0
 
 # INÍCIO INSERÇÃO DIA 16/05/2026
-# --- DEFINE ID DO USUÁRIO LOGADO ---
-# Recupera o identificador salvo na sessão durante o login
-# ID_USUARIO_LOGADO = str(st.session_state.get('CHAVE_MESTRA_UUID', ''))
-
-# --- INTERCEPTAÇÃO DE RETORNO DO MERCADO PAGO ---
+# INÍCIO INSERÇÃO DIA 16/05/2026 --- INTERCEPTAÇÃO DE RETORNO DO MERCADO PAGO
 import orcas_v01_retornodomp as retornodomp
 
-status_retorno = st.query_params.get("status", [None])[0]
-if status_retorno:
-    retornodomp.tratar_retorno(supabase, None)
+# Captura limpa dos parâmetros no padrão do Streamlit moderno
+status_retorno = st.query_params.get("status")
+pref_id = st.query_params.get("preference_id") or st.query_params.get("collection_id")
+
+if status_retorno and pref_id:
+    retornodomp.tratar_retorno(supabase, pref_id, status_retorno)
     st.stop()
 
 if not st.session_state.get('CHAVE_MESTRA_UUID'):
     st.session_state['CHAVE_MESTRA_UUID'] = ''
-
-# FIM INSERÇÃO DIA 16/06/2026
+# FIM INSERÇÃO DIA 16/05/2026
 
 # --- 4. LOGIN ---
 if 'logado' not in st.session_state:
@@ -420,15 +418,6 @@ if not st.session_state.logado:
 
 # --- 5. ESTADO E DADOS ---
 
-# INÍCIO INSERÇÃO DIA 16/05/2026
-# --- SEÇÃO DE GESTÃO ---
-if st.session_state.get("logado"):
-    import orcas_v01_gestao as gestao
-    gestao.exibir_gestao(supabase, ID_USUARIO_LOGADO)
-else:
-    st.warning("Faça login para acessar a tela de gestão.")
-# FIM INSERÇÃO DIA 16/05/2026
-
 ID_USUARIO_LOGADO = str(st.session_state.get('CHAVE_MESTRA_UUID', ''))
 vencimento_str = st.session_state.get('vencimento', '2026-01-01')
 venc_dt_objeto = datetime.strptime(vencimento_str, '%Y-%m-%d').date()
@@ -537,6 +526,21 @@ elif st.session_state.escolha == "🗓️ Projetar" and not bloqueado:
 elif st.session_state.escolha == "✅ Conciliação" and not bloqueado:
     conc.exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moeda)
 elif st.session_state.escolha == "⚙️ Gestão":
+    import orcas_v01_gestao as gestao
+
+    # Passamos exatamente TODAS as variáveis que a sua função pede, incluindo a v_mensal_total no final!
+    gestao.exibir_gestao(
+        supabase, 
+        ID_USUARIO_LOGADO, 
+        projs, 
+        d_ini_db, 
+        d_fim_db, 
+        s_db, 
+        format_moeda, 
+        parse_moeda, 
+        security,
+        v_mensal_total
+    )
     # Gestão sempre acessível para permitir pagamento
     gestao.exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, format_moeda, parse_moeda, security)
 elif st.session_state.escolha == "📊 Admin" and not bloqueado:

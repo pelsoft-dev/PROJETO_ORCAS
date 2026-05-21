@@ -4,7 +4,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 
-def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, format_moeda, parse_moeda, security):
+def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, format_moeda, parse_moeda, security, v_mensal_total):
     """
     Sub-rotina da Tela Gestão - Controle de Planos, Saldos e Assinatura.
     """
@@ -200,96 +200,97 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         st.info("💡 Selecione um plano acima para editar ou digite um novo nome para configurar.")
 
 # --- BLOCO DE SELEÇÃO DE PAGAMENTO ---
-st.write("---")
-st.subheader("💳 Finalizar Assinatura")
+    st.write("---")
+    st.subheader("💳 Finalizar Assinatura")
 
-tipo_pagamento = st.radio(
-    "Escolha o período de renovação:",
-    ["Mensal (Sem desconto)", "6 Meses (5% de desconto)", "12 Meses (11% de desconto)"],
-    horizontal=True, key="radio_pag_final_v5"
-)
-
-if "6 Meses" in tipo_pagamento:
-    qtd_meses = 6
-    v_base = (v_mensal_total * 6) * (1 - DESC_6_MESES)
-    label_desc = "5% OFF"
-elif "12 Meses" in tipo_pagamento:
-    qtd_meses = 12
-    v_base = (v_mensal_total * 12) * (1 - DESC_12_MESES)
-    label_desc = "11% OFF"
-else:
-    qtd_meses = 1
-    v_base = v_mensal_total
-    label_desc = "Valor Padrão"
-
-st.write("")
-cupom_in = st.text_input("Possui um Cupom de Desconto?", key="cp_gest_final_v3").upper()
-desc_extra = 0.0
-if cupom_in:
-    try:
-        res_c = supabase.table("cupons").select("*").eq("codigo", cupom_in).eq("ativo", True).execute()
-        if res_c.data:
-            d = res_c.data[0]
-            v_p = float(d.get('percentual_desconto', 0) or 0)
-            v_a = float(d.get('valor_desconto', 0) or 0)
-            desc_extra = v_base * (v_p / 100) if v_p > 0 else v_a
-            st.success("✅ Cupom aplicado!")
-        else:
-            st.error("❌ Cupom inválido.")
-    except:
-        pass
-
-valor_final = max(v_base - desc_extra, 1.00)
-
-col_res1, col_res2 = st.columns([2, 1])
-with col_res1:
-    st.write(f"**Total a pagar:** :green[R$ {valor_final:.2f}] ({label_desc})")
-
-with col_res2:
-    import orcas_v01_pagamentos as pag
-    email_user = st.session_state.get('usuario_email', "cliente@email.com")
-
-    # URL principal do app (sem submódulo)
-    url_origem = "https://orcas-planejamento-financeiro.streamlit.app/"
-
-    # Cria link de pagamento final
-    link, pref_id = pag.criar_link_final(
-        ID_USUARIO_LOGADO,
-        valor_final,
-        f"Assinatura ORCAS - {qtd_meses} Meses",
-        email_user,
-        qtd_meses,
-        url_origem
+    tipo_pagamento = st.radio(
+        "Escolha o período de renovação:",
+        ["Mensal (Sem desconto)", "6 Meses (5% de desconto)", "12 Meses (11% de desconto)"],
+        horizontal=True, key="radio_pag_final_v5"
     )
 
-    if link and pref_id:
-        st.session_state.url_ativa = link
-        st.session_state.pref_id_ativa = pref_id
-        st.session_state.valor_esperado = valor_final
-        st.session_state.meses_comprados = qtd_meses
-        st.toast("Link gerado com sucesso!")
-
-        # --- SALVA REGISTRO TEMPORÁRIO (apenas o valor final) ---
-        try:
-            supabase.table("pagamentos_temp").upsert({
-                "usuario_id": ID_USUARIO_LOGADO,
-                "pref_id": str(pref_id),
-                "valor": float(valor_final),
-                "status": "aguardando"
-            }).execute()
-        except Exception as e:
-            st.error(f"Erro ao registrar pagamento temporário: {e}")
+    if "6 Meses" in tipo_pagamento:
+        qtd_meses = 6
+        v_base = (v_mensal_total * 6) * (1 - DESC_6_MESES)
+        label_desc = "5% OFF"
+    elif "12 Meses" in tipo_pagamento:
+        qtd_meses = 12
+        v_base = (v_mensal_total * 12) * (1 - DESC_12_MESES)
+        label_desc = "11% OFF"
     else:
-        st.error("Erro ao gerar link.")
+        qtd_meses = 1
+        v_base = v_mensal_total
+        label_desc = "Valor Padrão"
 
-    # --- BOTÃO DE PAGAMENTO ---
+    st.write("")
+    cupom_in = st.text_input("Possui um Cupom de Desconto?", key="cp_gest_final_v3").upper()
+    desc_extra = 0.0
+    if cupom_in:
+        try:
+            res_c = supabase.table("cupons").select("*").eq("codigo", cupom_in).eq("ativo", True).execute()
+            if res_c.data:
+                d = res_c.data[0]
+                v_p = float(d.get('percentual_desconto', 0) or 0)
+                v_a = float(d.get('valor_desconto', 0) or 0)
+                desc_extra = v_base * (v_p / 100) if v_p > 0 else v_a
+                st.success("✅ Cupom aplicado!")
+            else:
+                st.error("❌ Cupom inválido.")
+        except:
+            pass
+
+    valor_final = max(v_base - desc_extra, 1.00)
+
+    col_res1, col_res2 = st.columns([2, 1])
+    with col_res1:
+        st.write(f"**Total a pagar:** :green[R$ {valor_final:.2f}] ({label_desc})")
+
+    with col_res2:
+        import orcas_v01_pagamentos as pag
+        email_user = st.session_state.get('usuario_email', "cliente@email.com")
+        url_origem = "https://orcas-planejamento-financeiro.streamlit.app/"
+
+        # O PROCESSO SÓ ACONTECE DE VERDADE QUANDO CLICA NO BOTÃO VERDE
+        if st.button("🚀 GERAR LINK DE PAGAMENTO", use_container_width=True):
+            with st.spinner("Gerando sua fatura segura..."):
+                link, pref_id = pag.criar_link_final(
+                    ID_USUARIO_LOGADO,
+                    valor_final,
+                    f"Assinatura ORCAS - {qtd_meses} Meses",
+                    email_user,
+                    qtd_meses,
+                    url_origem
+                )
+
+                if link and pref_id:
+                    st.session_state.url_ativa = link
+                    st.session_state.pref_id_ativa = pref_id
+                    st.session_state.valor_esperado = valor_final
+                    st.session_state.meses_comprados = qtd_meses
+                    
+                    # Salva o registro temporário no banco UMA ÚNICA VEZ por clique
+                    try:
+                        supabase.table("pagamentos_temp").upsert({
+                            "usuario_id": ID_USUARIO_LOGADO,
+                            "pref_id": str(pref_id),
+                            "valor": float(valor_final),
+                            "status": "aguardando"
+                        }).execute()
+                        st.toast("Link gerado! Use o botão azul abaixo.")
+                    except Exception as e:
+                        st.error(f"Erro ao registrar faturamento: {e}")
+                else:
+                    st.error("Erro ao gerar link de pagamento no Mercado Pago.")
+
+    # Exibe o botão real de redirecionamento de forma limpa apenas se a URL ativa existir
     if "url_ativa" in st.session_state:
-        st.link_button("🔵 PAGAR AGORA (MERCADO PAGO)", st.session_state.url_ativa, use_container_width=True)
-        st.info("Clique em 'PAGAR AGORA' para abrir o Mercado Pago e finalizar o pagamento.")
+        st.write("---")
+        st.link_button("🔵 CLIQUE AQUI PARA IR AO MERCADO PAGO", st.session_state.url_ativa, use_container_width=True)
+        st.info("Ao clicar no botão azul acima, você irá para o ambiente seguro. Após concluir o Pix/Cartão, basta clicar em 'Voltar para a loja' para ativar sua conta.")
 
     # Rodapé Integral
     st.markdown("""
     <div style="font-size: 12px; color: #333; margin-top: 20px; text-align: justify; line-height: 1.6; border-top: 1px solid #eee; padding-top: 10px;">
-    Sua Assinatura ORCAS BABY mensal custa R$ 19,90 e contempla 2 Planos de 24 meses cada um, mas se você quiser ou necessitar, é possível aumentar o período de um Plano em blocos adicionais de 12 meses tendo um acréscimo de R$ 6,40 para cada 12 meses adicionais. Para aumentar o número de Planos (Padrão - 24 meses), o valor é de R$ 12,80 por Plano adicional. Para receber um Resumo Diário das análises e pendências como, o que preciso pagar e receber hoje, o que ainda está em aberto, quanto já gastei de supermercado até hoje, quanto já gastei nessa reforma, etc de seu Plano via Whatsapp ou E-mail terá um acréscimo de R$ 9,85 por Plano.
+    Sua Assinatura ORCAS BABY mensal custa R$ 19,90 e contempla 2 Planos de 24 meses cada um, mas se você quiser ou necessitar, é possível aumentar o período de um Plano em blocos adicionais of 12 meses tendo um acréscimo de R$ 6,40 para cada 12 meses adicionais. Para aumentar o número de Planos (Padrão - 24 meses), o valor é de R$ 12,80 por Plano adicional. Para receber um Resumo Diário das análises e pendências como, o que preciso pagar e receber hoje, o que ainda está em aberto, quanto já gastei de supermercado até hoje, quanto já gastei nessa reforma, etc de seu Plano via Whatsapp ou E-mail terá um acréscimo de R$ 9,85 por Plano.
     </div>
     """, unsafe_allow_html=True)
