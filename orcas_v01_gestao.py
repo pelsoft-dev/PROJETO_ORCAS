@@ -262,14 +262,20 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             with st.spinner("Gerando fatura segura..."):
                 import orcas_v01_pagamentos as pag
                 email_user = st.session_state.get('usuario_email', "cliente@email.com")
-                    
-                link, pref_id = pag.criar_link_final(
-                    ID_USUARIO_LOGADO, 
-                    valor_final, 
-                    f"Assinatura ORCAS - {qtd_meses} Meses",
-                    email_user,
-                    qtd_meses
-                )
+
+                try:
+                    link, pref_id = pag.criar_link_final(
+                        ID_USUARIO_LOGADO, 
+                        valor_final, 
+                        f"Assinatura ORCAS - {qtd_meses} Meses",
+                        email_user,
+                        qtd_meses,
+                        None
+                    )
+                except TypeError as e:
+                    st.error(f"Erro de tipo detectado: {e}")
+                    # Isso vai printar na tela se faltou argumento ou se o retorno veio errado
+
                 if link:
                     st.session_state.url_ativa = link
                     st.session_state.pref_id_ativa = pref_id if pref_id else ID_USUARIO_LOGADO

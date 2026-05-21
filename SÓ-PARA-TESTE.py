@@ -1,318 +1,590 @@
 import streamlit as st
-import streamlit.components.v1
 import pandas as pd
+import numpy as np
 from datetime import datetime, timedelta
-from dateutil.relativedelta import relativedelta
+import hashlib
+import plotly.graph_objects as go
+import streamlit.components.v1 as components
 
-def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, format_moeda, parse_moeda, security):
-    """
-    Sub-rotina da Tela Gestão - Controle de Planos, Saldos e Assinatura.
-    """
-    st.markdown('<div class="titulo-tela">Gestão de Planos e Assinaturas</div>', unsafe_allow_html=True)
-    
-    hoje = datetime.now().date()
-    uid_gestao = ID_USUARIO_LOGADO
+# import orcas_v01_retornodomp as retornodomp
 
-    # Alteração 1: Valor padrão para evitar NameError
-    v_mensal_total = 19.90 
+# from supabase import Client
 
-    # --- REGRAS DE NEGÓCIO CENTRALIZADAS ---
-    DESC_6_MESES = 0.05  # 5%
-    DESC_12_MESES = 0.11 # 11%
+from supabase import create_client, Client
 
-    if st.session_state.get('msg_sucesso'):
-        st.success(st.session_state.msg_sucesso)
-        st.session_state.msg_sucesso = None
+import random
+import smtplib  # Adicione este
+from email.mime.text import MIMEText # Adicione este
+import os
 
-    col_l1_1, col_l1_2 = st.columns(2)
-    lista_gestao = [""] + projs
-    
-    plano_sel = col_l1_1.selectbox("Selecione um Plano já existente:", lista_gestao)
-    
-    if plano_sel != "" and plano_sel != st.session_state.get('projeto_ativo'):
-        st.session_state.projeto_ativo = plano_sel
-        st.session_state.escolha = "⚙️ Gestão" 
-        if 'tmp_fim_plano' in st.session_state: del st.session_state.tmp_fim_plano
-        st.rerun()
+# --- 1. IMPORTAÇÃO DOS MÓDULOS EXTERNOS ---
+#  import orcas_v01_gestao as gestao  - Está sendo importado depois do LOGIN
+import orcas_v01_dashboard as dash
+import orcas_v01_lancamentos as lanc
+import orcas_v01_projetar as proj
+import orcas_v01_conciliacao as conc
+import orcas_v01_admin as adm
+import orcas_v01_pagamentos as pag
 
-    nome_plano_input = col_l1_2.text_input(
-        "Nome do Plano carregado ou Nome para criação de um novo Plano", 
-        value=st.session_state.projeto_ativo if st.session_state.projeto_ativo else ""
-    )
-
-    # Bloco de configuração de plano (Mantido integralmente)
-    if nome_plano_input and nome_plano_input.strip() != "":
-        col_l2_1, col_l2_2 = st.columns(2)
+# --- FUNÇÃO DE ENVIO INTEGRADA (Versão Corrigida para Porta 587/TLS) ---
+def disparar_email_codigo(destinatario, codigo):
+    try:
+        # Puxa dos Secrets do Streamlit
+        server_host = st.secrets["SMTP_SERVER"]
+        server_port = int(st.secrets["SMTP_PORT"])
+        user_email = st.secrets["SMTP_USER"]
+        pass_email = st.secrets["SMTP_PASS"]
         
-        data_inicio_padrao = d_ini_db if d_ini_db else hoje.replace(day=1)
-        if not d_fim_db:
-            data_fim_padrao = (data_inicio_padrao + relativedelta(months=23)).replace(day=1) + relativedelta(months=1, days=-1)
-        else:
-            data_fim_padrao = d_fim_db
+        msg = MIMEText(f"Seu código de verificação ORCAS é: {codigo}. Validade: 10 minutos.")
+        msg['Subject'] = f"Código de Verificação - {codigo}"
+        msg['From'] = f"ORCAS App <{user_email}>"
+        msg['To'] = destinatario
 
-        if 'tmp_fim_plano' not in st.session_state:
-            st.session_state.tmp_fim_plano = data_fim_padrao
+        # MUDANÇA AQUI: smtplib.SMTP em vez de SMTP_SSL
+        server = smtplib.SMTP(server_host, server_port)
+        server.starttls() # Inicia a segurança TLS necessária para a porta 587
+        server.login(user_email, pass_email)
+        server.sendmail(user_email, destinatario, msg.as_string())
+        server.quit()
+        
+        return True
+    except Exception as e:
+        st.error(f"Erro ao disparar e-mail: {e}")
+        return False
 
-        d_ini_g = col_l2_1.date_input("Data de Início:", value=data_inicio_padrao, format="DD/MM/YYYY")
-        
-        col_fim, col_btn_per = col_l2_2.columns(2)
-        
-        diff_edit = relativedelta(st.session_state.tmp_fim_plano, d_ini_g)
-        meses_atuais = (diff_edit.years * 12) + diff_edit.months + 1
-        if meses_atuais not in [24, 36, 48, 60]:
-            meses_atuais = 24
+# --- 2. SEGURANÇA E CONEXÃO ---
+try:
+    import orcas_v01_security as security
+    supabase: Client = security.supabase
+except Exception as e:
+    st.error(f"Erro de conexão: Verifique o arquivo security.py. {e}")
+    st.stop()
 
-        with col_btn_per:
-            periodo_slider = st.select_slider(
-                "Aumentar Período (em 12 meses)",
-                options=[24, 36, 48, 60],
-                value=meses_atuais
-            )
-            nova_data_fim = (d_ini_g + relativedelta(months=periodo_slider - 1))
-            nova_data_fim = (nova_data_fim.replace(day=1) + relativedelta(months=1, days=-1))
-            st.session_state.tmp_fim_plano = nova_data_fim
+# --- 3. CONFIGURAÇÃO E ESTILO ---
+st.set_page_config(
+    page_title="ORCAS - Gestão Financeira", 
+    page_icon="🐋", 
+    layout="wide", 
+    initial_sidebar_state="expanded"
+)
 
-        d_fim_g = col_fim.date_input("Data de Término:", value=st.session_state.tmp_fim_plano, format="DD/MM/YYYY", disabled=True)
+def ir_para_o_topo():
+    components.html("""<script>window.parent.document.getElementById('topo-ancora').scrollIntoView();</script>""", height=0)
 
-        col_l3_1, col_l3_2 = st.columns(2)
-        valor_saldo_exibir = format_moeda(s_db) if s_db is not None else "0,00"
-        saldo_input = col_l3_1.text_input("Saldo Inicial:", value=valor_saldo_exibir)
-        
-        meses_total_edit = (st.session_state.tmp_fim_plano.year - d_ini_g.year) * 12 + (st.session_state.tmp_fim_plano.month - d_ini_g.month) + 1
-        col_l3_2.text_input("Período do Plano:", value=f"{meses_total_edit} meses", disabled=True)
-
-        col_l4_1, col_l4_2 = st.columns(2)
-        
-        res_cfg_plano = supabase.table("config_projetos").select("*").eq("projeto_id", nome_plano_input).eq("usuario_id", uid_gestao).execute()
-        zap_plano_db = res_cfg_plano.data[0].get('zap_ativo', 0) if res_cfg_plano.data else 0
-        email_plano_db = res_cfg_plano.data[0].get('email_ativo', 0) if res_cfg_plano.data else 0
-        
-        with col_l4_1:
-            st.write("") 
-            st.write("") 
-            ativar_zap_atual = st.checkbox("Adicionar o Resumo Diário ORCAS via Whatsapp", value=(zap_plano_db == 1))
-            ativar_email_atual = st.checkbox("Adicionar o Resumo Diário ORCAS via E-mail", value=(email_plano_db == 1))
-        
-        res_all = supabase.table("config_projetos").select("*").eq("usuario_id", uid_gestao).execute()
-        dados_db = res_all.data if res_all.data else []
-        
-        planos_consolidar = {}
-        relatorios_consolidar = {}
-        
-        for p in dados_db:
-            d1 = datetime.strptime(p['data_ini'], '%Y-%m-%d').date()
-            d2 = datetime.strptime(p['data_fim'], '%Y-%m-%d').date()
-            duracao = (d2.year - d1.year) * 12 + (d2.month - d1.month) + 1
-            planos_consolidar[p['projeto_id']] = duracao
-            rel_ativo = 1 if (p.get('zap_ativo', 0) == 1 or p.get('email_ativo', 0) == 1) else 0
-            relatorios_consolidar[p['projeto_id']] = rel_ativo
-
-        planos_consolidar[nome_plano_input] = meses_total_edit
-        relatorios_consolidar[nome_plano_input] = 1 if (ativar_zap_atual or ativar_email_atual) else 0
-
-        qtd_total_planos = len(planos_consolidar)
-        qtd_relatorios_totais = sum(relatorios_consolidar.values())
-        
-        c24 = sum(1 for m in planos_consolidar.values() if m <= 24)
-        c36 = sum(1 for m in planos_consolidar.values() if m == 36)
-        c48 = sum(1 for m in planos_consolidar.values() if m == 48)
-        c60 = sum(1 for m in planos_consolidar.values() if m >= 60)
-        
-        base_baby = 19.90 
-        custo_relatorio_total = qtd_relatorios_totais * 9.85
-        add_planos_extra = (qtd_total_planos - 2) * 12.80 if qtd_total_planos > 2 else 0.00
-        
-        v_p36 = c36 * 6.40
-        v_p48 = c48 * 12.80
-        v_p60 = c60 * 19.20
-        
-        v_mensal_total = base_baby + custo_relatorio_total + add_planos_extra + v_p36 + v_p48 + v_p60
-        v_6meses = (v_mensal_total * 6) * 0.95
-        v_12meses = (v_mensal_total * 12) * 0.89 
-
-        resumo_html = f"""
-        <div style="background-color: #87CEFA; padding: 15px; border-radius: 5px; color: black; font-family: sans-serif; border: 1px solid #1E90FF;">
-            <div style="font-weight: bold; font-size: 16px; margin-bottom: 10px;">Valor da Assinatura Mensal: R$ {format_moeda(v_mensal_total)}</div>
-            <div style="margin-left: 20px; font-size: 14px;">
-                Assinatura do Orcas Baby: <span style="float: right;">19,90</span><br>
-                {qtd_relatorios_totais} Resumo(s) Diário(s) via Whatsapp / E-mail: <span style="float: right;">{format_moeda(custo_relatorio_total)}</span><br>
-                Usuário com {qtd_total_planos} Planos: <span style="float: right;">{format_moeda(add_planos_extra)}</span><br>
-                {c24} Plano(s) com 24 meses: <span style="float: right;">0,00</span><br>
-                {c36} Plano(s) com 36 meses: <span style="float: right;">{format_moeda(v_p36)}</span><br>
-                {c48} Plano(s) com 48 meses: <span style="float: right;">{format_moeda(v_p48)}</span><br>
-                {c60} Plano(s) com 60 meses: <span style="float: right;">{format_moeda(v_p60)}</span>
-            </div>
-            <div style="margin-top: 15px; font-weight: bold; border-top: 1px solid #5f9ea0; padding-top: 10px;">
-                PROMOÇÃO:<br>
-                Valor da Assinatura p/ 6 meses (-5%): R$ {format_moeda(v_6meses)}<br>
-                Valor da Assinatura p/ 12 meses (-11%): R$ {format_moeda(v_12meses)}
-            </div>
-        </div>
+# FUNÇÃO PARA RECOLHER O MENU VIA CLIQUE NO BOTÃO NATIVO
+def recolher_menu_via_clique():
+    components.html(
         """
-        col_l4_2.markdown(resumo_html, unsafe_allow_html=True)
-
-        st.divider()
-
-        btn_col1, btn_col2 = st.columns(2)
-        if btn_col1.button("Salvar alterações ou Criar o novo Plano", use_container_width=True):
-            dados_p = {
-                "projeto_id": nome_plano_input, 
-                "usuario_id": uid_gestao, 
-                "saldo_inicial": parse_moeda(saldo_input),
-                "data_ini": d_ini_g.strftime('%Y-%m-%d'), 
-                "data_fim": st.session_state.tmp_fim_plano.strftime('%Y-%m-%d'),
-                "zap_ativo": 1 if ativar_zap_atual else 0,
-                "email_ativo": 1 if ativar_email_atual else 0
-            }
-            res_p = supabase.table("config_projetos").select("id").eq("projeto_id", nome_plano_input).eq("usuario_id", uid_gestao).execute()
-            if res_p.data: dados_p["id"] = res_p.data[0]["id"]
-            
-            supabase.table("config_projetos").upsert(dados_p).execute()
-            supabase.table("lancamentos")\
-                .delete()\
-                .eq("projeto_id", nome_plano_input)\
-                .eq("usuario_id", uid_gestao)\
-                .gt("data", st.session_state.tmp_fim_plano.strftime('%Y-%m-%d'))\
-                .execute()
-            if 'tmp_fim_plano' in st.session_state: del st.session_state.tmp_fim_plano
-            st.session_state.projeto_ativo = nome_plano_input
-            st.session_state.msg_sucesso = "Configurações salvas com sucesso!"
-            st.rerun()
-
-        if st.session_state.get('projeto_ativo'):
-            if btn_col2.button("Excluir Plano", type="primary", use_container_width=True):
-                st.session_state.confirmar_exclusao_plano = True
-
-        if st.session_state.get('confirmar_exclusao_plano', False):
-            st.error(f"Deseja mesmo excluir o plano {st.session_state.projeto_ativo}?")
-            ce1, ce2 = st.columns(2)
-            if ce1.button("CONFIRMAR EXCLUSÃO"):
-                supabase.table("lancamentos").delete().eq("projeto_id", st.session_state.projeto_ativo).eq("usuario_id", uid_gestao).execute()
-                supabase.table("config_projetos").delete().eq("projeto_id", st.session_state.projeto_ativo).eq("usuario_id", uid_gestao).execute()
-                st.session_state.projeto_ativo = None
-                st.session_state.confirmar_exclusao_plano = False
-                st.rerun()
-            if ce2.button("CANCELAR"):
-                st.session_state.confirmar_exclusao_plano = False
-                st.rerun()
-    else:
-        # Alteração 2: Apenas um aviso, mas o código continua para o bloco de pagamento
-        st.info("💡 Selecione um plano acima para editar ou digite um novo nome para configurar.")
-
-# --- BLOCO DE SELEÇÃO DE PAGAMENTO (Agora fora da condição principal para aparecer sempre) ---
-    st.write("---")
-    st.subheader("💳 Finalizar Assinatura")
-    
-    tipo_pagamento = st.radio(
-        "Escolha o período de renovação:",
-        ["Mensal (Sem desconto)", "6 Meses (5% de desconto)", "12 Meses (11% de desconto)"],
-        horizontal=True, key="radio_pag_final_v5"
+        <script>
+            var fechar = window.parent.document.querySelector('button[aria-label="Close sidebar"]');
+            if (fechar) { fechar.click(); }
+        </script>
+        """,
+        height=0,
     )
 
-    if "6 Meses" in tipo_pagamento:
-        qtd_meses = 6
-        v_base = (v_mensal_total * 6) * (1 - DESC_6_MESES)
-        label_desc = "5% OFF"
-    elif "12 Meses" in tipo_pagamento:
-        qtd_meses = 12
-        v_base = (v_mensal_total * 12) * (1 - DESC_12_MESES)
-        label_desc = "11% OFF"
-    else:
-        qtd_meses = 1
-        v_base = v_mensal_total
-        label_desc = "Valor Padrão"
-
-    st.write("")
-    cupom_in = st.text_input("Possui um Cupom de Desconto?", key="cp_gest_final_v3").upper()
-    desc_extra = 0.0
-    if cupom_in:
-        try:
-            res_c = supabase.table("cupons").select("*").eq("codigo", cupom_in).eq("ativo", True).execute()
-            if res_c.data:
-                d = res_c.data[0]
-                v_p = float(d.get('percentual_desconto', 0) or 0)
-                v_a = float(d.get('valor_desconto', 0) or 0)
-                desc_extra = v_base * (v_p / 100) if v_p > 0 else v_a
-                st.success("✅ Cupom aplicado!")
-            else:
-                st.error("❌ Cupom inválido.")
-        except: pass
-
-    valor_final = max(v_base - desc_extra, 1.00)
-
-    # CSS PARA CORES
-    st.markdown("""
-        <style>
-        div.stButton > button:has(div:contains("🚀")) { background-color: #28a745 !important; color: white !important; border: none !important; }
-        div.stButton > button:has(div:contains("CLIQUE")) { background-color: #009EE3 !important; color: white !important; border: none !important; font-weight: bold !important; }
-        div.stButton > button:has(div:contains("🔍")) { background-color: #f0f2f6 !important; color: #31333F !important; border: 1px solid #dcdfe6 !important; }
-        </style>
-    """, unsafe_allow_html=True)
-
-    col_res1, col_res2 = st.columns([2, 1])
-    with col_res1:
-        st.write(f"**Total a pagar:** :green[R$ {valor_final:.2f}] ({label_desc})")
+st.markdown("""
+    <style>
+    /* 1. Oculta menus nativos e footer */
+    #MainMenu {visibility: hidden;} 
+    footer {visibility: hidden;}
+    .stAppDeployButton {display:none !important;}
+    [data-testid="stStatusWidget"] {display:none !important;}
     
-    with col_res2:
-        if st.button("🚀 PAGAR AGORA", use_container_width=True):
-            import orcas_v01_pagamentos as pag
-            email_user = st.session_state.get('usuario_email', "cliente@email.com")
-            
-            link, pref_id = pag.criar_link_final(
-                ID_USUARIO_LOGADO, 
-                valor_final, 
-                f"Assinatura ORCAS - {qtd_meses} Meses",
-                email_user,
-                qtd_meses
-            )
-            if link:
-                st.session_state.url_ativa = link
-                st.session_state.pref_id_ativa = pref_id # Salva o ID da preferência para consulta
-                st.session_state.meses_comprados = qtd_meses
-                st.toast("Link gerado com sucesso!")
-            else:
-                st.error("Erro ao gerar link.")
+    /* 2. SOLUÇÃO PARA O BOTÃO >> (MENU CELULAR) */
+    [data-testid="stSidebarCollapsedControl"] {
+        top: 60px !important; 
+        left: 20px !important;
+        background-color: #1E3A8A !important; /* Azul ORCAS */
+        border-radius: 10px !important;
+        width: 45px !important;
+        height: 45px !important;
+        display: flex !important;
+        z-index: 9999999 !important;
+        box-shadow: 2px 2px 10px rgba(0,0,0,0.3) !important;
+    }
 
-        if "url_ativa" in st.session_state:
-            st.link_button("🔵 CLIQUE PARA PAGAR (MERCADO PAGO)", st.session_state.url_ativa, use_container_width=True)
-            
-            st.write("")
+    /* Ícone branco no botão do celular */
+    [data-testid="stSidebarCollapsedControl"] button svg {
+        fill: white !important;
+        width: 25px !important;
+        height: 25px !important;
+    }
 
-            if st.button("🔍 JÁ PAGUEI! VERIFICAR STATUS", use_container_width=True):
-                with st.spinner("Consultando Mercado Pago..."):
-                    try:
-                        import orcas_v01_pagamentos as pag
-                        from datetime import date
-                        
-                        # 1. CONSULTA DIRETA AO MERCADO PAGO (Via função no orcas_v01_pagamentos.py)
-                        # confirmado_valor = pag.consultar_pagamento_mp(st.session_state.pref_id_ativa)
-                        confirmado_valor = pag.consultar_pagamento_mp(ID_USUARIO_LOGADO)
-                        
-                        if confirmado_valor:
-                            # 2. SE APROVADO, ATUALIZA O SUPABASE NA HORA
-                            hoje = str(date.today())
-                            supabase.table("usuarios").update({
-                                "data_ult_assinat": hoje,
-                                "valor_pago": confirmado_valor
-                            }).eq("id", ID_USUARIO_LOGADO).execute()
-                            
-                            st.success(f"✅ Pagamento de R$ {confirmado_valor} Confirmado!")
-                            st.balloons()
-                            
-                            # Limpa a URL da sessão para resetar o estado de pagamento
-                            if "url_ativa" in st.session_state: 
-                                del st.session_state.url_ativa
-                            
+    [data-testid="stHeader"] {
+        background-color: rgba(0,0,0,0) !important;
+    }
+
+    /* 3. Remove badges flutuantes */
+    [data-testid="stDecoration"],
+    .viewerBadge_container__1QSob,
+    .viewerBadge_link__1S137,
+    div[class*="stDecoration"] {
+        display: none !important;
+        visibility: hidden !important;
+    }
+
+    /* 4. Ajuste de altura para conteúdo principal */
+    .block-container {
+        padding-top: 3.5rem !important;
+        margin-top: -1.0rem !important;
+    }
+
+    /* 5. FORÇA COMPACTAÇÃO RIGOROSA DE TABELAS */
+    [data-testid="stTable"] td, [data-testid="stTable"] th,
+    [data-testid="stDataFrame"] td, [data-testid="stDataFrame"] th,
+    table td, table th {
+        white-space: nowrap !important;
+        word-break: keep-all !important;
+    }
+    
+    [data-testid="stTable"], [data-testid="stDataFrame"] {
+        overflow-x: auto !important;
+    }
+
+    /* 6. ESTILOS CUSTOMIZADOS ORCAS (Restaurados) */
+    .logo-sidebar { 
+        font-size: 2.2rem !important; 
+        font-weight: bold; 
+        color: #1E3A8A; 
+        font-family: 'Arial Black', sans-serif; 
+        margin-bottom: 20px; 
+    }
+    
+    .user-email { 
+        font-size: 0.85rem; 
+        color: #64748b; 
+        margin-bottom: 2px; 
+    }
+    
+    .venc-text { 
+        font-size: 0.8rem; 
+        color: #e11d48; 
+        font-weight: bold; 
+        margin-bottom: 10px; 
+    }
+    
+    .titulo-tela { 
+        font-size: 1.6rem; 
+        font-weight: bold; 
+        color: #1E3A8A; 
+        border-bottom: 2px solid #E5E7EB; 
+        margin-bottom: 15px; 
+        padding-bottom: 5px; 
+    }
+    
+    .project-tag-sidebar { 
+        color: #1E3A8A; 
+        font-weight: bold; 
+        font-size: 0.9rem; 
+        margin-bottom: 15px; 
+        padding: 8px; 
+        border-left: 5px solid #1E3A8A; 
+        background: #F3F4F6; 
+        border-radius: 4px; 
+    }
+    
+    /* Garante que textos de alerta e info quebrem linha normalmente */
+    .info-pagamento, .stAlert p { 
+        white-space: normal !important; 
+        word-wrap: break-word !important; 
+        display: block !important;
+    }
+
+    /* 7. RESET ESTÉTICO DO MENU LATERAL (Para voltar ao Anexo 02) */
+    /* Garante fonte padrão do Streamlit nos itens do menu */
+    [data-testid="stSidebar"] [data-testid="stWidgetLabel"] p {
+        font-size: 1rem !important;
+        font-weight: 500 !important;
+        color: #31333F !important;
+    }
+    
+    /* Ajuste de espaçamento entre itens do rádio */
+    [data-testid="stSidebar"] .stRadio div[role="radiogroup"] {
+        gap: 0.5rem !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+def format_moeda(v):
+    return f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+def parse_moeda(t):
+    try:
+        t = str(t).replace('R$', '').replace(' ', '').replace('.', '').replace(',', '.')
+        return float(t)
+    except:
+        return 0.0
+
+# ==============================================================================
+# INÍCIO INSERÇÃO: INTERCEPTAÇÃO INTELIGENTE DE RETORNO DO MERCADO PAGO E LOGIN AUTOMÁTICO
+# ==============================================================================
+import orcas_v01_retornodomp as retornodomp
+
+# Captura limpa dos parâmetros no padrão do Streamlit moderno
+status_retorno = st.query_params.get("status")
+pref_id = st.query_params.get("preference_id") or st.query_params.get("collection_id")
+
+if status_retorno and pref_id:
+    with st.spinner("🚀 Processando seu pagamento e preparando seu ambiente..."):
+        # Chamamos o módulo para atualizar o banco e nos retornar as informações do usuário dono do pagamento
+        usuario_auto = retornodomp.tratar_retorno(supabase, pref_id, status_retorno)
+        
+        # Se retornar os dados do usuário válido, faz o BYPASS (Login Automático) sem pedir senha!
+        if usuario_auto and isinstance(usuario_auto, dict):
+            st.session_state.logado = True
+            st.session_state.CHAVE_MESTRA_UUID = str(usuario_auto.get('id'))
+            st.session_state.usuario = usuario_auto.get('email')
+            st.session_state.vencimento = str(usuario_auto.get('vencimento'))
+            st.session_state.zap_ativo = usuario_auto.get('zap_ativo', 0)
+            st.session_state.projeto_ativo = None
+            
+            # Limpa os parâmetros da URL de forma elegante para o usuário não reprocessar ao dar F5
+            st.query_params.clear()
+            
+            # Guarda um aviso de sucesso para exibir no Dashboard
+            st.session_state.msg_sucesso = "🎉 Assinatura renovada com sucesso! Bem-vindo de volta!"
+            st.rerun()
+        else:
+            # Se deu algum problema na validação, limpa a URL e deixa o usuário ir para a tela de login comum com um aviso
+            st.query_params.clear()
+            st.warning("⚠️ Não conseguimos validar o login automático do pagamento. Por favor, acesse com seu e-mail e senha.")
+
+if not st.session_state.get('CHAVE_MESTRA_UUID'):
+    st.session_state['CHAVE_MESTRA_UUID'] = ''
+# ==============================================================================
+# FIM INSERÇÃO: INTERCEPTAÇÃO INTELIGENTE
+# ==============================================================================
+
+# --- 4. LOGIN ---
+if 'logado' not in st.session_state:
+    st.session_state.logado = False
+if 'etapa_auth' not in st.session_state:
+    st.session_state.etapa_auth = "login"
+
+if not st.session_state.logado:
+    st.markdown("<h1 style='text-align: center; margin-top: 50px;'>🐋 ORCAS</h1>", unsafe_allow_html=True)
+    c1, c2, c3 = st.columns([1,2,1])
+    
+    with c2:
+        if st.session_state.etapa_auth == "login":
+            aba = st.tabs(["Acessar Conta", "Criar Nova Conta"])
+            
+            with aba[0]:
+                em = st.text_input("E-mail Cadastrado")
+                se = st.text_input("Senha de Acesso", type="password")
+                col_b1, col_b2 = st.columns(2)
+                if col_b1.button("Entrar no Sistema"):
+                    senha_hash = hashlib.sha256(str.encode(se)).hexdigest()
+                    res = supabase.table("usuarios").select("id, nome, email, celular, vencimento, zap_ativo").eq("email", em).eq("senha", senha_hash).execute()
+                    if res.data: 
+                        user_data = res.data[0]
+                        st.session_state.logado = True
+                        st.session_state.CHAVE_MESTRA_UUID = str(user_data['id'])
+                        st.session_state.usuario = em
+                        st.session_state.vencimento = str(user_data['vencimento'])
+                        st.session_state.zap_ativo = user_data.get('zap_ativo', 0)
+                        st.session_state.projeto_ativo = None
+                        st.rerun()
+                    else:
+                        st.error("E-mail ou senha incorretos.")
+                
+                if col_b2.button("Esqueci minha Senha"):
+                    st.session_state.etapa_auth = "esqueci_senha"
+                    st.rerun()
+
+            with aba[1]:
+                new_nome = st.text_input("Nome Completo")
+                new_email = st.text_input("E-mail")
+                new_celular = st.text_input("Celular (com DDD)")
+                
+                col_env1, col_env2 = st.columns(2)
+                
+                if col_env1.button("Enviar Código para Celular"):
+                    if new_email and new_celular:
+                        codigo = str(random.randint(100000, 999999))
+                        st.session_state.codigo_verificacao = codigo
+                        st.session_state.codigo_timestamp = datetime.now()
+                        st.session_state.temp_user_data = {"nome": new_nome, "email": new_email, "celular": new_celular}
+                        st.info(f"Código enviado para o celular {new_celular}") 
+                    else:
+                        st.error("Preencha E-mail e Celular para receber o código.")
+                
+                if col_env2.button("Enviar Código para E-mail"):
+                    if new_email:
+                        codigo = str(random.randint(100000, 999999))
+                        if disparar_email_codigo(new_email, codigo):
+                            st.session_state.codigo_verificacao = codigo
+                            st.session_state.codigo_timestamp = datetime.now()
+                            st.session_state.temp_user_data = {"nome": new_nome, "email": new_email, "celular": new_celular}
+                            st.info(f"Código enviado para o e-mail {new_email}")
+                    else:
+                        st.error("Preencha o campo E-mail para receber o código.")
+                
+                cod_input = st.text_input("Digite o Código recebido no Celular ou no E-mail abaixo e clique em [Validar Código]", key="new_acc_code")
+                
+                if st.button("Validar Código"):
+                    if 'codigo_timestamp' in st.session_state:
+                        decorrido = (datetime.now() - st.session_state.codigo_timestamp).total_seconds() / 60
+                        if decorrido > 10:
+                            st.error("O código expirou (validade de 10 minutos). Solicite um novo.")
+                        elif cod_input == st.session_state.get('codigo_verificacao'):
+                            st.session_state.etapa_auth = "definir_senha"
                             st.rerun()
                         else:
-                            st.warning("O Mercado Pago ainda não confirmou o recebimento. Se você já pagou, aguarde 30 segundos e tente novamente.")
-                            
-                    except Exception as e:
-                        st.error(f"Erro na verificação direta: {e}")
+                            st.error("Código inválido.")
+                    else:
+                        st.error("Solicite um código antes de validar.")
 
-    # Rodapé Integral
-    st.markdown("""
-    <div style="font-size: 12px; color: #333; margin-top: 20px; text-align: justify; line-height: 1.6; border-top: 1px solid #eee; padding-top: 10px;">
-    Sua Assinatura ORCAS BABY mensal custa R$ 19,90 e contempla 2 Planos de 24 meses cada um, mas se você quiser ou necessitar, é possível aumentar o período de um Plano em blocos adicionais de 12 meses tendo um acréscimo de R$ 6,40 para cada 12 meses adicionais. Para aumentar o número de Planos (Padrão - 24 meses), o valor é de R$ 12,80 por Plano adicional. Para receber um Resumo Diário das análises e pendências como, o que preciso pagar e receber hoje, o que ainda está em aberto, quanto já gastei de supermercado até hoje, quanto já gastei nessa reforma, etc de seu Plano via Whatsapp ou E-mail terá um acréscimo de R$ 9,85 por Plano.
-    </div>
-    """, unsafe_allow_html=True)
+                if st.button("Voltar", key="btn_voltar_new"):
+                    st.session_state.etapa_auth = "login"
+                    st.rerun()
+
+        elif st.session_state.etapa_auth == "esqueci_senha":
+            st.subheader("Verificação de Segurança")
+            
+            # Usando uma chave que o navegador não associa a e-mail para evitar autofill
+            conta_id = st.text_input("Informe a identificação da conta", key="usr_identity_check")
+            
+            col_rec1, col_rec2 = st.columns(2)
+            if col_rec1.button("Enviar Código para Celular"):
+                if conta_id:
+                    res = supabase.table("usuarios").select("celular").eq("email", conta_id).execute()
+                    if res.data:
+                        codigo = str(random.randint(100000, 999999))
+                        st.session_state.codigo_verificacao = codigo
+                        st.session_state.codigo_timestamp = datetime.now()
+                        st.session_state.temp_email = conta_id
+                        st.info(f"Código enviado para o celular cadastrado.")
+                    else:
+                        st.error("Conta não localizada.")
+                else:
+                    st.warning("Informe o e-mail primeiro.")
+
+            if col_rec2.button("Enviar Código para E-mail"):
+                if conta_id:
+                    res = supabase.table("usuarios").select("email").eq("email", conta_id).execute()
+                    if res.data:
+                        codigo = str(random.randint(100000, 999999))
+                        if disparar_email_codigo(conta_id, codigo):
+                            st.session_state.codigo_verificacao = codigo
+                            st.session_state.codigo_timestamp = datetime.now()
+                            st.session_state.temp_email = conta_id
+                            st.info(f"Código enviado para o e-mail cadastrado.")
+                    else:
+                        st.error("Conta não localizada.")
+                else:
+                    st.warning("Informe o e-mail primeiro.")
+
+            st.write("---")
+            
+            # Campo de código com nome e placeholder que 'quebram' o preenchimento automático do navegador
+            input_val = st.text_input(
+                "Digite a sequência numérica recebida", 
+                value="", 
+                placeholder="Ex: 123456",
+                key="field_code_validation_secure"
+            )
+
+            if st.button("Validar Código", use_container_width=True):
+                if 'codigo_timestamp' in st.session_state:
+                    decorrido = (datetime.now() - st.session_state.codigo_timestamp).total_seconds() / 60
+                    if decorrido > 10:
+                        st.error("O código expirou. Solicite um novo.")
+                    elif input_val == st.session_state.get('codigo_verificacao'):
+                        # Se validou, garante que o e-mail alvo vá para a próxima etapa
+                        st.session_state.temp_email = conta_id
+                        st.session_state.etapa_auth = "definir_senha"
+                        st.rerun()
+                    else:
+                        st.error("Sequência numérica incorreta.")
+                else:
+                    st.error("Gere um código antes de validar.")
+            
+            if st.button("Voltar", key="btn_voltar_forgot_final"):
+                st.session_state.etapa_auth = "login"
+                st.rerun()
+
+        elif st.session_state.etapa_auth == "definir_senha":
+            st.subheader("Definir Nova Senha")
+            nova_se = st.text_input("Nova Senha", type="password")
+            conf_se = st.text_input("Confirme a Nova Senha", type="password")
+            
+            if st.button("Finalizar e Entrar"):
+                if nova_se == conf_se and len(nova_se) > 0:
+                    senha_hash = hashlib.sha256(str.encode(nova_se)).hexdigest()
+                    
+                    if "temp_user_data" in st.session_state:
+                        d = st.session_state.temp_user_data
+                        venc_inicial = (datetime.now() + timedelta(days=7)).date().strftime('%Y-%m-%d')
+                        res = supabase.table("usuarios").insert({
+                            "nome": d['nome'], "email": d['email'], "celular": d['celular'], 
+                            "senha": senha_hash, "vencimento": venc_inicial
+                        }).execute()
+                        user_id = res.data[0]['id']
+                        user_email = d['email']
+                        user_venc = venc_inicial
+                    else:
+                        user_email = st.session_state.temp_email
+                        res = supabase.table("usuarios").update({"senha": senha_hash}).eq("email", user_email).execute()
+                        user_id = res.data[0]['id']
+                        user_venc = res.data[0]['vencimento']
+
+                    st.session_state.logado = True
+                    st.session_state.CHAVE_MESTRA_UUID = str(user_id)
+                    st.session_state.usuario = user_email
+                    st.session_state.vencimento = str(user_venc)
+                    st.session_state.projeto_ativo = None
+                    st.rerun()
+                else:
+                    st.error("As senhas não coincidem ou estão vazias.")
+    st.stop()
+
+# --- 5. ESTADO E DADOS ---
+
+# INÍCIO INSERÇÃO DIA 16/05/2026 --- SEÇÃO DE GESTÃO ---
+if st.session_state.get("logado"):
+    import orcas_v01_gestao as gestao
+    ID_USUARIO_LOGADO = str(st.session_state.get('CHAVE_MESTRA_UUID', ''))
+else:
+    st.warning("Faça login para acessar a tela de gestão.")
+# FIM INSERÇÃO DIA 16/05/2026
+
+ID_USUARIO_LOGADO = str(st.session_state.get('CHAVE_MESTRA_UUID', ''))
+vencimento_str = st.session_state.get('vencimento', '2026-01-01')
+venc_dt_objeto = datetime.strptime(vencimento_str, '%Y-%m-%d').date()
+
+if ID_USUARIO_LOGADO:
+    security.verificar_bloqueio_v01(ID_USUARIO_LOGADO, (venc_dt_objeto - datetime.now().date()).days)
+
+projs_req = supabase.table("config_projetos").select("projeto_id").eq("usuario_id", ID_USUARIO_LOGADO).execute()
+projs = [r['projeto_id'] for r in projs_req.data]
+
+if 'projeto_ativo' not in st.session_state:
+    st.session_state.projeto_ativo = None
+if 'escolha' not in st.session_state:
+    st.session_state.escolha = "🏠 Dashboard" if st.session_state.projeto_ativo else "⚙️ Gestão"
+
+s_db, d_ini_db, d_fim_db = 0.0, None, None
+if st.session_state.projeto_ativo:
+    cfg_req = supabase.table("config_projetos").select("*").eq("projeto_id", st.session_state.projeto_ativo).eq("usuario_id", ID_USUARIO_LOGADO).execute()
+    if cfg_req.data:
+        cfg = cfg_req.data[0]
+        s_db = cfg.get('saldo_inicial', 0.0)
+        d_ini_db = datetime.strptime(cfg['data_ini'], '%Y-%m-%d').date()
+        d_fim_db = datetime.strptime(cfg['data_fim'], '%Y-%m-%d').date()
+
+# --- 6. NAVEGAÇÃO NA SIDEBAR ---
+with st.sidebar:
+    st.markdown('<div class="logo-sidebar">🐋 ORCAS</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="user-email">👤 {st.session_state.usuario}</div>', unsafe_allow_html=True)
+    
+    # --- LÓGICA DE AVISO DE VENCIMENTO ---
+    import datetime
+    hoje = datetime.date.today()
+    dias_para_vencer = (venc_dt_objeto - hoje).days
+    
+    # Define o estilo do texto de vencimento baseado no prazo
+    if dias_para_vencer < 0:
+        texto_venc = f"⚠️ EXPIRADO EM: {venc_dt_objeto.strftime('%d/%m/%Y')}"
+        cor_venc = "#FF0000" # Vermelho
+        bloqueado = True
+    elif dias_para_vencer <= 3:
+        texto_venc = f"⏳ EXPIRA EM: {venc_dt_objeto.strftime('%d/%m/%Y')} ({dias_para_vencer}d)"
+        cor_venc = "#FFA500" # Laranja
+        bloqueado = False
+    else:
+        texto_venc = f"📅 EXPIRA EM: {venc_dt_objeto.strftime('%d/%m/%Y')}"
+        cor_venc = "#333" # Cor padrão
+        bloqueado = False
+
+    st.markdown(f'<div style="color:{cor_venc}; font-weight:bold; font-size:13px; padding:5px 0;">{texto_venc}</div>', unsafe_allow_html=True)
+    
+    if st.session_state.projeto_ativo:
+        st.markdown(f'<div class="project-tag-sidebar">Plano Ativo: {st.session_state.projeto_ativo}</div>', unsafe_allow_html=True)
+    
+    st.divider()
+    
+    # 1. Definição das opções de menu (BLOQUEIO AQUI)
+    if bloqueado:
+        # Se vencido, só pode acessar Gestão para pagar
+        menu_opcoes = ["⚙️ Gestão"]
+        st.session_state.escolha = "⚙️ Gestão"
+        st.warning("Assinatura Expirada! Acesse a Gestão para renovar.")
+    else:
+        menu_opcoes = ["🏠 Dashboard", "📝 Lançamentos", "🗓️ Projetar", "✅ Conciliação", "⚙️ Gestão", "📊 Admin"]
+
+    # 2. Lógica para definir qual item do menu ficará marcado visualmente
+    if st.session_state.escolha in menu_opcoes:
+        idx_selecionado = menu_opcoes.index(st.session_state.escolha)
+    else:
+        # Se estiver em pagamentos ou algo fora, foca na Gestão (que é a última ou única)
+        idx_selecionado = menu_opcoes.index("⚙️ Gestão") 
+
+    # 3. CRIAÇÃO DO MENU LATERAL
+    escolha_sidebar = st.sidebar.radio("Menu de Navegação", menu_opcoes, index=idx_selecionado)
+
+    # 4. Atualização do estado e Navegação
+    if escolha_sidebar != st.session_state.escolha:
+        if st.session_state.escolha == "💳 Pagamentos" and escolha_sidebar == "⚙️ Gestão":
+            pass 
+        else:
+            st.session_state.escolha = escolha_sidebar
+            st.rerun()
+
+    st.divider()
+    if st.button("Sair do Sistema"):
+        st.session_state.clear()
+        st.rerun()
+
+# --- 7. CARREGAMENTO DOS DADOS ---
+res_l = supabase.table("lancamentos").select("*").eq("projeto_id", st.session_state.projeto_ativo).eq("usuario_id", ID_USUARIO_LOGADO).order("data").execute()
+df = pd.DataFrame(res_l.data)
+if not df.empty:
+    df.columns = [c.lower() for c in df.columns]
+else:
+    df = pd.DataFrame(columns=['id', 'data', 'descricao', 'tipo', 'valor_plan', 'valor_real', 'status', 'projeto_id', 'usuario_id'])
+
+# --- 8. ROTEAMENTO ---
+st.markdown("<div id='topo-ancora'></div>", unsafe_allow_html=True)
+
+# Lógica de Roteamento Protegida
+if st.session_state.escolha == "🏠 Dashboard" and not bloqueado:
+    dash.exibir_dashboard(df, supabase, ID_USUARIO_LOGADO, s_db)
+elif st.session_state.escolha == "📝 Lançamentos" and not bloqueado:
+    lanc.exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db, format_moeda, ir_para_o_topo)
+elif st.session_state.escolha == "🗓️ Projetar" and not bloqueado:
+    proj.exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda)
+elif st.session_state.escolha == "✅ Conciliação" and not bloqueado:
+    conc.exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moeda)
+elif st.session_state.escolha == "⚙️ Gestão":
+    import orcas_v01_gestao as gestao
+
+    # Passamos exatamente TODAS as variáveis de forma única, removendo a duplicação!
+    gestao.exibir_gestao(
+        supabase, 
+        ID_USUARIO_LOGADO, 
+        projs, 
+        d_ini_db, 
+        d_fim_db, 
+        s_db, 
+        format_moeda, 
+        parse_moeda, 
+        security
+    )
+elif st.session_state.escolha == "📊 Admin" and not bloqueado:
+    adm.exibir_admin(df, supabase, ID_USUARIO_LOGADO, ir_para_o_topo)
+elif st.session_state.escolha == "💳 Pagamentos":
+    import orcas_v01_pagamentos as pag
+    pag.exibir_pagamentos(supabase, ID_USUARIO_LOGADO)
+else:
+    # Caso caia em algo bloqueado por erro, força Gestão de forma limpa e única
+    import orcas_v01_gestao as gestao
+    gestao.exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, format_moeda, parse_moeda, security)
+
+# --- O RODAPÉ DEVE VER ANTES DO STOP ---
+st.divider()
+st.caption(f"ORCAS v01 | Usuário: {st.session_state.usuario} | Projeto: {st.session_state.projeto_ativo}")
+
+# --- O STOP VEM POR ÚLTIMO ---
+st.stop()
