@@ -219,34 +219,39 @@ def parse_moeda(t):
 # ==============================================================================
 # INÍCIO INSERÇÃO: INTERCEPTAÇÃO INTELIGENTE DE RETORNO DO MERCADO PAGO E LOGIN AUTOMÁTICO
 # ==============================================================================
-import orcas_v01_retornodomp as retornodomp
+# 1. Garante a inicialização segura do estado de login para evitar falhas de chave
+if 'logado' not in st.session_state:
+    st.session_state.logado = False
 
-# Captura limpa dos parâmetros no padrão do Streamlit moderno
+# 2. Captura limpa dos parâmetros contidos na URL atual do navegador
 status_retorno = st.query_params.get("status")
 pref_id = st.query_params.get("preference_id") or st.query_params.get("collection_id")
 
-if status_retorno and pref_id:
+# 3. Interceptação ativa: só executa se houver dados do MP na URL e o usuário estiver deslogado
+if status_retorno and pref_id and not st.session_state.logado:
     with st.spinner("🚀 Processando seu pagamento e preparando seu ambiente..."):
-        # Chamamos o módulo para atualizar o banco e nos retornar as informações do usuário dono do pagamento
+        # Aciona o validador resiliente (checa tabela temp, atualiza créditos e exclui temp)
         usuario_auto = retornodomp.tratar_retorno(supabase, pref_id, status_retorno)
         
-        # Se retornar os dados do usuário válido, faz o BYPASS (Login Automático) sem pedir senha!
+        # Se os dados recebidos forem de um dicionário de usuário válido, executa o BYPASS
         if usuario_auto and isinstance(usuario_auto, dict):
             st.session_state.logado = True
-            st.session_state.CHAVE_MESTRA_UUID = str(usuario_auto.get('id'))
-            st.session_state.usuario = usuario_auto.get('email')
-            st.session_state.vencimento = str(usuario_auto.get('vencimento'))
+            st.session_state.CHAVE_MESTRA_UUID = str(usuario_auto.get('id', ''))
+            st.session_state.usuario = usuario_auto.get('email', '')
+            st.session_state.vencimento = str(usuario_auto.get('vencimento', ''))
             st.session_state.zap_ativo = usuario_auto.get('zap_ativo', 0)
             st.session_state.projeto_ativo = None
             
-            # Limpa os parâmetros da URL de forma elegante para o usuário não reprocessar ao dar F5
+            # Limpa todos os parâmetros anexados à URL para não reprocessar num F5 futuro
             st.query_params.clear()
             
-            # Guarda um aviso de sucesso para exibir no Dashboard
+            # Armazena a mensagem de sucesso que aparecerá dentro da área logada
             st.session_state.msg_sucesso = "🎉 Assinatura renovada com sucesso! Bem-vindo de volta!"
+            
+            # Executa o reprocessamento imediato do script, avançando direto para o Dashboard
             st.rerun()
         else:
-            # Se deu algum problema na validação, limpa a URL e deixa o usuário ir para a tela de login comum com um aviso
+            # Em caso de falha de validação, reseta os parâmetros e exibe o aviso na tela de login
             st.query_params.clear()
             st.warning("⚠️ Não conseguimos validar o login automático do pagamento. Por favor, acesse com seu e-mail e senha.")
 
