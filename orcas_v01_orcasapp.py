@@ -442,6 +442,14 @@ if not st.session_state.logado:
 
 # --- 5. ESTADO E DADOS ---
 
+# INÍCIO INSERÇÃO DIA 16/05/2026 --- SEÇÃO DE GESTÃO ---
+if st.session_state.get("logado"):
+    import orcas_v01_gestao as gestao
+    ID_USUARIO_LOGADO = str(st.session_state.get('CHAVE_MESTRA_UUID', ''))
+else:
+    st.warning("Faça login para acessar a tela de gestão.")
+# FIM INSERÇÃO DIA 16/05/2026
+
 ID_USUARIO_LOGADO = str(st.session_state.get('CHAVE_MESTRA_UUID', ''))
 vencimento_str = st.session_state.get('vencimento', '2026-01-01')
 venc_dt_objeto = datetime.strptime(vencimento_str, '%Y-%m-%d').date()
