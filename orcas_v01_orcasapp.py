@@ -560,7 +560,7 @@ elif st.session_state.escolha == "✅ Conciliação" and not bloqueado:
 elif st.session_state.escolha == "⚙️ Gestão":
     import orcas_v01_gestao as gestao
 
-    # Passamos exatamente TODAS as variáveis que a sua função pede, incluindo a v_mensal_total no final!
+    # Passamos exatamente TODAS as variáveis de forma única, removendo a duplicação!
     gestao.exibir_gestao(
         supabase, 
         ID_USUARIO_LOGADO, 
@@ -572,18 +572,17 @@ elif st.session_state.escolha == "⚙️ Gestão":
         parse_moeda, 
         security
     )
-    # Gestão sempre acessível para permitir pagamento
-    gestao.exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, format_moeda, parse_moeda, security)
 elif st.session_state.escolha == "📊 Admin" and not bloqueado:
     adm.exibir_admin(df, supabase, ID_USUARIO_LOGADO, ir_para_o_topo)
 elif st.session_state.escolha == "💳 Pagamentos":
     import orcas_v01_pagamentos as pag
     pag.exibir_pagamentos(supabase, ID_USUARIO_LOGADO)
 else:
-    # Caso caia em algo bloqueado por erro, força Gestão
+    # Caso caia em algo bloqueado por erro, força Gestão de forma limpa e única
+    import orcas_v01_gestao as gestao
     gestao.exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, format_moeda, parse_moeda, security)
 
-# --- O RODAPÉ DEVE VIR ANTES DO STOP ---
+# --- O RODAPÉ DEVE VER ANTES DO STOP ---
 st.divider()
 st.caption(f"ORCAS v01 | Usuário: {st.session_state.usuario} | Projeto: {st.session_state.projeto_ativo}")
 
