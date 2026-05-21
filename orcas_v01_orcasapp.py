@@ -216,8 +216,9 @@ def parse_moeda(t):
     except:
         return 0.0
 
-# INÍCIO INSERÇÃO DIA 16/05/2026
-# INÍCIO INSERÇÃO DIA 16/05/2026 --- INTERCEPTAÇÃO DE RETORNO DO MERCADO PAGO
+# ==============================================================================
+# INÍCIO INSERÇÃO: INTERCEPTAÇÃO INTELIGENTE DE RETORNO DO MERCADO PAGO E LOGIN AUTOMÁTICO
+# ==============================================================================
 import orcas_v01_retornodomp as retornodomp
 
 # Captura limpa dos parâmetros no padrão do Streamlit moderno
@@ -225,12 +226,35 @@ status_retorno = st.query_params.get("status")
 pref_id = st.query_params.get("preference_id") or st.query_params.get("collection_id")
 
 if status_retorno and pref_id:
-    retornodomp.tratar_retorno(supabase, pref_id, status_retorno)
-    st.stop()
+    with st.spinner("🚀 Processando seu pagamento e preparando seu ambiente..."):
+        # Chamamos o módulo para atualizar o banco e nos retornar as informações do usuário dono do pagamento
+        usuario_auto = retornodomp.tratar_retorno(supabase, pref_id, status_retorno)
+        
+        # Se retornar os dados do usuário válido, faz o BYPASS (Login Automático) sem pedir senha!
+        if usuario_auto and isinstance(usuario_auto, dict):
+            st.session_state.logado = True
+            st.session_state.CHAVE_MESTRA_UUID = str(usuario_auto.get('id'))
+            st.session_state.usuario = usuario_auto.get('email')
+            st.session_state.vencimento = str(usuario_auto.get('vencimento'))
+            st.session_state.zap_ativo = usuario_auto.get('zap_ativo', 0)
+            st.session_state.projeto_ativo = None
+            
+            # Limpa os parâmetros da URL de forma elegante para o usuário não reprocessar ao dar F5
+            st.query_params.clear()
+            
+            # Guarda um aviso de sucesso para exibir no Dashboard
+            st.session_state.msg_sucesso = "🎉 Assinatura renovada com sucesso! Bem-vindo de volta!"
+            st.rerun()
+        else:
+            # Se deu algum problema na validação, limpa a URL e deixa o usuário ir para a tela de login comum com um aviso
+            st.query_params.clear()
+            st.warning("⚠️ Não conseguimos validar o login automático do pagamento. Por favor, acesse com seu e-mail e senha.")
 
 if not st.session_state.get('CHAVE_MESTRA_UUID'):
     st.session_state['CHAVE_MESTRA_UUID'] = ''
-# FIM INSERÇÃO DIA 16/05/2026
+# ==============================================================================
+# FIM INSERÇÃO: INTERCEPTAÇÃO INTELIGENTE
+# ==============================================================================
 
 # --- 4. LOGIN ---
 if 'logado' not in st.session_state:

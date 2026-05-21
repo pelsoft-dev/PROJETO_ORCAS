@@ -27,7 +27,8 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
     col_l1_1, col_l1_2 = st.columns(2)
     lista_gestao = [""] + projs
     
-    plano_sel = col_l1_1.selectbox("Selecione um Plano já existente:", lista_gestao)
+    # ADICIONADO KEY ÚNICA PARA CORRIGIR O DUPLICATE ELEMENT ID
+    plano_sel = col_l1_1.selectbox("Selecione um Plano já existente:", lista_gestao, key="sb_plano_gestao_unique")
     
     if plano_sel != "" and plano_sel != st.session_state.get('projeto_ativo'):
         st.session_state.projeto_ativo = plano_sel
@@ -108,7 +109,9 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             relatorios_consolidar[p['projeto_id']] = rel_ativo
 
         planos_consolidar[nome_plano_input] = meses_total_edit
-        relatorios_consolidar[nome_plano_input] = 1 if (ativar_zap_atual or activar_email_atual) else 0
+        
+        # CORRIGIDO ERRO DE DIGITAÇÃO DE "activar_email_atual" PARA "ativar_email_atual"
+        relatorios_consolidar[nome_plano_input] = 1 if (ativar_zap_atual or ativar_email_atual) else 0
 
         qtd_total_planos = len(planos_consolidar)
         qtd_relatorios_totais = sum(relatorios_consolidar.values())
@@ -260,7 +263,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 import orcas_v01_pagamentos as pag
                 email_user = st.session_state.get('usuario_email', "cliente@email.com")
                     
-                # Voltamos para a chamada original exata de 5 parâmetros que seu arquivo pagamentos espera!
                 link, pref_id = pag.criar_link_final(
                     ID_USUARIO_LOGADO, 
                     valor_final, 
@@ -273,7 +275,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                     st.session_state.pref_id_ativa = pref_id if pref_id else ID_USUARIO_LOGADO
                     st.session_state.meses_comprados = qtd_meses
                     
-                    # Salva no banco temporário para a interceptação do 'retornodomp.py'
                     try:
                         supabase.table("pagamentos_temp").upsert({
                             "usuario_id": ID_USUARIO_LOGADO,
@@ -283,7 +284,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                         }).execute()
                         st.toast("Link gerado com sucesso!")
                     except Exception as e:
-                        pass  # Evita travar a tela caso a tabela temporária ainda não esteja mapeada
+                        pass
                 else:
                     st.error("Erro ao gerar link de pagamento no Mercado Pago.")
 
@@ -298,7 +299,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                         import orcas_v01_pagamentos as pag
                         from datetime import date
                         
-                        # Usa a chamada original para consultar o pagamento
                         confirmado_valor = pag.consultar_pagamento_mp(ID_USUARIO_LOGADO)
                         
                         if confirmado_valor:
@@ -324,6 +324,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
     # Rodapé Integral
     st.markdown("""
     <div style="font-size: 12px; color: #333; margin-top: 20px; text-align: justify; line-height: 1.6; border-top: 1px solid #eee; padding-top: 10px;">
-    Sua Assinatura ORCAS BABY mensal custa R$ 19,90 e contempla 2 Planos de 24 meses cada um, mas se você quiser ou necessitar, é possível aumentar o período de um Plano em blocos adicionais de 12 meses tendo um acréscimo de R$ 6,40 para cada 12 meses adicionais. Para aumentar o número de Planos (Padrão - 24 meses), o valor é de R$ 12,80 por Plano adicional. Para receber um Resumo Diário das análises e pendências como, o que preciso pagar e receber hoje, o que ainda está em aberto, quanto já gastei de supermercado até hoje, quanto já gastei nessa reforma, etc de seu Plano via Whatsapp ou E-mail terá um acréscimo de R$ 9,85 por Plano.
+    Sua Assinatura ORCAS BABY mensal custa R$ 19,90 e contempla 2 Planos de 24 meses cada um, mas se você quiser ou necessitar, é possível aumentar o período de um Plano in blocos adicionais de 12 meses tendo um acréscimo de R$ 6,40 para cada 12 meses adicionais. Para aumentar o número de Planos (Padrão - 24 meses), o valor é de R$ 12,80 por Plano adicional. Para receber um Resumo Diário das análises e pendências como, o que preciso pagar e receber hoje, o que ainda está em aberto, quanto já gastei de supermercado até hoje, quanto já gastei nessa reforma, etc de seu Plano via Whatsapp ou E-mail terá um acréscimo de R$ 9,85 por Plano.
     </div>
     """, unsafe_allow_html=True)
