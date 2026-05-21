@@ -538,8 +538,7 @@ elif st.session_state.escolha == "⚙️ Gestão":
         s_db, 
         format_moeda, 
         parse_moeda, 
-        security,
-        v_mensal_total
+        security
     )
     # Gestão sempre acessível para permitir pagamento
     gestao.exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, format_moeda, parse_moeda, security)
