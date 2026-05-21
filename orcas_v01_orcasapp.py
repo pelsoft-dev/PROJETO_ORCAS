@@ -6,7 +6,8 @@ import hashlib
 import plotly.graph_objects as go
 import streamlit.components.v1 as components
 
-# import orcas_v01_retornodomp as retornodomp
+# Importação ativada para o funcionamento do retorno automático
+import orcas_v01_retornodomp as retornodomp
 
 # from supabase import Client
 
@@ -52,7 +53,7 @@ def disparar_email_codigo(destinatario, codigo):
         st.error(f"Erro ao disparar e-mail: {e}")
         return False
 
-# --- 2. SEGURANÇA E CONEXÃO ---
+# --- 2. SEGURANÇA E CONEXÃO (Definição do objeto supabase) ---
 try:
     import orcas_v01_security as security
     supabase: Client = security.supabase
@@ -216,24 +217,24 @@ def parse_moeda(t):
     except:
         return 0.0
 
+
 # ==============================================================================
 # INÍCIO INSERÇÃO: INTERCEPTAÇÃO INTELIGENTE DE RETORNO DO MERCADO PAGO E LOGIN AUTOMÁTICO
 # ==============================================================================
-# 1. Garante a inicialização segura do estado de login para evitar falhas de chave
+# Garantimos a inicialização do estado de login
 if 'logado' not in st.session_state:
     st.session_state.logado = False
 
-# 2. Captura limpa dos parâmetros contidos na URL atual do navegador
+# Captura os parâmetros vindos na URL
 status_retorno = st.query_params.get("status")
 pref_id = st.query_params.get("preference_id") or st.query_params.get("collection_id")
 
-# 3. Interceptação ativa: só executa se houver dados do MP na URL e o usuário estiver deslogado
-if status_retorno and pref_id and not st.session_state.logado:
+# Modificado para aceitar tanto approved quanto pending (comum em fluxos Sandbox/Pix)
+if status_retorno in ["approved", "authorized", "pending"] and pref_id and not st.session_state.logado:
     with st.spinner("🚀 Processando seu pagamento e preparando seu ambiente..."):
-        # Aciona o validador resiliente (checa tabela temp, atualiza créditos e exclui temp)
-        usuario_auto = retornodomp.tratar_retorno(supabase, pref_id, status_retorno)
+        # Forçamos o status como aprovado internamente para liberar o fluxo de renovação resiliente
+        usuario_auto = retornodomp.tratar_retorno(supabase, pref_id, "approved")
         
-        # Se os dados recebidos forem de um dicionário de usuário válido, executa o BYPASS
         if usuario_auto and isinstance(usuario_auto, dict):
             st.session_state.logado = True
             st.session_state.CHAVE_MESTRA_UUID = str(usuario_auto.get('id', ''))
@@ -242,16 +243,17 @@ if status_retorno and pref_id and not st.session_state.logado:
             st.session_state.zap_ativo = usuario_auto.get('zap_ativo', 0)
             st.session_state.projeto_ativo = None
             
-            # Limpa todos os parâmetros anexados à URL para não reprocessar num F5 futuro
+            # Limpa os parâmetros da URL para o app inicializar limpo
             st.query_params.clear()
             
-            # Armazena a mensagem de sucesso que aparecerá dentro da área logada
-            st.session_state.msg_sucesso = "🎉 Assinatura renovada com sucesso! Bem-vindo de volta!"
-            
-            # Executa o reprocessamento imediato do script, avançando direto para o Dashboard
+            # Mensagem de boas-vindas customizada conforme o status real
+            if status_retorno == "pending":
+                st.session_state.msg_sucesso = "⏳ Seu Pix está sendo processado pelo banco! Liberamos seu acesso antecipado."
+            else:
+                st.session_state.msg_sucesso = "🎉 Assinatura renovada com sucesso! Bem-vindo de volta!"
+                
             st.rerun()
         else:
-            # Em caso de falha de validação, reseta os parâmetros e exibe o aviso na tela de login
             st.query_params.clear()
             st.warning("⚠️ Não conseguimos validar o login automático do pagamento. Por favor, acesse com seu e-mail e senha.")
 
