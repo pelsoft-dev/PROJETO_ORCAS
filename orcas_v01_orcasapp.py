@@ -220,27 +220,26 @@ def parse_moeda(t):
 # ==============================================================================
 # INÍCIO INSERÇÃO: INTERCEPTAÇÃO INTELIGENTE DE RETORNO DO MERCADO PAGO E LOGIN AUTOMÁTICO
 # ==============================================================================
-# 1. Garantimos a inicialização de todas as variáveis para evitar QUALQUER NameError
+# 1. BLINDAGEM ABSOLUTA: Definimos as variáveis no início para impedir QUALQUER NameError posterior
 status_retorno = None
 pref_id = None
 
 if 'logado' not in st.session_state:
     st.session_state.logado = False
 
-# 2. Captura os parâmetros de forma ultra segura usando o dicionário do Streamlit
-params_atuais = st.query_params
+# 2. Captura os parâmetros de forma segura se eles existirem na URL atual
+params_url = st.query_params
 
-if params_atuais:
-    status_retorno = params_atuais.get("status") or params_atuais.get("collection_status")
-    pref_id = params_atuais.get("preference_id") or params_atuais.get("collection_id")
+if params_url and len(params_url) > 0:
+    status_retorno = params_url.get("status") or params_url.get("collection_status")
+    pref_id = params_url.get("preference_id") or params_url.get("collection_id")
 
-# 3. Só entra no bloco se as variáveis foram de fato populadas e o usuário não está logado
+# 3. O login automático só avança se os dados vierem ATIVOS na URL (evita rodar com URL limpa)
 if status_retorno and pref_id and not st.session_state.logado:
-    # Filtra apenas os status válidos antes de rodar o processo pesado
     if status_retorno in ["approved", "authorized", "pending"]:
         with st.spinner("🚀 Processando seu pagamento e preparando seu ambiente..."):
             
-            # Executa a função passando as variáveis perfeitamente definidas
+            # Dispara a verificação e atualização no banco
             usuario_auto = retornodomp.tratar_retorno(supabase, pref_id, status_retorno)
             
             if usuario_auto and isinstance(usuario_auto, dict):
@@ -250,13 +249,13 @@ if status_retorno and pref_id and not st.session_state.logado:
                 st.session_state.vencimento = str(usuario_auto.get('vencimento', ''))
                 st.session_state.zap_ativo = usuario_auto.get('zap_ativo', 0)
                 
-                # Reconexão automática do plano salvo antes do PIX
+                # Restaura automaticamente o plano ativo salvo antes do checkout
                 if usuario_auto.get("projeto_ativo"):
                     st.session_state.projeto_ativo = usuario_auto["projeto_ativo"]
                 else:
                     st.session_state.projeto_ativo = None
                 
-                # Limpa a URL para o app iniciar sem loops
+                # Limpa a URL de forma segura após o sucesso do login automático
                 st.query_params.clear()
                 
                 if status_retorno == "pending":
@@ -269,6 +268,7 @@ if status_retorno and pref_id and not st.session_state.logado:
                 st.query_params.clear()
                 st.warning("⚠️ Não conseguimos validar o login automático do pagamento. Por favor, acesse com seu e-mail e senha.")
 
+# Garante que o estado global não fique nulo se o fluxo for ignorado
 if not st.session_state.get('CHAVE_MESTRA_UUID'):
     st.session_state['CHAVE_MESTRA_UUID'] = ''
 # ==============================================================================
@@ -461,60 +461,82 @@ if not st.session_state.logado:
 
 # --- 5. ESTADO E DADOS ---
 
-# INÍCIO INSERÇÃO DIA 16/05/2026 --- SEÇÃO DE GESTÃO ---
-if st.session_state.get("logado"):
-    import orcas_v01_gestao as gestao
-    ID_USUARIO_LOGADO = str(st.session_state.get('CHAVE_MESTRA_UUID', ''))
-else:
-    st.warning("Faça login para acessar a tela de gestão.")
-# FIM INSERÇÃO DIA 16/05/2026
+# [REMOVIDO BLOCO ANTERIOR E CONSOLIDADO PARA EVITAR CONFLITOS]
+if not st.session_state.get("logado"):
+    st.warning("⚠️ Sessão encerrada ou inválida. Por favor, faça login para acessar o sistema.")
+    st.stop()
 
+# Captura de chaves e variáveis com valores padrão seguros para evitar quebras de escopo
 ID_USUARIO_LOGADO = str(st.session_state.get('CHAVE_MESTRA_UUID', ''))
-vencimento_str = st.session_state.get('vencimento', '2026-01-01')
-venc_dt_objeto = datetime.strptime(vencimento_str, '%Y-%m-%d').date()
+vencimento_str = st.session_state.get('vencimento', '')
 
+# Tratamento ultra-seguro para a string de vencimento do banco de dados
+if not vencimento_str or vencimento_str.strip() == "":
+    venc_dt_objeto = date.today()
+else:
+    try:
+        venc_dt_objeto = datetime.strptime(vencimento_str, '%Y-%m-%d').date()
+    except Exception:
+        venc_dt_objeto = date.today()
+
+# Executa rotina de segurança se houver usuário válido na sessão
 if ID_USUARIO_LOGADO:
-    security.verificar_bloqueio_v01(ID_USUARIO_LOGADO, (venc_dt_objeto - datetime.now().date()).days)
+    try:
+        security.verificar_bloqueio_v01(ID_USUARIO_LOGADO, (venc_dt_objeto - date.today()).days)
+    except Exception:
+        pass
 
-projs_req = supabase.table("config_projetos").select("projeto_id").eq("usuario_id", ID_USUARIO_LOGADO).execute()
-projs = [r['projeto_id'] for r in projs_req.data]
+# Busca os projetos associados à conta do usuário logado
+try:
+    projs_req = supabase.table("config_projetos").select("projeto_id").eq("usuario_id", ID_USUARIO_LOGADO).execute()
+    projs = [r['projeto_id'] for r in projs_req.data] if projs_req.data else []
+except Exception:
+    projs = []
 
+# Inicializa as chaves essenciais de navegação caso não existam
 if 'projeto_ativo' not in st.session_state:
     st.session_state.projeto_ativo = None
+
 if 'escolha' not in st.session_state:
     st.session_state.escolha = "🏠 Dashboard" if st.session_state.projeto_ativo else "⚙️ Gestão"
 
+# Recuperação dos parâmetros de saldo e período do plano carregado
 s_db, d_ini_db, d_fim_db = 0.0, None, None
-if st.session_state.projeto_ativo:
-    cfg_req = supabase.table("config_projetos").select("*").eq("projeto_id", st.session_state.projeto_ativo).eq("usuario_id", ID_USUARIO_LOGADO).execute()
-    if cfg_req.data:
-        cfg = cfg_req.data[0]
-        s_db = cfg.get('saldo_inicial', 0.0)
-        d_ini_db = datetime.strptime(cfg['data_ini'], '%Y-%m-%d').date()
-        d_fim_db = datetime.strptime(cfg['data_fim'], '%Y-%m-%d').date()
+if st.session_state.projeto_ativo and ID_USUARIO_LOGADO:
+    try:
+        cfg_req = supabase.table("config_projetos").select("*").eq("projeto_id", st.session_state.projeto_ativo).eq("usuario_id", ID_USUARIO_LOGADO).execute()
+        if cfg_req.data:
+            cfg = cfg_req.data[0]
+            s_db = cfg.get('saldo_inicial', 0.0)
+            if cfg.get('data_ini'):
+                d_ini_db = datetime.strptime(cfg['data_ini'], '%Y-%m-%d').date()
+            if cfg.get('data_fim'):
+                d_fim_db = datetime.strptime(cfg['data_fim'], '%Y-%m-%d').date()
+    except Exception:
+        pass
 
 # --- 6. NAVEGAÇÃO NA SIDEBAR ---
 with st.sidebar:
     st.markdown('<div class="logo-sidebar">🐋 ORCAS</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="user-email">👤 {st.session_state.usuario}</div>', unsafe_allow_html=True)
     
-    # --- LÓGICA DE AVISO DE VENCIMENTO ---
-    import datetime
-    hoje = datetime.date.today()
-    dias_para_vencer = (venc_dt_objeto - hoje).days
+    usuario_exibir = st.session_state.get('usuario', 'Usuário Logado')
+    st.markdown(f'<div class="user-email">👤 {usuario_exibir}</div>', unsafe_allow_html=True)
     
-    # Define o estilo do texto de vencimento baseado no prazo
+    # --- LÓGICA DE AVISO DE VENCIMENTO COMERCIAL ---
+    hoje_atual = date.today()
+    dias_para_vencer = (venc_dt_objeto - hoje_atual).days
+    
     if dias_para_vencer < 0:
         texto_venc = f"⚠️ EXPIRADO EM: {venc_dt_objeto.strftime('%d/%m/%Y')}"
-        cor_venc = "#FF0000" # Vermelho
+        cor_venc = "#FF0000"  # Vermelho
         bloqueado = True
     elif dias_para_vencer <= 3:
         texto_venc = f"⏳ EXPIRA EM: {venc_dt_objeto.strftime('%d/%m/%Y')} ({dias_para_vencer}d)"
-        cor_venc = "#FFA500" # Laranja
+        cor_venc = "#FFA500"  # Laranja
         bloqueado = False
     else:
         texto_venc = f"📅 EXPIRA EM: {venc_dt_objeto.strftime('%d/%m/%Y')}"
-        cor_venc = "#333" # Cor padrão
+        cor_venc = "#333333"  # Cor padrão padronizada
         bloqueado = False
 
     st.markdown(f'<div style="color:{cor_venc}; font-weight:bold; font-size:13px; padding:5px 0;">{texto_venc}</div>', unsafe_allow_html=True)
@@ -524,26 +546,24 @@ with st.sidebar:
     
     st.divider()
     
-    # 1. Definição das opções de menu (BLOQUEIO AQUI)
+    # Restrição de menu baseada no status financeiro da assinatura
     if bloqueado:
-        # Se vencido, só pode acessar Gestão para pagar
         menu_opcoes = ["⚙️ Gestão"]
         st.session_state.escolha = "⚙️ Gestão"
         st.warning("Assinatura Expirada! Acesse a Gestão para renovar.")
     else:
         menu_opcoes = ["🏠 Dashboard", "📝 Lançamentos", "🗓️ Projetar", "✅ Conciliação", "⚙️ Gestão", "📊 Admin"]
 
-    # 2. Lógica para definir qual item do menu ficará marcado visualmente
+    # Posicionamento do marcador de seleção da barra lateral
     if st.session_state.escolha in menu_opcoes:
         idx_selecionado = menu_opcoes.index(st.session_state.escolha)
     else:
-        # Se estiver em pagamentos ou algo fora, foca na Gestão (que é a última ou única)
         idx_selecionado = menu_opcoes.index("⚙️ Gestão") 
 
-    # 3. CRIAÇÃO DO MENU LATERAL
-    escolha_sidebar = st.sidebar.radio("Menu de Navegação", menu_opcoes, index=idx_selecionado)
+    # Renderização e captura da escolha do rádio
+    escolha_sidebar = st.radio("Menu de Navegação", menu_opcoes, index=idx_selecionado)
 
-    # 4. Atualização do estado e Navegação
+    # Disparador de mudança de rota se houver clique do usuário
     if escolha_sidebar != st.session_state.escolha:
         if st.session_state.escolha == "💳 Pagamentos" and escolha_sidebar == "⚙️ Gestão":
             pass 
@@ -557,17 +577,20 @@ with st.sidebar:
         st.rerun()
 
 # --- 7. CARREGAMENTO DOS DADOS ---
-res_l = supabase.table("lancamentos").select("*").eq("projeto_id", st.session_state.projeto_ativo).eq("usuario_id", ID_USUARIO_LOGADO).order("data").execute()
-df = pd.DataFrame(res_l.data)
-if not df.empty:
-    df.columns = [c.lower() for c in df.columns]
-else:
+try:
+    res_l = supabase.table("lancamentos").select("*").eq("projeto_id", st.session_state.projeto_ativo).eq("usuario_id", ID_USUARIO_LOGADO).order("data").execute()
+    df = pd.DataFrame(res_l.data)
+    if not df.empty:
+        df.columns = [c.lower() for c in df.columns]
+    else:
+        df = pd.DataFrame(columns=['id', 'data', 'descricao', 'tipo', 'valor_plan', 'valor_real', 'status', 'projeto_id', 'usuario_id'])
+except Exception:
     df = pd.DataFrame(columns=['id', 'data', 'descricao', 'tipo', 'valor_plan', 'valor_real', 'status', 'projeto_id', 'usuario_id'])
 
 # --- 8. ROTEAMENTO ---
 st.markdown("<div id='topo-ancora'></div>", unsafe_allow_html=True)
 
-# Lógica de Roteamento Protegida
+# Centralização das chamadas das sub-telas de negócio
 if st.session_state.escolha == "🏠 Dashboard" and not bloqueado:
     dash.exibir_dashboard(df, supabase, ID_USUARIO_LOGADO, s_db)
 elif st.session_state.escolha == "📝 Lançamentos" and not bloqueado:
@@ -578,32 +601,20 @@ elif st.session_state.escolha == "✅ Conciliação" and not bloqueado:
     conc.exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moeda)
 elif st.session_state.escolha == "⚙️ Gestão":
     import orcas_v01_gestao as gestao
-
-    # Passamos exatamente TODAS as variáveis de forma única, removendo a duplicação!
-    gestao.exibir_gestao(
-        supabase, 
-        ID_USUARIO_LOGADO, 
-        projs, 
-        d_ini_db, 
-        d_fim_db, 
-        s_db, 
-        format_moeda, 
-        parse_moeda, 
-        security
-    )
+    gestao.exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, format_moeda, parse_moeda, security)
 elif st.session_state.escolha == "📊 Admin" and not bloqueado:
     adm.exibir_admin(df, supabase, ID_USUARIO_LOGADO, ir_para_o_topo)
 elif st.session_state.escolha == "💳 Pagamentos":
     import orcas_v01_pagamentos as pag
     pag.exibir_pagamentos(supabase, ID_USUARIO_LOGADO)
 else:
-    # Caso caia em algo bloqueado por erro, força Gestão de forma limpa e única
     import orcas_v01_gestao as gestao
     gestao.exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, format_moeda, parse_moeda, security)
 
-# --- O RODAPÉ DEVE VER ANTES DO STOP ---
+# --- O RODAPÉ DEVE VIR ANTES DO STOP ---
 st.divider()
-st.caption(f"ORCAS v01 | Usuário: {st.session_state.usuario} | Projeto: {st.session_state.projeto_ativo}")
+usuario_rodape = st.session_state.get('usuario', '')
+st.caption(f"ORCAS v01 | Usuário: {usuario_rodape} | Projeto: {st.session_state.projeto_ativo}")
 
 # --- O STOP VEM POR ÚLTIMO ---
 st.stop()
