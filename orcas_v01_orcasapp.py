@@ -220,47 +220,54 @@ def parse_moeda(t):
 # ==============================================================================
 # INÍCIO INSERÇÃO: INTERCEPTAÇÃO INTELIGENTE DE RETORNO DO MERCADO PAGO E LOGIN AUTOMÁTICO
 # ==============================================================================
-# Garantimos a inicialização do estado de login
+# 1. Garantimos a inicialização de todas as variáveis para evitar QUALQUER NameError
+status_retorno = None
+pref_id = None
+
 if 'logado' not in st.session_state:
     st.session_state.logado = False
 
-# Captura os parâmetros vindos na URL de forma segura (mapeando variações do Mercado Pago)
+# 2. Captura os parâmetros de forma ultra segura usando o dicionário do Streamlit
 params_atuais = st.query_params
-status_retorno = params_atuais.get("status") or params_atuais.get("collection_status")
-pref_id = params_atuais.get("preference_id") or params_atuais.get("collection_id")
 
-# Modificado para aceitar tanto approved quanto pending (comum em fluxos Sandbox/Pix reais)
-if status_retorno in ["approved", "authorized", "pending"] and pref_id and not st.session_state.logado:
-    with st.spinner("🚀 Processando seu pagamento e preparando seu ambiente..."):
-        # Passamos o status real (permitindo que o retornodomp processe o "pending" de forma inteligente)
-        usuario_auto = retornodomp.tratar_retorno(supabase, pref_id, status_retorno)
-        
-        if usuario_auto and isinstance(usuario_auto, dict):
-            st.session_state.logado = True
-            st.session_state.CHAVE_MESTRA_UUID = str(usuario_auto.get('id', ''))
-            st.session_state.usuario = usuario_auto.get('email', '')
-            st.session_state.vencimento = str(usuario_auto.get('vencimento', ''))
-            st.session_state.zap_ativo = usuario_auto.get('zap_ativo', 0)
+if params_atuais:
+    status_retorno = params_atuais.get("status") or params_atuais.get("collection_status")
+    pref_id = params_atuais.get("preference_id") or params_atuais.get("collection_id")
+
+# 3. Só entra no bloco se as variáveis foram de fato populadas e o usuário não está logado
+if status_retorno and pref_id and not st.session_state.logado:
+    # Filtra apenas os status válidos antes de rodar o processo pesado
+    if status_retorno in ["approved", "authorized", "pending"]:
+        with st.spinner("🚀 Processando seu pagamento e preparando seu ambiente..."):
             
-            # RECONEXÃO AUTOMÁTICA DO PLANO: Se houver um plano salvo antes do pagamento, restaura ele agora
-            if usuario_auto.get("projeto_ativo"):
-                st.session_state.projeto_ativo = usuario_auto["projeto_ativo"]
-            else:
-                st.session_state.projeto_ativo = None
+            # Executa a função passando as variáveis perfeitamente definidas
+            usuario_auto = retornodomp.tratar_retorno(supabase, pref_id, status_retorno)
             
-            # Limpa os parâmetros da URL para o app inicializar limpo e evitar loops de recarregamento
-            st.query_params.clear()
-            
-            # Mensagem de boas-vindas customizada conforme o status real
-            if status_retorno == "pending":
-                st.session_state.msg_sucesso = "⏳ Seu Pix está sendo processado pelo banco! Liberamos seu acesso antecipado."
-            else:
-                st.session_state.msg_sucesso = "🎉 Assinatura renovada com sucesso! Bem-vindo de volta!"
+            if usuario_auto and isinstance(usuario_auto, dict):
+                st.session_state.logado = True
+                st.session_state.CHAVE_MESTRA_UUID = str(usuario_auto.get('id', ''))
+                st.session_state.usuario = usuario_auto.get('email', '')
+                st.session_state.vencimento = str(usuario_auto.get('vencimento', ''))
+                st.session_state.zap_ativo = usuario_auto.get('zap_ativo', 0)
                 
-            st.rerun()
-        else:
-            st.query_params.clear()
-            st.warning("⚠️ Não conseguimos validar o login automático do pagamento. Por favor, acesse com seu e-mail e senha.")
+                # Reconexão automática do plano salvo antes do PIX
+                if usuario_auto.get("projeto_ativo"):
+                    st.session_state.projeto_ativo = usuario_auto["projeto_ativo"]
+                else:
+                    st.session_state.projeto_ativo = None
+                
+                # Limpa a URL para o app iniciar sem loops
+                st.query_params.clear()
+                
+                if status_retorno == "pending":
+                    st.session_state.msg_sucesso = "⏳ Seu Pix está sendo processado pelo banco! Liberamos seu acesso antecipado."
+                else:
+                    st.session_state.msg_sucesso = "🎉 Assinatura renovada com sucesso! Bem-vindo de volta!"
+                    
+                st.rerun()
+            else:
+                st.query_params.clear()
+                st.warning("⚠️ Não conseguimos validar o login automático do pagamento. Por favor, acesse com seu e-mail e senha.")
 
 if not st.session_state.get('CHAVE_MESTRA_UUID'):
     st.session_state['CHAVE_MESTRA_UUID'] = ''
