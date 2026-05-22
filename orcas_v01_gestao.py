@@ -13,7 +13,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
     hoje = datetime.now().date()
     uid_gestao = ID_USUARIO_LOGADO
 
-    # Alteração 1: Valor padrão para evitar NameError
+    # Valor padrão para evitar NameError
     v_mensal_total = 19.90 
 
     # --- REGRAS DE NEGÓCIO CENTRALIZADAS ---
@@ -110,8 +110,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
 
         planos_consolidar[nome_plano_input] = meses_total_edit
         
-        # CORRIGIDO ERRO DE DIGITAÇÃO DE "activar_email_atual" PARA "ativar_email_atual"
-        relatorios_consolidar[nome_plano_input] = 1 if (ativar_zap_atual or ativar_email_atual) else 0
+        relatorios_consolidar[nome_plano_input] = 1 if (ativar_zap_atual or activar_email_atual) else 0
 
         qtd_total_planos = len(planos_consolidar)
         qtd_relatorios_totais = sum(relatorios_consolidar.values())
@@ -199,8 +198,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 st.session_state.confirmar_exclusao_plano = False
                 st.rerun()
     else:
-        # Alteração 2: Apenas um aviso, mas o código continua para o bloco de pagamento
-        st.info("💡 Selecione um plano acima para editar ou digite um novo nome para configurar.")
+        st.info("💡 Selecione um plano acima para editar ou digite um novo nome para configuring.")
 
     # --- BLOCO DE SELEÇÃO DE PAGAMENTO (Agora fora da condição principal para aparecer sempre) ---
     st.write("---")
@@ -248,7 +246,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         <style>
         div.stButton > button:has(div:contains("🚀")) { background-color: #28a745 !important; color: white !important; border: none !important; }
         div.stButton > button:has(div:contains("CLIQUE")) { background-color: #009EE3 !important; color: white !important; border: none !important; font-weight: bold !important; }
-        div.stButton > button:has(div:contains("🔍")) { background-color: #f0f2f6 !important; color: #31333F !important; border: 1px solid #dcdfe6 !important; }
         </style>
     """, unsafe_allow_html=True)
 
@@ -257,9 +254,32 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         st.write(f"**Total a pagar:** :green[R$ {valor_final:.2f}] ({label_desc})")
     
     with col_res2:
-        # PROTEÇÃO CONTRA ALTERAÇÕES AUTOMÁTICAS: SÓ GERA O LINK QUANDO O USUÁRIO DE FATO CLICA
         if st.button("🚀 GERAR LINK DE PAGAMENTO", use_container_width=True):
-            with st.spinner("Gerando fatura segura..."):
+            with st.spinner("Efetuando salvamento automático e gerando fatura segura..."):
+                
+                # --- INÍCIO PROCEDIMENTO DE SALVAMENTO AUTOMÁTICO ANTES DE GERAR LINK ---
+                plano_para_vincular = None
+                if nome_plano_input and nome_plano_input.strip() != "":
+                    plano_para_vincular = nome_plano_input.strip()
+                    dados_p = {
+                        "projeto_id": plano_para_vincular, 
+                        "usuario_id": uid_gestao, 
+                        "saldo_inicial": parse_moeda(saldo_input),
+                        "data_ini": d_ini_g.strftime('%Y-%m-%d'), 
+                        "data_fim": st.session_state.tmp_fim_plano.strftime('%Y-%m-%d'),
+                        "zap_ativo": 1 if ativar_zap_atual else 0,
+                        "email_ativo": 1 if ativar_email_atual else 0
+                    }
+                    try:
+                        res_p = supabase.table("config_projetos").select("id").eq("projeto_id", plano_para_vincular).eq("usuario_id", uid_gestao).execute()
+                        if res_p.data: dados_p["id"] = res_p.data[0]["id"]
+                        
+                        supabase.table("config_projetos").upsert(dados_p).execute()
+                        st.session_state.projeto_ativo = plano_para_vincular
+                    except Exception as e:
+                        pass
+                # --- FIM PROCEDIMENTO DE SALVAMENTO AUTOMÁTICO ---
+
                 import orcas_v01_pagamentos as pag
                 email_user = st.session_state.get('usuario_email', "cliente@email.com")
 
@@ -274,7 +294,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                     )
                 except TypeError as e:
                     st.error(f"Erro de tipo detectado: {e}")
-                    # Isso vai printar na tela se faltou argumento ou se o retorno veio errado
 
                 if link:
                     st.session_state.url_ativa = link
@@ -286,7 +305,8 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                             "usuario_id": ID_USUARIO_LOGADO,
                             "pref_id": str(st.session_state.pref_id_ativa),
                             "valor": float(valor_final),
-                            "status": "aguardando"
+                            "status": "aguardando",
+                            "projeto_id": plano_para_vincular  # Gravando o nome do plano ativo na coluna temporária
                         }).execute()
                         st.toast("Link gerado com sucesso!")
                     except Exception as e:
@@ -295,37 +315,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                     st.error("Erro ao gerar link de pagamento no Mercado Pago.")
 
         if "url_ativa" in st.session_state:
-            st.link_button("🔵 CLIQUE PARA PAGAR (MERCADO PAGO)", st.session_state.url_ativa, use_container_width=True)
-            
-            st.write("")
-
-            if st.button("🔍 VERIFICAR SE PAGAMENTO OK", use_container_width=True):
-                with st.spinner("Consultando Mercado Pago..."):
-                    try:
-                        import orcas_v01_pagamentos as pag
-                        from datetime import date
-                        
-                        confirmado_valor = pag.consultar_pagamento_mp(ID_USUARIO_LOGADO)
-                        
-                        if confirmado_valor:
-                            hoje = str(date.today())
-                            supabase.table("usuarios").update({
-                                "data_ult_assinat": hoje,
-                                "valor_pago": confirmado_valor
-                            }).eq("id", ID_USUARIO_LOGADO).execute()
-                            
-                            st.success(f"✅ Pagamento de R$ {confirmado_valor} Confirmado!")
-                            st.balloons()
-                            
-                            if "url_ativa" in st.session_state: 
-                                del st.session_state.url_ativa
-                            
-                            st.rerun()
-                        else:
-                            st.warning("O Mercado Pago ainda não confirmou o recebimento. Se você já pagou, aguarde 30 segundos e tente novamente.")
-                            
-                    except Exception as e:
-                        st.error(f"Erro na verificação direta: {e}")
+            st.link_button("🔵 PAGAMENTO - IR P/ MERCADO PAGO", st.session_state.url_ativa, use_container_width=True)
 
     # Rodapé Integral
     st.markdown("""
