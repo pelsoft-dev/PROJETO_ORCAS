@@ -217,7 +217,6 @@ def parse_moeda(t):
     except:
         return 0.0
 
-
 # ==============================================================================
 # INÍCIO INSERÇÃO: INTERCEPTAÇÃO INTELIGENTE DE RETORNO DO MERCADO PAGO E LOGIN AUTOMÁTICO
 # ==============================================================================
@@ -225,15 +224,16 @@ def parse_moeda(t):
 if 'logado' not in st.session_state:
     st.session_state.logado = False
 
-# Captura os parâmetros vindos na URL
-status_retorno = st.query_params.get("status")
-pref_id = st.query_params.get("preference_id") or st.query_params.get("collection_id")
+# Captura os parâmetros vindos na URL de forma segura (mapeando variações do Mercado Pago)
+params_atuais = st.query_params
+status_retorno = params_atuais.get("status") or params_atuais.get("collection_status")
+pref_id = params_atuais.get("preference_id") or params_atuais.get("collection_id")
 
-# Modificado para aceitar tanto approved quanto pending (comum em fluxos Sandbox/Pix)
+# Modificado para aceitar tanto approved quanto pending (comum em fluxos Sandbox/Pix reais)
 if status_retorno in ["approved", "authorized", "pending"] and pref_id and not st.session_state.logado:
     with st.spinner("🚀 Processando seu pagamento e preparando seu ambiente..."):
-        # Forçamos o status como aprovado internamente para liberar o fluxo de renovação resiliente
-        usuario_auto = retornodomp.tratar_retorno(supabase, pref_id, "approved")
+        # Passamos o status real (permitindo que o retornodomp processe o "pending" de forma inteligente)
+        usuario_auto = retornodomp.tratar_retorno(supabase, pref_id, status_retorno)
         
         if usuario_auto and isinstance(usuario_auto, dict):
             st.session_state.logado = True
@@ -241,9 +241,14 @@ if status_retorno in ["approved", "authorized", "pending"] and pref_id and not s
             st.session_state.usuario = usuario_auto.get('email', '')
             st.session_state.vencimento = str(usuario_auto.get('vencimento', ''))
             st.session_state.zap_ativo = usuario_auto.get('zap_ativo', 0)
-            st.session_state.projeto_ativo = None
             
-            # Limpa os parâmetros da URL para o app inicializar limpo
+            # RECONEXÃO AUTOMÁTICA DO PLANO: Se houver um plano salvo antes do pagamento, restaura ele agora
+            if usuario_auto.get("projeto_ativo"):
+                st.session_state.projeto_ativo = usuario_auto["projeto_ativo"]
+            else:
+                st.session_state.projeto_ativo = None
+            
+            # Limpa os parâmetros da URL para o app inicializar limpo e evitar loops de recarregamento
             st.query_params.clear()
             
             # Mensagem de boas-vindas customizada conforme o status real
