@@ -461,7 +461,6 @@ if not st.session_state.logado:
 
 # --- 5. ESTADO E DADOS ---
 
-# [REMOVIDO BLOCO ANTERIOR E CONSOLIDADO PARA EVITAR CONFLITOS]
 if not st.session_state.get("logado"):
     st.warning("⚠️ Sessão encerrada ou inválida. Por favor, faça login para acessar o sistema.")
     st.stop()
@@ -472,17 +471,17 @@ vencimento_str = st.session_state.get('vencimento', '')
 
 # Tratamento ultra-seguro para a string de vencimento do banco de dados
 if not vencimento_str or vencimento_str.strip() == "":
-    venc_dt_objeto = date.today()
+    venc_dt_objeto = datetime.now().date()
 else:
     try:
         venc_dt_objeto = datetime.strptime(vencimento_str, '%Y-%m-%d').date()
     except Exception:
-        venc_dt_objeto = date.today()
+        venc_dt_objeto = datetime.now().date()
 
 # Executa rotina de segurança se houver usuário válido na sessão
 if ID_USUARIO_LOGADO:
     try:
-        security.verificar_bloqueio_v01(ID_USUARIO_LOGADO, (venc_dt_objeto - date.today()).days)
+        security.verificar_bloqueio_v01(ID_USUARIO_LOGADO, (venc_dt_objeto - datetime.now().date()).days)
     except Exception:
         pass
 
@@ -523,7 +522,7 @@ with st.sidebar:
     st.markdown(f'<div class="user-email">👤 {usuario_exibir}</div>', unsafe_allow_html=True)
     
     # --- LÓGICA DE AVISO DE VENCIMENTO COMERCIAL ---
-    hoje_atual = date.today()
+    hoje_atual = datetime.now().date()
     dias_para_vencer = (venc_dt_objeto - hoje_atual).days
     
     if dias_para_vencer < 0:
@@ -611,7 +610,7 @@ else:
     import orcas_v01_gestao as gestao
     gestao.exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, format_moeda, parse_moeda, security)
 
-# --- O RODAPÉ DEVE VIR ANTES DO STOP ---
+# --- O RODAPÉ DEVE VER ANTES DO STOP ---
 st.divider()
 usuario_rodape = st.session_state.get('usuario', '')
 st.caption(f"ORCAS v01 | Usuário: {usuario_rodape} | Projeto: {st.session_state.projeto_ativo}")
