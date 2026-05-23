@@ -280,13 +280,13 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                     except Exception as e:
                         pass
                 # --- FIM PROCEDIMENTO DE SALVAMENTO AUTOMÁTICO ---
-
                 import orcas_v01_pagamentos as pag
                 email_user = st.session_state.get('usuario_email', "cliente@email.com")
 
                 try:
+                    # CORREÇÃO: Mudado ID_USUARIO_LOGADO para uid_gestao para casar com o escopo da tela de Gestão
                     link, pref_id = pag.criar_link_final(
-                        ID_USUARIO_LOGADO, 
+                        uid_gestao, 
                         valor_final, 
                         f"Assinatura ORCAS - {qtd_meses} Meses",
                         email_user,
@@ -295,7 +295,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                     )
                 except TypeError as e:
                     st.error(f"Erro de tipo detectado: {e}")
-
+                
                 if link:
                     st.session_state.url_ativa = link
                     st.session_state.pref_id_ativa = pref_id if pref_id else ID_USUARIO_LOGADO

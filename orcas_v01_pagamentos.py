@@ -16,6 +16,9 @@ def criar_link_final(user_id, valor, descricao, email_usuario, qtd_meses, url_or
             
         sdk = mercadopago.SDK(token)
         
+        # URL limpa da raiz do seu app para receber a concatenação limpa do Mercado Pago
+        url_do_seu_app = "https://orcas-planejamento-financeiro.streamlit.app/"
+        
         preference_data = {
             "items": [{
                 "id": str(qtd_meses),
@@ -26,19 +29,16 @@ def criar_link_final(user_id, valor, descricao, email_usuario, qtd_meses, url_or
             "payer": {"email": email_usuario},
             "external_reference": str(user_id),
 
+            # URLs apontando para a raiz limpa do aplicativo
             "back_urls": {
-                "success": "https://orcas-planejamento-financeiro.streamlit.app/?status=success",
-                "pending": "https://orcas-planejamento-financeiro.streamlit.app/?status=pending",
-                "failure": "https://orcas-planejamento-financeiro.streamlit.app/?status=failure",
+                "success": url_do_seu_app,
+                "pending": url_do_seu_app,
+                "failure": url_do_seu_app,
             },
-
-            # "back_urls": {
-            #     "success": f"{url_origem}?status=success",
-            #     "pending": f"{url_origem}?status=pending",
-            #     "failure": f"{url_origem}?status=failure",
-            # },
             "notification_url": "https://hook.us2.make.com/youbq3bhry3422tjjahaqqmyrsr2o81e",
-            "auto_return": "approved"
+            
+            # CRÍTICO: "all" obriga o MP a redirecionar de volta tanto em aprovado quanto em Pix Pendente!
+            "auto_return": "all"
         }
         
         res = sdk.preference().create(preference_data)
