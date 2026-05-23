@@ -3,10 +3,10 @@ import mercadopago
 import requests
 from datetime import datetime, timedelta
 
-def criar_link_final(user_id, valor, descricao, email_usuario, qtd_meses, url_origem):
+def criar_link_final(user_id, valor, descricao, email_usuario, qtd_meses, url_origem=None):
     """
-    Cria a preferência de pagamento no Mercado Pago.
-    O 'external_reference' leva o ID do usuário para vincular a transação.
+    Cria a preferência de pagamento no Mercado Pago injetando os dados de bypass 
+    diretamente na URL de retorno para evitar perdas pelo botão manual do Pix.
     """
     try:
         token = st.secrets.get("MP_ACCESS_TOKEN")
@@ -16,8 +16,16 @@ def criar_link_final(user_id, valor, descricao, email_usuario, qtd_meses, url_or
             
         sdk = mercadopago.SDK(token)
         
-        # URL limpa da raiz do seu app para receber a concatenação limpa do Mercado Pago
-        url_do_seu_app = "https://orcas-planejamento-financeiro.streamlit.app/"
+        # Recupera o nome do plano ativo guardado na sessão para persistência
+        plano_ativo = st.session_state.get('projeto_ativo', 'PLANO_PADRAO')
+        
+        # Injeção direta de metadados na URL de retorno que o MP é obrigado a manter no botão "Voltar"
+        url_retorno_com_bypass = (
+            f"https://orcas-planejamento-financeiro.streamlit.app/?"
+            f"bypass_uid={user_id}&"
+            f"bypass_plano={plano_ativo}&"
+            f"bypass_val={float(round(valor, 2))}"
+        )
         
         preference_data = {
             "items": [{
@@ -29,15 +37,13 @@ def criar_link_final(user_id, valor, descricao, email_usuario, qtd_meses, url_or
             "payer": {"email": email_usuario},
             "external_reference": str(user_id),
 
-            # URLs apontando para a raiz limpa do aplicativo
+            # Força o Mercado Pago a carregar a nossa URL customizada em qualquer cenário de clique
             "back_urls": {
-                "success": url_do_seu_app,
-                "pending": url_do_seu_app,
-                "failure": url_do_seu_app,
+                "success": url_retorno_com_bypass,
+                "pending": url_retorno_com_bypass,
+                "failure": url_retorno_com_bypass,
             },
             "notification_url": "https://hook.us2.make.com/youbq3bhry3422tjjahaqqmyrsr2o81e",
-            
-            # CRÍTICO: "all" obriga o MP a redirecionar de volta tanto em aprovado quanto em Pix Pendente!
             "auto_return": "all"
         }
         
@@ -66,17 +72,15 @@ def consultar_pagamento_mp(user_id, pref_id=None, valor_esperado=None):
 
         if res.get('results'):
             for pag in res['results']:
-                # 1. Valida Usuário (External Reference)
                 if str(pag.get('external_reference')) != str(user_id):
                     continue
-                # 2. Valida Preferência de forma correta usando o campo nativo da API de busca
                 if pref_id and str(pag.get('preference_id')) != str(pref_id):
                     continue
-                # 3. Pagamento recente (Últimas 24h)
+                
                 data_pag = datetime.strptime(pag['date_created'][:19], "%Y-%m-%dT%H:%M:%S")
                 if datetime.utcnow() - data_pag > timedelta(hours=24):
                     continue
-                # 4. Valida Valor Esperado
+                    
                 valor_pago = pag.get('transaction_amount')
                 if valor_esperado is not None and round(valor_pago, 2) != round(valor_esperado, 2):
                     continue

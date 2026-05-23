@@ -220,26 +220,75 @@ def parse_moeda(t):
 # ==============================================================================
 # INÍCIO INSERÇÃO: INTERCEPTAÇÃO INTELIGENTE DE RETORNO DO MERCADO PAGO E LOGIN AUTOMÁTICO
 # ==============================================================================
-# 1. BLINDAGEM ABSOLUTA: Definimos as variáveis no início para impedir QUALQUER NameError posterior
+# 1. BLINDAGEM ABSOLUTA: Definimos as variáveis iniciais para impedir QUALQUER NameError posterior
 status_retorno = None
 pref_id = None
 
 if 'logado' not in st.session_state:
     st.session_state.logado = False
 
-# 2. Captura os parâmetros de forma segura se eles existirem na URL atual
-params_url = st.query_params
+# 2. Captura os parâmetros seguros da URL atual (Tanto o fallback antigo quanto o novo modelo Bypass)
+query_params = st.query_params
 
-if params_url and len(params_url) > 0:
-    status_retorno = params_url.get("status") or params_url.get("collection_status")
-    pref_id = params_url.get("preference_id") or params_url.get("collection_id")
+# --- NOVA ESTRATÉGIA: INTEGRAÇÃO COM TABELA TEMPORÁRIA (BYPASS) ---
+if "bypass_uid" in query_params and "bypass_val" in query_params:
+    uid_retorno = query_params["bypass_uid"]
+    valor_retorno = float(query_params["bypass_val"])
+    plano_retorno = query_params.get("bypass_plano", "")
 
-# 3. O login automático só avança se os dados vierem ATIVOS na URL (evita rodar com URL limpa)
+    try:
+        # A. Consulta se existe uma transação idêntica aguardando na tabela temporária
+        req_temp = supabase.table("pagamentos_temp").select("*").eq("usuario_id", uid_retorno).eq("status", "aguardando").execute()
+        
+        if req_temp.data:
+            dados_temp = req_temp.data[0]
+            
+            # B. Busca os dados oficiais e atualizados do usuário para montar a sessão legítima
+            req_user = supabase.table("usuarios").select("*").eq("id", uid_retorno).execute()
+            
+            if req_user.data:
+                u_dados = req_user.data[0]
+                
+                # C. Força a extensão artificial do vencimento no Session State (+30 dias)
+                # Isso garante o acesso visual imediato enquanto o webhook do Make atualiza o banco em background
+                vencimento_ajustado = (datetime.now().date() + timedelta(days=30)).strftime('%Y-%m-%d')
+                
+                # D. Injeta as credenciais de sessão (LOGIN AUTOMÁTICO REPARADO)
+                st.session_state.logado = True
+                st.session_state.CHAVE_MESTRA_UUID = str(uid_retorno)
+                st.session_state.usuario = u_dados.get('email', 'Usuário Confirmado')
+                st.session_state.usuario_email = u_dados.get('email', '')
+                st.session_state.vencimento = vencimento_ajustado
+                
+                # Reconexão do plano selecionado na hora do checkout
+                st.session_state.projeto_ativo = plano_retorno if plano_retorno else dados_temp.get('projeto_id')
+                st.session_state.escolha = "🏠 Dashboard"
+                
+                # E. Consome e apaga o registro da tabela temporária para invalidar reaproveitamentos do link
+                try:
+                    supabase.table("pagamentos_temp").delete().eq("usuario_id", uid_retorno).execute()
+                except Exception:
+                    pass
+                
+                # F. Limpa os parâmetros da barra de endereço e reinicia o app já logado por dentro
+                st.query_params.clear()
+                st.rerun()
+        else:
+            st.warning("⚠️ Nota: O registro temporário de pagamento já foi processado ou expirou.")
+            st.query_params.clear()
+            
+    except Exception as erro_bypass:
+        st.error(f"Erro interno ao processar validação automática: {erro_bypass}")
+
+# --- MODELO DE RETORNO CLÁSSICO (Se o Mercado Pago enviar os parâmetros nativos) ---
+elif query_params and len(query_params) > 0:
+    status_retorno = query_params.get("status") or query_params.get("collection_status")
+    pref_id = query_params.get("preference_id") or query_params.get("collection_id")
+
 if status_retorno and pref_id and not st.session_state.logado:
     if status_retorno in ["approved", "authorized", "pending"]:
         with st.spinner("🚀 Processando seu pagamento e preparando seu ambiente..."):
             
-            # Dispara a verificação e atualização no banco
             usuario_auto = retornodomp.tratar_retorno(supabase, pref_id, status_retorno)
             
             if usuario_auto and isinstance(usuario_auto, dict):
@@ -249,13 +298,11 @@ if status_retorno and pref_id and not st.session_state.logado:
                 st.session_state.vencimento = str(usuario_auto.get('vencimento', ''))
                 st.session_state.zap_ativo = usuario_auto.get('zap_ativo', 0)
                 
-                # Restaura automaticamente o plano ativo salvo antes do checkout
                 if usuario_auto.get("projeto_ativo"):
                     st.session_state.projeto_ativo = usuario_auto["projeto_ativo"]
                 else:
                     st.session_state.projeto_ativo = None
                 
-                # Limpa a URL de forma segura após o sucesso do login automático
                 st.query_params.clear()
                 
                 if status_retorno == "pending":
@@ -268,7 +315,7 @@ if status_retorno and pref_id and not st.session_state.logado:
                 st.query_params.clear()
                 st.warning("⚠️ Não conseguimos validar o login automático do pagamento. Por favor, acesse com seu e-mail e senha.")
 
-# Garante que o estado global não fique nulo se o fluxo for ignorado
+# Garante a integridade da chave mestra de sessão caso nenhum fluxo seja disparado
 if not st.session_state.get('CHAVE_MESTRA_UUID'):
     st.session_state['CHAVE_MESTRA_UUID'] = ''
 # ==============================================================================
