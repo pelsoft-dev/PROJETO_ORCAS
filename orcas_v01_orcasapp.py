@@ -227,7 +227,7 @@ pref_id = None
 if 'logado' not in st.session_state:
     st.session_state.logado = False
 
-# 2. Captura os parâmetros seguros da URL atual (Tanto o fallback antigo quanto o novo modelo Bypass)
+# 2. Captura os parâmetros seguros da URL atual
 query_params = st.query_params
 
 # --- NOVA ESTRATÉGIA: INTEGRAÇÃO COM TABELA TEMPORÁRIA (BYPASS) ---
@@ -249,9 +249,17 @@ if "bypass_uid" in query_params and "bypass_val" in query_params:
             if req_user.data:
                 u_dados = req_user.data[0]
                 
-                # C. Força a extensão artificial do vencimento no Session State (+30 dias)
-                # Isso garante o acesso visual imediato enquanto o webhook do Make atualiza o banco em background
-                vencimento_ajustado = (datetime.now().date() + timedelta(days=30)).strftime('%Y-%m-%d')
+                # C. AJUSTE: Calcula o vencimento temporário para o ÚLTIMO DIA DO MÊS SEGUINTE
+                hoje = datetime.now()
+                # Vai para o primeiro dia do mês subsequente ao próximo mês, e subtrai 1 dia
+                if hoje.month == 11:
+                    proximo_mes_limite = datetime(hoje.year + 1, 1, 1)
+                elif hoje.month == 12:
+                    proximo_mes_limite = datetime(hoje.year + 1, 2, 1)
+                else:
+                    proximo_mes_limite = datetime(hoje.year, hoje.month + 2, 1)
+                
+                vencimento_ajustado = (proximo_mes_limite - timedelta(days=1)).strftime('%Y-%m-%d')
                 
                 # D. Injeta as credenciais de sessão (LOGIN AUTOMÁTICO REPARADO)
                 st.session_state.logado = True
@@ -262,7 +270,9 @@ if "bypass_uid" in query_params and "bypass_val" in query_params:
                 
                 # Reconexão do plano selecionado na hora do checkout
                 st.session_state.projeto_ativo = plano_retorno if plano_retorno else dados_temp.get('projeto_id')
-                st.session_state.escolha = "🏠 Dashboard"
+                
+                # AJUSTE: Redireciona diretamente para o menu de Gestão
+                st.session_state.escolha = "⚙️ Gestão"
                 
                 # E. Consome e apaga o registro da tabela temporária para invalidar reaproveitamentos do link
                 try:
@@ -304,6 +314,9 @@ if status_retorno and pref_id and not st.session_state.logado:
                     st.session_state.projeto_ativo = None
                 
                 st.query_params.clear()
+                
+                # Mantém o mesmo comportamento de destino na rota clássica
+                st.session_state.escolha = "⚙️ Gestão"
                 
                 if status_retorno == "pending":
                     st.session_state.msg_sucesso = "⏳ Seu Pix está sendo processado pelo banco! Liberamos seu acesso antecipado."
