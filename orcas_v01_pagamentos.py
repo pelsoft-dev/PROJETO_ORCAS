@@ -1,12 +1,36 @@
 import streamlit as st
 import mercadopago
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
+from calendar import monthrange
+
+def calcular_proximo_vencimento(hoje, qtd_meses=1):
+    """
+    Regra Comercial D+Meses: Avança o mês mantendo o mesmo dia.
+    Se a data original for o último dia do mês, o vencimento será o último dia do mês destino.
+    """
+    ano = hoje.year
+    mes = hoje.month + qtd_meses
+    
+    while mes > 12:
+        mes -= 12
+        ano += 1
+        
+    dia_original = hoje.day
+    _, ultimo_dia_atual = monthrange(hoje.year, hoje.month)
+    _, ultimo_dia_destino = monthrange(ano, mes)
+    
+    if dia_original == ultimo_dia_atual:
+        dia_destino = ultimo_dia_destino
+    else:
+        dia_destino = min(dia_original, ultimo_dia_destino)
+        
+    return date(ano, mes, dia_destino)
 
 def criar_link_final(user_id, valor, descricao, email_usuario, qtd_meses, url_origem=None):
     """
     Cria a preferência de pagamento no Mercado Pago injetando os dados de bypass 
-    diretamente na URL de retorno para evitar perdas pelo botão manual do Pix.
+    e o cálculo preciso de vencimento comercial direto na URL de retorno.
     """
     try:
         token = st.secrets.get("MP_ACCESS_TOKEN")
@@ -15,16 +39,22 @@ def criar_link_final(user_id, valor, descricao, email_usuario, qtd_meses, url_or
             return None, None
             
         sdk = mercadopago.SDK(token)
-        
-        # Recupera o nome do plano ativo guardado na sessão para persistência
         plano_ativo = st.session_state.get('projeto_ativo', 'PLANO_PADRAO')
         
-        # Injeção direta de metadados na URL de retorno que o MP é obrigado a manter no botão "Voltar"
+        # Calcula a data exata usando a regra comercial para enviar via URL
+        hoje_dt = datetime.now().date()
+        venc_calculado = calcular_proximo_vencimento(hoje_dt, int(qtd_meses))
+        venc_str = venc_calculado.strftime('%Y-%m-%d')
+        
+        url_do_seu_app = "https://orcas-planejamento-financeiro.streamlit.app/"
+        
+        # Parâmetros injetados de forma limpa
         url_retorno_com_bypass = (
-            f"https://orcas-planejamento-financeiro.streamlit.app/?"
+            f"{url_do_seu_app}?"
             f"bypass_uid={user_id}&"
             f"bypass_plano={plano_ativo}&"
-            f"bypass_val={float(round(valor, 2))}"
+            f"bypass_val={float(round(valor, 2))}&"
+            f"bypass_venc={venc_str}"
         )
         
         preference_data = {
@@ -36,8 +66,6 @@ def criar_link_final(user_id, valor, descricao, email_usuario, qtd_meses, url_or
             }],
             "payer": {"email": email_usuario},
             "external_reference": str(user_id),
-
-            # Força o Mercado Pago a carregar a nossa URL customizada em qualquer cenário de clique
             "back_urls": {
                 "success": url_retorno_com_bypass,
                 "pending": url_retorno_com_bypass,
@@ -61,9 +89,6 @@ def criar_link_final(user_id, valor, descricao, email_usuario, qtd_meses, url_or
         return None, None
 
 def consultar_pagamento_mp(user_id, pref_id=None, valor_esperado=None):
-    """
-    Consulta o Mercado Pago e retorna o valor pago validando metadados importantes.
-    """
     try:
         token = st.secrets.get("MP_ACCESS_TOKEN")
         headers = {"Authorization": f"Bearer {token}"}
@@ -90,9 +115,6 @@ def consultar_pagamento_mp(user_id, pref_id=None, valor_esperado=None):
         return None
 
 def verificar_pagamento_no_banco(user_id, supabase_client):
-    """
-    Verifica no Supabase se a data da última assinatura foi atualizada hoje.
-    """
     try:
         res = supabase_client.table("usuarios").select("data_ult_assinat").eq("id", user_id).execute()
         if res.data:

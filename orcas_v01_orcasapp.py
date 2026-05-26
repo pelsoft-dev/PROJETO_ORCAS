@@ -220,21 +220,22 @@ def parse_moeda(t):
 # ==============================================================================
 # INÍCIO INSERÇÃO: INTERCEPTAÇÃO INTELIGENTE DE RETORNO DO MERCADO PAGO E LOGIN AUTOMÁTICO
 # ==============================================================================
-# 1. BLINDAGEM ABSOLUTA: Definimos as variáveis iniciais para impedir QUALQUER NameError posterior
+import streamlit.components.v1 as components
+
 status_retorno = None
 pref_id = None
 
 if 'logado' not in st.session_state:
     st.session_state.logado = False
 
-# 2. Captura os parâmetros seguros da URL atual
 query_params = st.query_params
 
-# --- NOVA ESTRATÉGIA: INTEGRAÇÃO COM TABELA TEMPORÁRIA (BYPASS) ---
+# --- NOVA ESTRATÉGIA: INTEGRAÇÃO COM TABELA TEMPORÁRIA (BYPASS COM PERSISTÊNCIA REAL) ---
 if "bypass_uid" in query_params and "bypass_val" in query_params:
     uid_retorno = query_params["bypass_uid"]
     valor_retorno = float(query_params["bypass_val"])
     plano_retorno = query_params.get("bypass_plano", "")
+    venc_retorno_str = query_params.get("bypass_venc", "")
 
     try:
         # A. Consulta se existe uma transação idêntica aguardando na tabela temporária
@@ -243,44 +244,58 @@ if "bypass_uid" in query_params and "bypass_val" in query_params:
         if req_temp.data:
             dados_temp = req_temp.data[0]
             
-            # B. Busca os dados oficiais e atualizados do usuário para montar a sessão legítima
+            # Se não veio a data na URL por segurança, calcula os +30 dias padrão
+            if not venc_retorno_str:
+                venc_retorno_str = (datetime.now().date() + timedelta(days=30)).strftime('%Y-%m-%d')
+            
+            # ITEM (1) ATUALIZAÇÃO DIRETA NO BANCO DE DADOS (Garante persistência imediata)
+            hoje_string = datetime.now().date().strftime('%Y-%m-%d')
+            try:
+                supabase.table("usuarios").update({
+                    "data_ult_assinat": hoje_string,
+                    "valor_pago": valor_retorno,
+                    "vencimento": venc_retorno_str
+                }).eq("id", uid_retorno).execute()
+            except Exception as erro_banco:
+                st.error(f"Erro ao consolidar dados cadastrais da assinatura: {erro_banco}")
+
+            # B. Busca os dados oficiais atualizados do usuário para montar a sessão legítima
             req_user = supabase.table("usuarios").select("*").eq("id", uid_retorno).execute()
             
             if req_user.data:
                 u_dados = req_user.data[0]
                 
-                # C. AJUSTE: Calcula o vencimento temporário para o ÚLTIMO DIA DO MÊS SEGUINTE
-                hoje = datetime.now()
-                # Vai para o primeiro dia do mês subsequente ao próximo mês, e subtrai 1 dia
-                if hoje.month == 11:
-                    proximo_mes_limite = datetime(hoje.year + 1, 1, 1)
-                elif hoje.month == 12:
-                    proximo_mes_limite = datetime(hoje.year + 1, 2, 1)
-                else:
-                    proximo_mes_limite = datetime(hoje.year, hoje.month + 2, 1)
-                
-                vencimento_ajustado = (proximo_mes_limite - timedelta(days=1)).strftime('%Y-%m-%d')
-                
-                # D. Injeta as credenciais de sessão (LOGIN AUTOMÁTICO REPARADO)
+                # C. Injeta credenciais no Session State
                 st.session_state.logado = True
                 st.session_state.CHAVE_MESTRA_UUID = str(uid_retorno)
                 st.session_state.usuario = u_dados.get('email', 'Usuário Confirmado')
                 st.session_state.usuario_email = u_dados.get('email', '')
-                st.session_state.vencimento = vencimento_ajustado
-                
-                # Reconexão do plano selecionado na hora do checkout
+                st.session_state.vencimento = venc_retorno_str
                 st.session_state.projeto_ativo = plano_retorno if plano_retorno else dados_temp.get('projeto_id')
                 
-                # AJUSTE: Redireciona diretamente para o menu de Gestão
+                # Força o direcionamento correto para a tela de Gestão
                 st.session_state.escolha = "⚙️ Gestão"
                 
-                # E. Consome e apaga o registro da tabela temporária para invalidar reaproveitamentos do link
+                # D. Consome e apaga o registro da tabela temporária
                 try:
                     supabase.table("pagamentos_temp").delete().eq("usuario_id", uid_retorno).execute()
                 except Exception:
                     pass
                 
-                # F. Limpa os parâmetros da barra de endereço e reinicia o app já logado por dentro
+                # ITEM (2) - MECANISMO DE GERENCIAMENTO DE ABAS DUPLICADAS
+                # Armazena uma marcação no localStorage do navegador informando que o login ocorreu com sucesso
+                components.html("""
+                    <script>
+                        localStorage.setItem('orcas_payment_success', 'true');
+                        // Se esta aba foi aberta como um popup/nova aba pelo MP, tenta fechá-la 
+                        // após propagar o sinal, evitando o acúmulo de abas soltas.
+                        if (window.opener) {
+                            window.close();
+                        }
+                    </script>
+                """, height=0)
+                
+                # E. Limpa os parâmetros da barra de endereço e reinicia o app logado
                 st.query_params.clear()
                 st.rerun()
         else:
@@ -290,7 +305,7 @@ if "bypass_uid" in query_params and "bypass_val" in query_params:
     except Exception as erro_bypass:
         st.error(f"Erro interno ao processar validação automática: {erro_bypass}")
 
-# --- MODELO DE RETORNO CLÁSSICO (Se o Mercado Pago enviar os parâmetros nativos) ---
+# --- MODELO DE RETORNO CLÁSSICO ---
 elif query_params and len(query_params) > 0:
     status_retorno = query_params.get("status") or query_params.get("collection_status")
     pref_id = query_params.get("preference_id") or query_params.get("collection_id")
@@ -298,37 +313,27 @@ elif query_params and len(query_params) > 0:
 if status_retorno and pref_id and not st.session_state.logado:
     if status_retorno in ["approved", "authorized", "pending"]:
         with st.spinner("🚀 Processando seu pagamento e preparando seu ambiente..."):
-            
             usuario_auto = retornodomp.tratar_retorno(supabase, pref_id, status_retorno)
-            
             if usuario_auto and isinstance(usuario_auto, dict):
                 st.session_state.logado = True
                 st.session_state.CHAVE_MESTRA_UUID = str(usuario_auto.get('id', ''))
                 st.session_state.usuario = usuario_auto.get('email', '')
                 st.session_state.vencimento = str(usuario_auto.get('vencimento', ''))
                 st.session_state.zap_ativo = usuario_auto.get('zap_ativo', 0)
-                
-                if usuario_auto.get("projeto_ativo"):
-                    st.session_state.projeto_ativo = usuario_auto["projeto_ativo"]
-                else:
-                    st.session_state.projeto_ativo = None
+                st.session_state.projeto_ativo = usuario_auto.get("projeto_ativo")
                 
                 st.query_params.clear()
-                
-                # Mantém o mesmo comportamento de destino na rota clássica
                 st.session_state.escolha = "⚙️ Gestão"
                 
                 if status_retorno == "pending":
                     st.session_state.msg_sucesso = "⏳ Seu Pix está sendo processado pelo banco! Liberamos seu acesso antecipado."
                 else:
                     st.session_state.msg_sucesso = "🎉 Assinatura renovada com sucesso! Bem-vindo de volta!"
-                    
                 st.rerun()
             else:
                 st.query_params.clear()
                 st.warning("⚠️ Não conseguimos validar o login automático do pagamento. Por favor, acesse com seu e-mail e senha.")
 
-# Garante a integridade da chave mestra de sessão caso nenhum fluxo seja disparado
 if not st.session_state.get('CHAVE_MESTRA_UUID'):
     st.session_state['CHAVE_MESTRA_UUID'] = ''
 # ==============================================================================
@@ -495,11 +500,18 @@ if not st.session_state.logado:
                     
                     if "temp_user_data" in st.session_state:
                         d = st.session_state.temp_user_data
+                        
+                        # --- ADEQUAÇÃO DO ITEM (3): GERAÇÃO EXATA DOS 7 DIAS DE DEGUSTAÇÃO ---
                         venc_inicial = (datetime.now() + timedelta(days=7)).date().strftime('%Y-%m-%d')
+                        
                         res = supabase.table("usuarios").insert({
-                            "nome": d['nome'], "email": d['email'], "celular": d['celular'], 
-                            "senha": senha_hash, "vencimento": venc_inicial
+                            "nome": d['nome'], 
+                            "email": d['email'], 
+                            "celular": d['celular'], 
+                            "senha": senha_hash, 
+                            "vencimento": venc_inicial
                         }).execute()
+                        
                         user_id = res.data[0]['id']
                         user_email = d['email']
                         user_venc = venc_inicial
