@@ -402,7 +402,7 @@ if not st.session_state.logado:
                             st.session_state.codigo_verificacao = codigo
                             st.session_state.codigo_timestamp = datetime.now()
                             st.session_state.temp_user_data = {"nome": new_nome, "email": new_email, "celular": new_celular}
-                            st.info(f"Código enviado para o e-mail {new_email}")
+                            st.info(f"Código enviado para o e-mail {new_email}",codigo)
                     else:
                         st.error("Preencha o campo E-mail para receber o código.")
                 
