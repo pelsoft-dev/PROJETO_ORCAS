@@ -397,6 +397,7 @@ if not st.session_state.logado:
                 if col_env2.button("Enviar Código para E-mail"):
                     if new_email:
                         codigo = str(random.randint(100000, 999999))
+                        print(codigo)
                         if disparar_email_codigo(new_email, codigo):
                             st.session_state.codigo_verificacao = codigo
                             st.session_state.codigo_timestamp = datetime.now()
