@@ -397,12 +397,11 @@ if not st.session_state.logado:
                 if col_env2.button("Enviar Código para E-mail"):
                     if new_email:
                         codigo = str(random.randint(100000, 999999))
-                        print(codigo)
                         if disparar_email_codigo(new_email, codigo):
                             st.session_state.codigo_verificacao = codigo
                             st.session_state.codigo_timestamp = datetime.now()
                             st.session_state.temp_user_data = {"nome": new_nome, "email": new_email, "celular": new_celular}
-                            st.info(f"Código enviado para o e-mail {new_email}",codigo)
+                            st.info(f"Código enviado para o e-mail {new_email}")
                     else:
                         st.error("Preencha o campo E-mail para receber o código.")
                 
@@ -456,6 +455,9 @@ if not st.session_state.logado:
                             st.session_state.codigo_timestamp = datetime.now()
                             st.session_state.temp_email = conta_id
                             st.info(f"Código enviado para o e-mail cadastrado.")
+                            # --- CÓDIGO PROVISÓRIO DE TESTE ---
+                            st.toast(f"🔑 MODO TESTE: Código gerado: {codigo}", icon="⚙️")
+                            st.success(f"⚙️ [TESTE] Código gerado: **{codigo}**")
                     else:
                         st.error("Conta não localizada.")
                 else:
