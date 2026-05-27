@@ -402,6 +402,8 @@ if not st.session_state.logado:
                             st.session_state.codigo_timestamp = datetime.now()
                             st.session_state.temp_user_data = {"nome": new_nome, "email": new_email, "celular": new_celular}
                             st.info(f"Código enviado para o e-mail {new_email}")
+                            # --- CÓDIGO PROVISÓRIO DE TESTE (Criação de Conta - E-mail) ---
+                            st.success(f"⚙️ [TESTE CRIAR CONTA] Código: **{codigo}**")   
                     else:
                         st.error("Preencha o campo E-mail para receber o código.")
                 
@@ -455,9 +457,6 @@ if not st.session_state.logado:
                             st.session_state.codigo_timestamp = datetime.now()
                             st.session_state.temp_email = conta_id
                             st.info(f"Código enviado para o e-mail cadastrado.")
-                            # --- CÓDIGO PROVISÓRIO DE TESTE ---
-                            st.toast(f"🔑 MODO TESTE: Código gerado: {codigo}", icon="⚙️")
-                            st.success(f"⚙️ [TESTE] Código gerado: **{codigo}**")
                     else:
                         st.error("Conta não localizada.")
                 else:
