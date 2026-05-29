@@ -7,14 +7,14 @@ from dateutil.relativedelta import relativedelta
 def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, format_moeda, parse_moeda, security):
     """
     Sub-rotina da Tela Gestão - Controle de Planos, Saldos e Assinatura.
-    Layout 100% fiel ao protótipo e cálculo de pro-rata baseado no 'valor_pago' real do banco.
+    Layout 100% fiel ao protótipo e cálculo de pro-rata baseado no 'valor_pago' e 'data_ult_assinat'.
     """
     
     # --- TRATAMENTO DO PERFIL DO UTILIZADOR E VALOR PAGO REAL ---
     tipo_renov_original = "6 Meses"
     vencimento_atual_str = None
     valor_pago_real = 0.00
-    data_pagamento_real = None
+    data_ult_assinat_real = None
     
     try:
         res_user_master = supabase.table("usuarios").select("*").eq("id", ID_USUARIO_LOGADO).execute()
@@ -22,11 +22,11 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             dados_usuario = res_user_master.data[0]
             vencimento_atual_str = dados_usuario.get('vencimento')
             
-            # Buscando o valor real pago e a data em que o ciclo começou
+            # Ajuste do nome do campo conforme especificado por você
             valor_pago_real = float(dados_usuario.get('valor_pago') or 0.00)
-            data_pag_aux = dados_usuario.get('data_pagamento') or dados_usuario.get('criado_em')
+            data_pag_aux = dados_usuario.get('data_ult_assinat') or dados_usuario.get('criado_em')
             if data_pag_aux:
-                data_pagamento_real = datetime.strptime(str(data_pag_aux)[:10], '%Y-%m-%d').date()
+                data_ult_assinat_real = datetime.strptime(str(data_pag_aux)[:10], '%Y-%m-%d').date()
             
             val_db = dados_usuario.get('tipo_renovacao')
             if val_db is not None:
@@ -137,12 +137,11 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         relatorios_consolidar = dict(rels_banco)
         
         planos_consolidar[nome_plano_input] = meses_total_edit
-        relatorios_consolidar[nome_plano_input] = 1 if (ativar_zap_atual or activar_email_atual := ativar_email_atual) else 0
+        relatorios_consolidar[nome_plano_input] = 1 if (ativar_zap_atual or ativar_email_atual) else 0
 
         qtd_total_planos = len(planos_consolidar)
         qtd_relatorios_totais = sum(relatorios_consolidar.values())
         
-        c24 = sum(1 for m in planos_consolidar.values() if m <= 24)
         c36 = sum(1 for m in planos_consolidar.values() if m == 36)
         c48 = sum(1 for m in planos_consolidar.values() if m == 48)
         c60 = sum(1 for m in planos_consolidar.values() if m >= 60)
@@ -173,19 +172,19 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         st.write("")
 
         # ------------------------------------------------------------------------------------
-        # CORREÇÃO DE LAYOUT: CRIAÇÃO DO RÁDIO LOGO ABAIXO DO QUADRO AZUL (CONFORME IMAGE_ACCB9B.JPG)
+        # DISPOSIÇÃO DO LAYOUT COMPATÍVEL COM O SEU PEDIDO (ABAIXO DO QUADRO AZUL)
         # ------------------------------------------------------------------------------------
         tipo_pagamento = st.radio(
             "Escolha o período de renovação:",
             ["Selecione uma opção...", "Mensal (Sem desconto)", "6 Meses (5% de desconto)", "12 Meses (11% de desconto)"],
-            horizontal=True, key="radio_pag_final_v7"
+            horizontal=True, key="radio_pag_final_v8"
         )
 
-        # --- VERIFICAÇÃO DINÂMICA DE MUDANÇA DE PARÂMETROS ---
+        # Verificação exata de modificações
         houve_mudanca_parametros = False
         if res_cfg_plano.data:
             if (meses_total_edit != meses_originais_db or 
-                (1 if activar_zap_atual else 0) != zap_plano_db or 
+                (1 if ativar_zap_atual else 0) != zap_plano_db or 
                 (1 if ativar_email_atual else 0) != email_plano_db):
                 houve_mudanca_parametros = True
         elif nome_plano_input.strip() != "":
@@ -194,7 +193,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         if tipo_pagamento != "Selecione uma opção...":
             houve_mudanca_parametros = True
 
-        # Exibe o Alerta Verde condicional imediatamente abaixo do rádio
+        # Exibição do aviso verde condicional logo abaixo do rádio
         if houve_mudanca_parametros:
             st.markdown(
                 f"""
@@ -205,7 +204,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 unsafe_allow_html=True
             )
 
-        # --- BOTÕES DE SALVAR E EXCLUIR NA POSIÇÃO EXATA DO LAYOUT ---
+        # Botões de ação posicionados conforme o layout enviado
         btn_col1, btn_col2 = st.columns(2)
         
         dados_p_salvamento = {
@@ -214,7 +213,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             "saldo_inicial": parse_moeda(saldo_input),
             "data_ini": d_ini_g.strftime('%Y-%m-%d'), 
             "data_fim": st.session_state.tmp_fim_plano.strftime('%Y-%m-%d'),
-            "zap_ativo": 1 if activar_zap_atual else 0,
+            "zap_ativo": 1 if ativar_zap_atual else 0,
             "email_ativo": 1 if ativar_email_atual else 0
         }
 
@@ -239,7 +238,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 st.rerun()
 
         # ------------------------------------------------------------------------------------
-        # SEÇÃO FINALIZAR ASSINATURA (ABAIXO DOS BOTÕES CONFORME LAYOUT)
+        # TÍTULO "FINALIZAR ASSINATURA" LOGO APÓS OS BOTÕES
         # ------------------------------------------------------------------------------------
         st.write("")
         st.subheader("💳 Finalizar Assinatura")
@@ -263,7 +262,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 label_desc = "Valor Padrão"
                 recalculo_expiracao = (hoje + relativedelta(months=1)).strftime('%Y-%m-%d')
 
-            # --- CÁLCULO SEGURO E CORRETO DE PRO-RATA BASEADO NO VALOR PAGO REAL DO BANCO ---
+            # --- MATEMÁTICA PROTEGIDA BASEADA NA DATA_ULT_ASSINAT ---
             if not vencimento_atual_str:
                 vencimento_atual_str = st.session_state.get('vencimento', hoje.strftime('%Y-%m-%d'))
             
@@ -273,16 +272,16 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 venc_date = hoje
 
             dias_restantes = (venc_date - hoje).days if venc_date > hoje else 0
+            dias_totais_ciclo = 180
 
-            # Descobre o total de dias total do ciclo antigo para saber a proporção diária real
-            if data_pagamento_real and venc_date > data_pagamento_real:
-                dias_totais_ciclo = (venc_date - data_pagamento_real).days
+            # Verificação com a variável correta que você indicou: data_ult_assinat
+            if data_ult_assinat_real and venc_date > data_ult_assinat_real:
+                dias_totais_ciclo = (venc_date - data_ult_assinat_real).days
             else:
                 if "6 Meses" in tipo_renov_original: dias_totais_ciclo = 180
                 elif "12 Meses" in tipo_renov_original: dias_totais_ciclo = 365
                 else: dias_totais_ciclo = 30
 
-            # Valor diário baseado no dinheiro REAL que entrou no seu banco
             if valor_pago_real > 0 and dias_totais_ciclo > 0:
                 valor_diario_real = valor_pago_real / dias_totais_ciclo
                 saldo_credito_usuario = max(dias_restantes * valor_diario_real, 0.0)
@@ -291,7 +290,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
 
             valor_final = v_custo_novo_periodo - saldo_credito_usuario
 
-            # O aviso amarelo SÓ aparece se de fato houver perda real de saldo financeiro excedente
             if valor_final < 0 and "Mensal" in tipo_pagamento and dias_restantes > 30:
                 saldo_perdido_exibir = abs(valor_final)
                 diferenca_semestral_exibir = max(v_6meses - saldo_credito_usuario, 0.00)
@@ -341,7 +339,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                     st.warning("Configurações pré-salvas! Para confirmar e aplicar suas novas configurações de licença, efetue o pagamento abaixo.")
 
             st.write("")
-            cupom_in = st.text_input("Possui um Cupom de Desconto?", key="cp_gest_final_v4").upper()
+            cupom_in = st.text_input("Possui um Cupom de Desconto?", key="cp_gest_final_v5").upper()
             desc_extra = 0.0
             if cupom_in:
                 try:
@@ -413,8 +411,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                                     st.toast("Link gerado com sucesso!")
                                 except Exception:
                                     pass
-                            else:
-                                anti_erro = True
             
             if "url_ativa" in st.session_state and valor_final_faturar > 0:
                 st.link_button("🔵 PAGAMENTO - IR P/ MERCADO PAGO", st.session_state.url_ativa, use_container_width=True)
