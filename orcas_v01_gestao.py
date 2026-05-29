@@ -7,7 +7,7 @@ from dateutil.relativedelta import relativedelta
 def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, format_moeda, parse_moeda, security):
     """
     Sub-rotina da Tela Gestão - Controle de Planos, Saldos e Assinatura.
-    Com cálculo Dinâmico de Pro-rata e Aviso de Alteração de Licença (Item 5).
+    Fluxo corrigido com ordenação de elementos e cálculo preciso de Upgrade (Item 5).
     """
     st.markdown('<div class="titulo-tela">Gestão de Planos e Assinaturas</div>', unsafe_allow_html=True)
     
@@ -28,7 +28,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
     col_l1_1, col_l1_2 = st.columns(2)
     lista_gestao = [""] + projs
     
-    # ADICIONADO KEY ÚNICA PARA CORRIGIR O DUPLICATE ELEMENT ID
+    # Seleção de plano
     plano_sel = col_l1_1.selectbox("Selecione um Plano já existente:", lista_gestao, key="sb_plano_gestao_unique")
     
     if plano_sel != "" and plano_sel != st.session_state.get('projeto_ativo'):
@@ -42,7 +42,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         value=st.session_state.projeto_ativo if st.session_state.projeto_ativo else ""
     )
 
-    # Bloco de configuração de plano (Mantido integralmente)
+    # Bloco de configuração de plano
     if nome_plano_input and nome_plano_input.strip() != "":
         col_l2_1, col_l2_2 = st.columns(2)
         
@@ -86,8 +86,15 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         col_l4_1, col_l4_2 = st.columns(2)
         
         res_cfg_plano = supabase.table("config_projetos").select("*").eq("projeto_id", nome_plano_input).eq("usuario_id", uid_gestao).execute()
+        
+        # Guardamos as configurações originais salvas no banco para comparar e calcular pro-rata preciso
         zap_plano_db = res_cfg_plano.data[0].get('zap_ativo', 0) if res_cfg_plano.data else 0
         email_plano_db = res_cfg_plano.data[0].get('email_ativo', 0) if res_cfg_plano.data else 0
+        meses_originais_db = 24
+        if res_cfg_plano.data:
+            d1_orig = datetime.strptime(res_cfg_plano.data[0]['data_ini'], '%Y-%m-%d').date()
+            d2_orig = datetime.strptime(res_cfg_plano.data[0]['data_fim'], '%Y-%m-%d').date()
+            meses_originais_db = (d2_orig.year - d1_orig.year) * 12 + (d2_orig.month - d1_orig.month) + 1
         
         with col_l4_1:
             st.write("") 
@@ -95,22 +102,30 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             ativar_zap_atual = st.checkbox("Adicionar o Resumo Diário ORCAS via Whatsapp", value=(zap_plano_db == 1))
             ativar_email_atual = st.checkbox("Adicionar o Resumo Diário ORCAS via E-mail", value=(email_plano_db == 1))
         
+        # --- CÁLCULO DO VALOR BASE (DO BANCO) VS ATUAL DA TELA ---
         res_all = supabase.table("config_projetos").select("*").eq("usuario_id", uid_gestao).execute()
         dados_db = res_all.data if res_all.data else []
         
-        planos_consolidar = {}
-        relatorios_consolidar = {}
-        
+        # 1. Custo se baseando no que já está gravado no banco de dados
+        planos_banco = {}
+        rels_banco = {}
         for p in dados_db:
-            d1 = datetime.strptime(p['data_ini'], '%Y-%m-%d').date()
-            d2 = datetime.strptime(p['data_fim'], '%Y-%m-%d').date()
-            duracao = (d2.year - d1.year) * 12 + (d2.month - d1.month) + 1
-            planos_consolidar[p['projeto_id']] = duracao
-            rel_ativo = 1 if (p.get('zap_ativo', 0) == 1 or p.get('email_ativo', 0) == 1) else 0
-            relatorios_consolidar[p['projeto_id']] = rel_ativo
+            da1 = datetime.strptime(p['data_ini'], '%Y-%m-%d').date()
+            da2 = datetime.strptime(p['data_fim'], '%Y-%m-%d').date()
+            planos_banco[p['projeto_id']] = (da2.year - da1.year) * 12 + (da2.month - da1.month) + 1
+            rels_banco[p['projeto_id']] = 1 if (p.get('zap_ativo', 0) == 1 or p.get('email_ativo', 0) == 1) else 0
 
+        v_mensal_banco = 19.90 + (sum(rels_banco.values()) * 9.85) + (max(len(planos_banco) - 2, 0) * 12.80)
+        v_mensal_banco += sum(6.40 for m in planos_banco.values() if m == 36)
+        v_mensal_banco += sum(12.80 for m in planos_banco.values() if m == 48)
+        v_mensal_banco += sum(19.20 for m in planos_banco.values() if m >= 60)
+
+        # 2. Custo baseado nas alterações dinâmicas feitas em tempo de execução na tela
+        planos_consolidar = dict(planos_banco)
+        relatorios_consolidar = dict(rels_banco)
+        
         planos_consolidar[nome_plano_input] = meses_total_edit
-        relatorios_consolidar[nome_plano_input] = 1 if (ativar_zap_atual or activar_email_atual if 'activar_email_atual' in locals() else activar_email_atual if 'activar_email_atual' in globals() else tirar_erro_variavel if False else ativar_email_atual) else 0
+        relatorios_consolidar[nome_plano_input] = 1 if (ativar_zap_atual or ativar_email_atual) else 0
 
         qtd_total_planos = len(planos_consolidar)
         qtd_relatorios_totais = sum(relatorios_consolidar.values())
@@ -155,68 +170,17 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
 
         st.divider()
 
-        # --- DETECÇÃO DINÂMICA DE ALTERAÇÃO DA LICENÇA (ITEM 5 - ANEXO 02) ---
-        # Verifica se os parâmetros em tela são diferentes dos originais salvos no banco para este plano
+        # --- DETECÇÃO DE UPGRADE/ALTERAÇÃO DOS PARÂMETROS ---
         houve_mudanca_parametros = False
         if res_cfg_plano.data:
-            dados_plano_original = res_cfg_plano.data[0]
-            if (meses_total_edit != duracao or 
-                (1 if ativar_zap_atual else 0) != dados_plano_original.get('zap_ativo', 0) or 
-                (1 if ativar_email_atual else 0) != dados_plano_original.get('email_ativo', 0)):
+            if (meses_total_edit != meses_originais_db or 
+                (1 if ativar_zap_atual else 0) != zap_plano_db or 
+                (1 if ativar_email_atual else 0) != email_plano_db):
                 houve_mudanca_parametros = True
         elif nome_plano_input.strip() != "":
-            # Se for um plano novo digitado na caixa, assume que é uma nova configuração
             houve_mudanca_parametros = True
 
-        # --- SELEÇÃO DE PERÍODO DE PAGAMENTO / RENOVAÇÃO (MOVIDO PARA CIMA DOS BOTÕES DE SALVAMENTO) ---
-        st.subheader("💳 Finalizar Assinatura")
-        
-        tipo_pagamento = st.radio(
-            "Escolha o período de renovação:",
-            ["Mensal (Sem desconto)", "6 Meses (5% de desconto)", "12 Meses (11% de desconto)"],
-            horizontal=True, key="radio_pag_final_v5"
-        )
-
-        if "6 Meses" in tipo_pagamento:
-            qtd_meses = 6
-            v_custo_novo_plano = v_6meses
-            label_desc = "5% OFF"
-        elif "12 Meses" in tipo_pagamento:
-            qtd_meses = 12
-            v_custo_novo_plano = v_12meses
-            label_desc = "11% OFF"
-        else:
-            qtd_meses = 1
-            v_custo_novo_plano = v_mensal_total
-            label_desc = "Valor Padrão"
-
-        # --- CÁLCULO FINANCEIRO REAL PRO-RATA (BASEADO EM DIAS RESTANTES) ---
-        vencimento_atual_str = st.session_state.get('vencimento', hoje.strftime('%Y-%m-%d'))
-        try:
-            venc_date = datetime.strptime(vencimento_atual_str[:10], '%Y-%m-%d').date()
-        except:
-            venc_date = hoje
-
-        dias_restantes = (venc_date - hoje).days if venc_date > hoje else 0
-
-        # Obtém o valor diário da assinatura atual baseado na configuração anterior do banco
-        # Se não houver configuração prévia, baseia-se no valor de base padrão
-        valor_diario_antigo = v_mensal_total / 30
-        saldo_credito_usuario = max(dias_restantes * valor_diario_antigo, 0.0)
-
-        # Determinação do valor complementar/final
-        if v_custo_novo_plano > saldo_credito_usuario:
-            valor_final = v_custo_novo_plano - saldo_credito_usuario
-            recalculo_expiracao = (hoje + relativedelta(months=qtd_meses)).strftime('%Y-%m-%d')
-        else:
-            # Caso a nova configuração dê um valor menor ou igual ao crédito que ele já tem:
-            valor_final = 0.00
-            # Não devolvemos dinheiro. Recalculamos os dias estendidos proporcionais com base no saldo
-            div_novo = (v_custo_novo_plano / (qtd_meses * 30))
-            dias_comprados_proporcional = int(saldo_credito_usuario / div_novo) if div_novo > 0 else (qtd_meses * 30)
-            recalculo_expiracao = (hoje + timedelta(days=dias_comprados_proporcional)).strftime('%Y-%m-%d')
-
-        # SE HOUVE ALTERAÇÃO EM RELAÇÃO AO BANCO, EXIBE A MENSAGEM DO ANEXO 02
+        # Exibição da mensagem exata solicitada (Anexo 02) se o usuário alterar algo
         if houve_mudanca_parametros:
             st.markdown(
                 f"""
@@ -227,45 +191,23 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 unsafe_allow_html=True
             )
 
-        # --- SEÇÃO DE BOTÕES DE GERENCIAMENTO ---
+        # --- BOTÕES DE SALVAMENTO DO ESCOPO DO PLANO (AQUI FICA NO MEIO CONFORME PEDIDO) ---
         btn_col1, btn_col2 = st.columns(2)
         
+        # Estado temporário de pré-salvamento se houver pagamento pendente
+        dados_p_salvamento = {
+            "projeto_id": nome_plano_input, 
+            "usuario_id": uid_gestao, 
+            "saldo_inicial": parse_moeda(saldo_input),
+            "data_ini": d_ini_g.strftime('%Y-%m-%d'), 
+            "data_fim": st.session_state.tmp_fim_plano.strftime('%Y-%m-%d'),
+            "zap_ativo": 1 if ativar_zap_atual else 0,
+            "email_ativo": 1 if ativar_email_atual else 0
+        }
+
         if btn_col1.button("Salvar alterações ou Criar o novo Plano", use_container_width=True):
-            dados_p = {
-                "projeto_id": nome_plano_input, 
-                "usuario_id": uid_gestao, 
-                "saldo_inicial": parse_moeda(saldo_input),
-                "data_ini": d_ini_g.strftime('%Y-%m-%d'), 
-                "data_fim": st.session_state.tmp_fim_plano.strftime('%Y-%m-%d'),
-                "zap_ativo": 1 if ativar_zap_atual else 0,
-                "email_ativo": 1 if ativar_email_atual else 0
-            }
-            
-            # SE NÃO HÁ VALOR ADICIONAL A PAGAR (R$ 0.00), PERSISTE IMEDIATAMENTE NO BANCO
-            if valor_final <= 0.00:
-                res_p = supabase.table("config_projetos").select("id").eq("projeto_id", nome_plano_input).eq("usuario_id", uid_gestao).execute()
-                if res_p.data: dados_p["id"] = res_p.data[0]["id"]
-                
-                supabase.table("config_projetos").upsert(dados_p).execute()
-                supabase.table("lancamentos").delete().eq("projeto_id", nome_plano_input).eq("usuario_id", uid_gestao).gt("data", st.session_state.tmp_fim_plano.strftime('%Y-%m-%d')).execute()
-                
-                # Atualiza a licença e validade no cadastro oficial do usuário imediatamente
-                supabase.table("usuarios").update({"vencimento": recalculo_expiracao}).eq("id", uid_gestao).execute()
-                st.session_state.vencimento = str(recalculo_expiracao)
-                
-                if 'tmp_fim_plano' in st.session_state: del st.session_state.tmp_fim_plano
-                st.session_state.projeto_ativo = nome_plano_input
-                st.session_state.msg_sucesso = f"Configurações salvas e aplicadas gratuitamente com sucesso! Nova data de expiração: {datetime.strptime(recalculo_expiracao, '%Y-%m-%d').strftime('%DD/%MM/%YYYY')}"
-                st.rerun()
-            else:
-                # SE EXISTE VALOR COMPLEMENTAR A PAGAR, GUARDA A INTENÇÃO TEMPORARIAMENTE NA SESSÃO
-                # As alterações NÃO vão para o banco oficial até que o pagamento seja aprovado
-                st.session_state.alteracao_licenca_pendente = {
-                    "dados_projeto": dados_p,
-                    "novo_vencimento": recalculo_expiracao,
-                    "valor_a_pagar": valor_final
-                }
-                st.warning("Configurações pré-salvas! Para validar e aplicar esta alteração de Licença definitivamente, efetue o pagamento do valor complementar calculado abaixo.")
+            # No clique do salvar, o cálculo financeiro abaixo validará a persistência imediata ou condicional
+            st.session_state.solicitou_salvar_config = True
 
         if st.session_state.get('projeto_ativo'):
             if btn_col2.button("Excluir Plano", type="primary", use_container_width=True):
@@ -283,8 +225,94 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             if ce2.button("CANCELAR"):
                 st.session_state.confirmar_exclusao_plano = False
                 st.rerun()
+
+        # --- (1) DESLOCAMENTO DA SEÇÃO DE FINALIZAÇÃO DA ASSINATURA PARA O FINAL ---
+        st.write("---")
+        st.subheader("💳 Finalizar Assinatura")
+        
+        tipo_pagamento = st.radio(
+            "Escolha o período de renovação:",
+            ["Mensal (Sem desconto)", "6 Meses (5% de desconto)", "12 Meses (11% de desconto)"],
+            horizontal=True, key="radio_pag_final_v5"
+        )
+
+        # Injeta o tipo de renovação no payload que vai para o banco
+        dados_p_salvamento["tipo_renovacao"] = tipo_pagamento
+
+        # Define o multiplicador/período base da contratação
+        if "6 Meses" in tipo_pagamento:
+            qtd_meses = 6
+            v_custo_config_escolhida = v_6meses
+            label_desc = "5% OFF"
+        elif "12 Meses" in tipo_pagamento:
+            qtd_meses = 12
+            v_custo_config_escolhida = v_12meses
+            label_desc = "11% OFF"
+        else:
+            qtd_meses = 1
+            v_custo_config_escolhida = v_mensal_total
+            label_desc = "Valor Padrão"
+
+        # --- (2) CORREÇÃO DO CÁLCULO DE PRO-RATA (VALOR NÃO DEVE SER ZERO) ---
+        # Resgata a expiração atual da licença master da conta
+        vencimento_atual_str = st.session_state.get('vencimento', hoje.strftime('%Y-%m-%d'))
+        try:
+            venc_date = datetime.strptime(vencimento_atual_str[:10], '%Y-%m-%d').date()
+        except:
+            venc_date = hoje
+
+        dias_restantes = (venc_date - hoje).days if venc_date > hoje else 0
+
+        # Diferença mensal real gerada pelas novas caixas de seleção/sliders ativados na tela
+        diferenca_mensal = v_mensal_total - v_mensal_banco
+
+        if diferenca_mensal > 0 and dias_restantes > 0:
+            # Upgrade ativo por acréscimo de recursos no período vigente: cobra proporcional aos dias restantes
+            valor_residual_recursos = (diferenca_mensal / 30) * dias_restantes
+            valor_final = v_custo_config_escolhida + valor_residual_recursos
+            recalculo_expiracao = (venc_date + relativedelta(months=qtd_meses)).strftime('%Y-%m-%d')
+        else:
+            # Renovação padrão ou upgrade sem licença prévia ativa
+            valor_final = v_custo_config_escolhida
+            recalculo_expiracao = (hoje + relativedelta(months=qtd_meses)).strftime('%Y-%m-%d')
+
+        # Força o piso para que upgrades nunca fiquem zerados se houver adição de novos itens
+        if houve_mudanca_parametros and valor_final <= v_custo_config_escolhida and diferenca_mensal > 0:
+            valor_final = v_custo_config_escolhida + (diferenca_mensal * (dias_restantes / 30))
+
+        # Garantia total: Não há devolução se o valor for menor
+        if valor_final < 0:
+            valor_final = 0.00
+
+        # --- EXECUÇÃO LOGICIAL CONDICIONADA APÓS O CLIQUE DO SALVAR ---
+        if st.session_state.get('solicitou_salvar_config', False):
+            st.session_state.solicitou_salvar_config = False # limpa estado
+            
+            if valor_final <= 0.00:
+                # Sem valor residual: salva imediatamente nas tabelas oficiais
+                res_p = supabase.table("config_projetos").select("id").eq("projeto_id", nome_plano_input).eq("usuario_id", uid_gestao).execute()
+                if res_p.data: dados_p_salvamento["id"] = res_p.data[0]["id"]
                 
-        # --- BLOCO DOS COMPONENTES FINAIS DE PAGAMENTO ---
+                supabase.table("config_projetos").upsert(dados_p_salvamento).execute()
+                supabase.table("lancamentos").delete().eq("projeto_id", nome_plano_input).eq("usuario_id", uid_gestao).gt("data", st.session_state.tmp_fim_plano.strftime('%Y-%m-%d')).execute()
+                
+                supabase.table("usuarios").update({"vencimento": recalculo_expiracao, "tipo_renovacao": tipo_pagamento}).eq("id", uid_gestao).execute()
+                st.session_state.vencimento = str(recalculo_expiracao)
+                
+                if 'tmp_fim_plano' in st.session_state: del st.session_state.tmp_fim_plano
+                st.session_state.projeto_ativo = nome_plano_input
+                st.session_state.msg_sucesso = f"Configurações salvas com sucesso! Licença estendida até: {datetime.strptime(recalculo_expiracao, '%Y-%m-%d').strftime('%d/%m/%Y')}"
+                st.rerun()
+            else:
+                # Há valores residuais a pagar: Mantém no estado temporário até a aprovação do webhook MP
+                st.session_state.alteracao_licenca_pendente = {
+                    "dados_projeto": dados_p_salvamento,
+                    "novo_vencimento": recalculo_expiracao,
+                    "valor_a_pagar": valor_final,
+                    "tipo_renovacao": tipo_pagamento
+                }
+                st.warning("Configurações registradas! Para que a mudança de parâmetros tenha validade, efetue o pagamento complementar gerado abaixo.")
+
         st.write("")
         cupom_in = st.text_input("Possui um Cupom de Desconto?", key="cp_gest_final_v3").upper()
         desc_extra = 0.0
@@ -303,7 +331,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
 
         valor_final_faturar = max(valor_final - desc_extra, 0.00)
 
-        # CSS PARA CORES DOS BOTÕES
+        # Estilização visual dos botões de checkout
         st.markdown("""
             <style>
             div.stButton > button:has(div:contains("🚀")) { background-color: #28a745 !important; color: white !important; border: none !important; }
@@ -313,20 +341,14 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
 
         col_res1, col_res2 = st.columns([2, 1])
         with col_res1:
-            if valor_final_faturar > 0:
-                st.write(f"**Total a pagar:** :green[R$ {valor_final_faturar:.2f}] ({label_desc})")
-            else:
-                st.write(f"**Total a pagar:** :green[R$ 0,00] (Crédito residual cobre as alterações)")
+            st.write(f"**Total a pagar:** :green[R$ {valor_final_faturar:.2f}] ({label_desc})")
         
         with col_res2:
             if st.button("🚀 GERAR LINK DE PAGAMENTO", use_container_width=True):
                 if valor_final_faturar > 0:
                     with st.spinner("Efetuando salvamento automático e gerando fatura segura..."):
                         
-                        plano_para_vincular = None
-                        if nome_plano_input and nome_plano_input.strip() != "":
-                            plano_para_vincular = nome_plano_input.strip()
-                        
+                        plano_para_vincular = nome_plano_input.strip() if nome_plano_input else None
                         import orcas_v01_pagamentos as pag
                         email_user = st.session_state.get('usuario_email', "cliente@email.com")
 
@@ -340,7 +362,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                                 None
                             )
                         except TypeError as e:
-                            st.error(f"Erro de tipo detectado: {e}")
+                            st.error(f"Erro ao estruturar pagamento: {e}")
                             link, pref_id = None, None
                         
                         if link:
@@ -355,7 +377,8 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                                     "valor": float(valor_final_faturar),
                                     "status": "aguardando",
                                     "projeto_id": plano_para_vincular,
-                                    "vencimento_proposto": recalculo_expiracao # Enviamos a nova data calculada via pro-rata para o webhook atualizar no sucesso
+                                    "vencimento_proposto": recalculo_expiracao,
+                                    "tipo_renovacao": tipo_pagamento  # Envia o tipo de renovação ao banco temporário de transações
                                 }).execute()
                                 st.toast("Link gerado com sucesso!")
                             except Exception as e:
@@ -363,7 +386,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                         else:
                             st.error("Erro ao gerar link de pagamento no Mercado Pago.")
                 else:
-                    st.info("Suas alterações não geraram valores a pagar. Clique em 'Salvar alterações ou Criar o novo Plano' para aplicar agora.")
+                    st.info("Sua configuração não gerou valores pendentes. Clique no botão 'Salvar alterações' acima para aplicar gratuitamente.")
 
         if "url_ativa" in st.session_state:
             st.link_button("🔵 PAGAMENTO - IR P/ MERCADO PAGO", st.session_state.url_ativa, use_container_width=True)
