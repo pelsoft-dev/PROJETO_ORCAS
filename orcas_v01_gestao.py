@@ -7,25 +7,28 @@ from dateutil.relativedelta import relativedelta
 def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, format_moeda, parse_moeda, security):
     """
     Sub-rotina da Tela Gestão - Controle de Planos, Saldos e Assinatura.
-    Blindagem total contra TypeError e APIError na leitura do perfil do usuário.
+    Correção definitiva para o TypeError na linha 268 com normalização estrita de strings.
     """
     
-    # --- TRATAMENTO SEGURO DO USUÁRIO (EVITA TYPEERROR E APIERROR) ---
+    # --- TRATAMENTO ULTRA SEGURO DO PERFIL DO UTILIZADOR ---
     tipo_renov_original = "6 Meses"
     vencimento_atual_str = None
     
     try:
-        # Buscamos explicitamente os dados do usuário logado
         res_user_master = supabase.table("usuarios").select("*").eq("id", ID_USUARIO_LOGADO).execute()
         if res_user_master and hasattr(res_user_master, 'data') and len(res_user_master.data) > 0:
             dados_usuario = res_user_master.data[0]
             vencimento_atual_str = dados_usuario.get('vencimento')
-            # Captura a renovação se ela existir no banco; caso contrário, mantém o default
-            tipo_renov_original = dados_usuario.get('tipo_renovacao', "6 Meses")
-            if tipo_renov_original is None:
-                tipo_renov_original = "6 Meses"
+            
+            # Força o valor obtido a ser tratado como string limpa para evitar quebras em condicionais
+            val_db = dados_usuario.get('tipo_renovacao')
+            if val_db is not None:
+                tipo_renov_original = str(val_db).strip()
     except Exception:
-        # Fallback total caso a tabela ou colunas gerem qualquer erro de infraestrutura
+        tipo_renov_original = "6 Meses"
+
+    # Garantia absoluta de contingência para que a string nunca seja vazia
+    if not tipo_renov_original:
         tipo_renov_original = "6 Meses"
 
     st.markdown('<div class="titulo-tela">Gestão de Planos e Assinaturas</div>', unsafe_allow_html=True)
@@ -263,6 +266,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
 
         dias_restantes = (venc_date - hoje).days if venc_date > hoje else 0
 
+        # Verificação normalizada e infalível baseada em strings limpas
         if "6 Meses" in tipo_renov_original:
             preco_pago_original = (v_mensal_banco * 6) * (1 - DESC_6_MESES)
             dias_ciclo_original = 180
@@ -278,7 +282,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
 
         valor_final = v_custo_novo_periodo - saldo_credito_usuario
 
-        # Mensagem de Up-sell se o valor for menor ou igual a zero e for plano mensal
         if valor_final <= 0 and "Mensal" in tipo_pagamento and dias_restantes > 30:
             custo_ficticio_semestral = v_6meses
             diferenca_semestral_exibir = max(custo_ficticio_semestral - saldo_credito_usuario, 0.00)
@@ -297,7 +300,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         if valor_final < 0:
             valor_final = 0.00
 
-        # --- CONTROLE DINÂMICO DOS AVISOS DE ALTERAÇÃO DE LICENÇA ---
         if houve_mudanca_parametros and valor_final > 0.00:
             st.markdown(
                 f"""
@@ -308,16 +310,13 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 unsafe_allow_html=True
             )
 
-        # --- PROCESSAMENTO DO BOTÃO DE SALVAMENTO ---
         if st.session_state.get('solicitou_salvar_config', False):
             st.session_state.solicitou_salvar_config = False
             
-            # SE O VALOR É R$ 0,00 (REDUÇÃO DE ESCOPO / SALDO COBRE), SALVA DIRETO NO BANCO SEM EXIBIR AVISOS DE RETENÇÃO
             if valor_final <= 0.00:
                 res_p = supabase.table("config_projetos").select("id").eq("projeto_id", nome_plano_input).eq("usuario_id", uid_gestao).execute()
                 if res_p.data: dados_p_salvamento["id"] = res_p.data[0]["id"]
                 
-                # Executa upsert imediato do escopo
                 supabase.table("config_projetos").upsert(dados_p_salvamento).execute()
                 supabase.table("lancamentos").delete().eq("projeto_id", nome_plano_input).eq("usuario_id", uid_gestao).gt("data", st.session_state.tmp_fim_plano.strftime('%Y-%m-%d')).execute()
                 
@@ -330,11 +329,10 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
 
                 if 'tmp_fim_plano' in st.session_state: del st.session_state.tmp_fim_plano
                 st.session_state.projeto_ativo = nome_plano_input
-                st.session_state.msg_sucesso = "Configurações atualizadas e salvas com sucesso imediato!"
+                st.session_state.msg_sucesso = "Configurações updated e salvas com sucesso imediato!"
                 if "alteracao_licenca_pendente" in st.session_state: del st.session_state.alteracao_licenca_pendente
                 st.rerun()
             else:
-                # Se há valor complementar a pagar (> 0), retém em sessão e alerta sobre o pagamento
                 st.session_state.alteracao_licenca_pendente = {
                     "dados_projeto": dados_p_salvamento,
                     "novo_vencimento": recalculo_expiracao,
