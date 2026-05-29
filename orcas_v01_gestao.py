@@ -7,20 +7,25 @@ from dateutil.relativedelta import relativedelta
 def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, format_moeda, parse_moeda, security):
     """
     Sub-rotina da Tela Gestão - Controle de Planos, Saldos e Assinatura.
-    Implementação com isolamento total contra erros de colunas ausentes no banco (APIError).
+    Blindagem total contra TypeError e APIError na leitura do perfil do usuário.
     """
     
-    # --- ISOLAMENTO CRÍTICO CONTRA ERROS DE COLUNA NO BANCO (APIError Linha 265) ---
+    # --- TRATAMENTO SEGURO DO USUÁRIO (EVITA TYPEERROR E APIERROR) ---
     tipo_renov_original = "6 Meses"
+    vencimento_atual_str = None
+    
     try:
+        # Buscamos explicitamente os dados do usuário logado
         res_user_master = supabase.table("usuarios").select("*").eq("id", ID_USUARIO_LOGADO).execute()
-        if res_user_master.data:
-            # Tenta obter o campo com segurança. Se não existir no payload, assume o padrão
-            tipo_renov_original = res_user_master.data[0].get('tipo_renovacao', "6 Meses")
+        if res_user_master and hasattr(res_user_master, 'data') and len(res_user_master.data) > 0:
+            dados_usuario = res_user_master.data[0]
+            vencimento_atual_str = dados_usuario.get('vencimento')
+            # Captura a renovação se ela existir no banco; caso contrário, mantém o default
+            tipo_renov_original = dados_usuario.get('tipo_renovacao', "6 Meses")
             if tipo_renov_original is None:
                 tipo_renov_original = "6 Meses"
     except Exception:
-        # Se a coluna não existir no banco de dados, o try/except captura o erro e impede a tela de quebrar
+        # Fallback total caso a tabela ou colunas gerem qualquer erro de infraestrutura
         tipo_renov_original = "6 Meses"
 
     st.markdown('<div class="titulo-tela">Gestão de Planos e Assinaturas</div>', unsafe_allow_html=True)
@@ -248,9 +253,11 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             recalculo_expiracao = (hoje + relativedelta(months=1)).strftime('%Y-%m-%d')
 
         # --- CÁLCULO MONETÁRIO DE PRO-RATA ---
-        vencimento_atual_str = st.session_state.get('vencimento', hoje.strftime('%Y-%m-%d'))
+        if not vencimento_atual_str:
+            vencimento_atual_str = st.session_state.get('vencimento', hoje.strftime('%Y-%m-%d'))
+        
         try:
-            venc_date = datetime.strptime(vencimento_atual_str[:10], '%Y-%m-%d').date()
+            venc_date = datetime.strptime(str(vencimento_atual_str)[:10], '%Y-%m-%d').date()
         except:
             venc_date = hoje
 
@@ -291,7 +298,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             valor_final = 0.00
 
         # --- CONTROLE DINÂMICO DOS AVISOS DE ALTERAÇÃO DE LICENÇA ---
-        # Só exibe o aviso verde se houver de fato valor complementar pendente a pagar (> R$ 0.00)
         if houve_mudanca_parametros and valor_final > 0.00:
             st.markdown(
                 f"""
@@ -315,12 +321,12 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 supabase.table("config_projetos").upsert(dados_p_salvamento).execute()
                 supabase.table("lancamentos").delete().eq("projeto_id", nome_plano_input).eq("usuario_id", uid_gestao).gt("data", st.session_state.tmp_fim_plano.strftime('%Y-%m-%d')).execute()
                 
-                payload_usuario = {"vencimento": str(vencimento_atual_str[:10])}
+                payload_usuario = {"vencimento": str(str(vencimento_atual_str)[:10])}
                 try:
                     payload_usuario["tipo_renovacao"] = tipo_pagamento
                     supabase.table("usuarios").update(payload_usuario).eq("id", uid_gestao).execute()
                 except Exception:
-                    supabase.table("usuarios").update({"vencimento": str(vencimento_atual_str[:10])}).eq("id", uid_gestao).execute()
+                    supabase.table("usuarios").update({"vencimento": str(str(vencimento_atual_str)[:10])}).eq("id", uid_gestao).execute()
 
                 if 'tmp_fim_plano' in st.session_state: del st.session_state.tmp_fim_plano
                 st.session_state.projeto_ativo = nome_plano_input
@@ -366,7 +372,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         with col_res1:
             if valor_final_faturar <= 0:
                 st.write(f"**Total a pagar:** :green[R$ 0,00] (Crédito residual cobre as alterações)")
-                st.write(f"*(Sua validade atual de {datetime.strptime(str(vencimento_atual_str[:10]), '%Y-%m-%d').strftime('%d/%m/%Y')} foi mantida intacta)*")
+                st.write(f"*(Sua validade atual de {datetime.strptime(str(str(vencimento_atual_str)[:10]), '%Y-%m-%d').strftime('%d/%m/%Y')} foi mantida intacta)*")
             else:
                 st.write(f"**Total a pagar:** :green[R$ {valor_final_faturar:.2f}] ({label_desc})")
                 st.write(f"*(Sua licença estenderá redonda para a data: {datetime.strptime(recalculo_expiracao, '%Y-%m-%d').strftime('%d/%m/%Y')})*")
