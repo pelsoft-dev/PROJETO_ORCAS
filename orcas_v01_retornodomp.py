@@ -1,5 +1,5 @@
 import requests
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from dateutil.relativedelta import relativedelta
 import streamlit as st
 
@@ -8,40 +8,82 @@ def tratar_retorno(supabase, pref_id, status_retorno):
     Processa o retorno de forma resiliente: localiza o pagamento pendente do usuário,
     atualiza sua assinatura calculando o vencimento comercial correto, recupera o plano 
     ativo salvo temporariamente, limpa o registro temporário e faz o login automático.
+    
+    CORREÇÃO: Caso o Webhook já tenha processado e deletado o registro temporário,
+    o sistema faz uma busca pela sessão ativa ou pelo status da licença do usuário para
+    garantir o bypass de login sem exibir mensagens de erro/expiração.
     """
     # Aceita approved, authorized e pending (comum em fluxos PIX reais no redirecionamento)
     if status_retorno not in ["approved", "authorized", "pending"]:
         return None
 
+    hoje = date.today()
+
     try:
         # 1. LOCALIZAÇÃO DO REGISTRO TEMPORÁRIO
-        # Como o pref_id vindo na URL pode ser o collection_id, tentamos buscar primeiro por ele.
         res_temp = supabase.table("pagamentos_temp")\
-            .select("usuario_id, valor, pref_id, projeto_id")\
+            .select("usuario_id, valor, pref_id, projeto_id, vencimento_proposto, tipo_renovacao")\
             .eq("pref_id", str(pref_id))\
             .execute()
             
-        # CONTINGÊNCIA: Se não achou pelo ID (porque o MP mudou o parâmetro na URL),
-        # buscamos o último pagamento que foi registrado no sistema para aquele fluxo.
-        if not res_temp.data:
+        # CONTINGÊNCIA 1: Se o Webhook já processou MUITO rápido e deletou o registro,
+        # verificamos se o session_state do Streamlit possui o ID e o vencimento proposto guardados
+        if not res_temp.data and "alteracao_licenca_pendente" in st.session_state:
+            dados_pendentes = st.session_state.alteracao_licenca_pendente
+            uid_usuario = dados_pendentes["dados_projeto"]["usuario_id"]
+            
+            # Busca direta na tabela oficial de usuários para validar se o Webhook já o atualizou
+            res_user_direto = supabase.table("usuarios")\
+                .select("id, nome, email, vencimento, zap_ativo")\
+                .eq("id", uid_usuario)\
+                .execute()
+                
+            if res_user_direto.data:
+                user_db = res_user_direto.data[0]
+                # Se o vencimento no banco já está igual ou posterior ao proposto, o Webhook já venceu a corrida!
+                if user_db["vencimento"] >= hoje.strftime("%Y-%m-%d"):
+                    return {
+                        "id": user_db["id"],
+                        "nome": user_db["nome"],
+                        "email": user_db["email"],
+                        "vencimento": user_db["vencimento"],
+                        "zap_ativo": user_db["zap_ativo"],
+                        "projeto_id": dados_pendentes["dados_projeto"]["projeto_id"]
+                    }
+
+        # CONTINGÊNCIA 2: Se não achou na sessão nem por ID exato, tenta buscar o último do próprio usuário ativo
+        if not res_temp.data and "usuario_id" in st.session_state:
             res_temp = supabase.table("pagamentos_temp")\
-                .select("usuario_id, valor, pref_id, projeto_id")\
+                .select("usuario_id, valor, pref_id, projeto_id, vencimento_proposto, tipo_renovacao")\
+                .eq("usuario_id", st.session_state.usuario_id)\
                 .order("created_at", desc=True)\
                 .limit(1)\
                 .execute()
 
-        # Se mesmo com a contingência não houver registros iniciados, bloqueia por segurança
+        # Se mesmo com todas as contingências de segurança o registro sumiu e o usuário não está logado
         if not res_temp.data:
-            print("Nenhum rastro de pagamento pendente foi encontrado no banco.")
+            print("Nenhum rastro de pagamento temporário localizado. Assumindo processamento prévio por Webhook.")
+            # Tentativa final: Se temos o e-mail na sessão, logamos usando o estado atualizado do banco
+            if st.session_state.get("usuario_email"):
+                res_user_final = supabase.table("usuarios").select("*").eq("email", st.session_state.usuario_email).execute()
+                if res_user_final.data:
+                    u = res_user_final.data[0]
+                    return {
+                        "id": u["id"], "nome": u["nome"], "email": u["email"],
+                        "vencimento": u["vencimento"], "zap_ativo": u.get("zap_ativo", 0),
+                        "projeto_ativo": st.session_state.get("projeto_ativo")
+                    }
             return None
             
         dados_pag_temp = res_temp.data[0]
         uid_usuario = dados_pag_temp["usuario_id"]
         valor_esperado = dados_pag_temp["valor"]
         pref_id_original = dados_pag_temp["pref_id"]
-        plano_salvo = dados_pag_temp.get("projeto_id") # Resgata o plano ativo salvo antes do pagamento
+        plano_salvo = dados_pag_temp.get("projeto_id")
+        vencimento_proposto = dados_pag_temp.get("vencimento_proposto")
+        tipo_renov_escolhido = dados_pag_temp.get("tipo_renovacao")
         
-        # 2. BUSCA OS DADOS DO USUÁRIO PARA RENOVAÇÃO
+        # 2. BUSCA OS DADOS DO USUÁRIO PARA ATUALIZAÇÃO
         res_user_atual = supabase.table("usuarios")\
             .select("vencimento, id, nome, email, zap_ativo")\
             .eq("id", uid_usuario)\
@@ -52,57 +94,54 @@ def tratar_retorno(supabase, pref_id, status_retorno):
             
         user_db = res_user_atual.data[0]
         
-        # Descobre a quantidade de meses contratada baseando-se no valor esperado armazenado
-        # Buscamos o registro correspondente para garantir o multiplicador correto de meses
-        meses_comprados = 1
-        if "url_ativa" in st.session_state and st.session_state.get("pref_id_ativa") == pref_id_original:
-            meses_comprados = st.session_state.get("meses_comprados", 1)
+        # 3. DEFINIÇÃO DA DATA DE VENCIMENTO COMERCIAL
+        # Se o painel de gestão já calculou a data ideal exata baseada em "Hoje + Período", usamos ela
+        if vencimento_proposto:
+            nova_data_vencimento_str = vencimento_proposto
         else:
-            # Contingência caso o session_state tenha limpado: inferência pelo valor estimado
-            if valor_esperado > 150.00:  # Faixa de preço de planos anuais com desconto
+            # Fallback de segurança caso a coluna não exista ou venha nula
+            meses_comprados = 1
+            if valor_esperado > 150.00:
                 meses_comprados = 12
-            elif valor_esperado > 50.00: # Faixa de preço de planos semestrais com desconto
+            elif valor_esperado > 50.00:
                 meses_comprados = 6
-
-        # 3. CÁLCULO DO NOVO VENCIMENTO COMERCIAL (Último dia do mês alvo)
-        # Regra solicitada:
-        # Mensal (1 mês) -> Último dia do mês seguinte (+1 no multiplicador comercial = 2 meses à frente - 1 dia)
-        # 6 Meses       -> Último dia do 7º mês à frente
-        # 12 Meses      -> Último dia do 13º mês à frente
-        hoje = date.today()
+                
+            dt_calculada = hoje + relativedelta(months=meses_comprados)
+            nova_data_vencimento_str = dt_calculada.strftime("%Y-%m-%d")
         
-        # Deslocamento base para atingir o início do mês subsequente ao período contratado
-        deslocamento_meses = meses_comprados + 1
-        
-        # Forçamos o cálculo comercial a partir do primeiro dia do mês atual para evitar distorções de dias vazios
-        primeiro_dia_mes_atual = hoje.replace(day=1)
-        
-        # Avança até o primeiro dia do mês posterior ao período limite e subtrai 1 dia para pegar o último dia exato
-        nova_data_vencimento = (primeiro_dia_mes_atual + relativedelta(months=deslocamento_meses)) - timedelta(days=1)
-        
-        # 4. ATUALIZA OS CRÉDITOS NA TABELA USUÁRIOS
-        supabase.table("usuarios").update({
-            "vencimento": nova_data_vencimento.strftime("%Y-%m-%d"),
+        # 4. ATUALIZA OS DADOS DA LICENÇA NA TABELA PRINCIPAL DE USUÁRIOS
+        dados_atualizacao_usuario = {
+            "vencimento": nova_data_vencimento_str,
             "data_ult_assinat": hoje.strftime("%Y-%m-%d"),
             "valor_pago": float(valor_esperado)
-        }).eq("id", uid_usuario).execute()
+        }
         
-        # 5. LIMPEZA: Deleta o registro para não deixar lixo na tabela temporária
+        # Se veio gravado o tipo de renovação no temporário, sincroniza no cadastro do cliente
+        if tipo_renov_escolhido:
+            dados_atualizacao_usuario["tipo_renovacao"] = tipo_renov_escolhido
+
+        supabase.table("usuarios").update(dados_atualizacao_usuario).eq("id", uid_usuario).execute()
+        
+        # 5. LIMPEZA: Remove o registro temporário para evitar duplicidades futuras
         supabase.table("pagamentos_temp")\
             .delete()\
             .eq("pref_id", pref_id_original)\
             .execute()
         
-        # 6. RETORNA O DICIONÁRIO COMPLETO PARA O BYPASS DE LOGIN (Incluindo o plano reativado)
+        # Limpa o estado temporário de sessão se ele existir
+        if "alteracao_licenca_pendente" in st.session_state:
+            del st.session_state.alteracao_licenca_pendente
+        
+        # 6. RETORNA O DICIONÁRIO COMPLETO PARA EFETUAR O LOGIN AUTOMÁTICO (BYPASS)
         return {
             "id": user_db["id"],
             "nome": user_db["nome"],
             "email": user_db["email"],
-            "vencimento": nova_data_vencimento.strftime("%Y-%m-%d"),
+            "vencimento": nova_data_vencimento_str,
             "zap_ativo": user_db["zap_ativo"],
-            "projeto_ativo": plano_salvo # Injetado para o app restaurar a sessão do plano automaticamente
+            "projeto_ativo": plano_salvo
         }
 
     except Exception as e:
-        print(f"Erro crítico no processamento do retorno: {e}")
+        print(f"Erro crítico no processamento do retorno MP: {e}")
         return None
