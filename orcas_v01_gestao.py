@@ -136,11 +136,12 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         relatorios_consolidar = dict(rels_banco)
         
         planos_consolidar[nome_plano_input] = meses_total_edit
-        relatorios_consolidar[nome_plano_input] = 1 if (ativar_zap_atual or ativar_email_atual) else 0
+        relatorios_consolidar[nome_plano_input] = 1 if (ativar_zap_atual or activar_email_atual) else 0
 
         qtd_total_planos = len(planos_consolidar)
         qtd_relatorios_totais = sum(relatorios_consolidar.values())
         
+        c24 = sum(1 for m in planos_consolidar.values() if m <= 24)
         c36 = sum(1 for m in planos_consolidar.values() if m == 36)
         c48 = sum(1 for m in planos_consolidar.values() if m == 48)
         c60 = sum(1 for m in planos_consolidar.values() if m >= 60)
@@ -157,14 +158,21 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         v_6meses = (v_mensal_total * 6) * 0.95
         v_12meses = (v_mensal_total * 12) * 0.89 
 
-        # --- RETORNO DO QUADRO AZUL COMPLETO (CONFORME SOLICITADO) ---
+        # --- COMPOSIÇÃO COMPLETA E DETALHADA DO QUADRO AZUL RESTAURADA ---
         resumo_html = f"""
         <div style="background-color: #87CEFA; padding: 15px; border-radius: 5px; color: black; font-family: sans-serif; border: 1px solid #1E90FF;">
-            <div style="font-weight: bold; font-size: 16px; margin-bottom: 5px;">PROMOÇÃO:</div>
-            <div style="font-size: 14px; margin-bottom: 3px;">Valor Base Mensal Calculado: R$ {format_moeda(v_mensal_total)}</div>
-            <div style="font-size: 14px; margin-bottom: 3px;">Planos Adicionais Rastreados: {qtd_total_planos} | Relatórios Ativos: {qtd_relatorios_totais}</div>
-            <hr style="border: 0; border-top: 1px solid #1E90FF; margin: 8px 0;">
-            <div style="font-size: 14px; font-weight: bold;">
+            <div style="font-weight: bold; font-size: 16px; margin-bottom: 10px;">Valor da Assinatura Mensal: R$ {format_moeda(v_mensal_total)}</div>
+            <div style="margin-left: 20px; font-size: 14px;">
+                Assinatura do Orcas Baby: <span style="float: right;">19,90</span><br>
+                {qtd_relatorios_totais} Resumo(s) Diário(s) via Whatsapp / E-mail: <span style="float: right;">{format_moeda(custo_relatorio_total)}</span><br>
+                Usuário com {qtd_total_planos} Planos: <span style="float: right;">{format_moeda(add_planos_extra)}</span><br>
+                {c24} Plano(s) com 24 meses: <span style="float: right;">0,00</span><br>
+                {c36} Plano(s) com 36 meses: <span style="float: right;">{format_moeda(v_p36)}</span><br>
+                {c48} Plano(s) com 48 meses: <span style="float: right;">{format_moeda(v_p48)}</span><br>
+                {c60} Plano(s) com 60 meses: <span style="float: right;">{format_moeda(v_p60)}</span>
+            </div>
+            <div style="margin-top: 15px; font-weight: bold; border-top: 1px solid #5f9ea0; padding-top: 10px;">
+                PROMOÇÃO:<br>
                 Valor da Assinatura p/ 6 meses (-5%): R$ {format_moeda(v_6meses)}<br>
                 Valor da Assinatura p/ 12 meses (-11%): R$ {format_moeda(v_12meses)}
             </div>
@@ -175,7 +183,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         st.write("")
 
         # ------------------------------------------------------------------------------------
-        # DISPOSIÇÃO DO LAYOUT: LOGO APÓS O QUADRO AZUL VEM A ESCOLA DO PERÍODO DE RENOVAÇÃO
+        # DISPOSIÇÃO DO LAYOUT: LOGO APÓS O QUADRO AZUL VEM A ESCOLHA DO PERÍODO DE RENOVAÇÃO
         # ------------------------------------------------------------------------------------
         tipo_pagamento = st.radio(
             "Escolha o período de renovação:",
@@ -300,7 +308,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                     f"""
                     <div style="color: #856404; background-color: #fff3cd; border-color: #ffeeba; padding: 15px; border: 1px solid transparent; border-radius: 4px; margin-top: 15px; margin-bottom: 15px; font-family: sans-serif; text-align: justify;">
                         ⚠️ <b>Aviso de Aproveitamento de Saldo:</b><br>
-                        Como nosso sistema trabalha com as opções Mensal, Semestral e Anual, e agora você está optando por uma renovação Mensal, apesar de sua assinatura atual possuir créditos ativos, você terá este mês sem custos, mas perderá um saldo residual calculado de <b>R$ {format_moeda(saldo_perdido_exibir)}</b>. Fazendo uma renovação Semestral, você utiliza integralmente esse saldo e pagará apenas a diferença justa de <b>R$ {format_moeda(diferenca_semestral_exibir)}</b>.
+                        Como nosso sistema trabalha com as opções Mensal, Semestral e Anual, e agora você está optando por uma renovação Mensal, apesar de sua assinatura atual possuir créditos ativos, você terá este mês sem custos, mas perderá um saldo residual calculated de <b>R$ {format_moeda(saldo_perdido_exibir)}</b>. Fazendo uma renovação Semestral, você utiliza integralmente esse saldo e pagará apenas a diferença justa de <b>R$ {format_moeda(diferenca_semestral_exibir)}</b>.
                     </div>
                     """,
                     unsafe_allow_html=True
