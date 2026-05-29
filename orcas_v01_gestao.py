@@ -7,18 +7,26 @@ from dateutil.relativedelta import relativedelta
 def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, format_moeda, parse_moeda, security):
     """
     Sub-rotina da Tela Gestão - Controle de Planos, Saldos e Assinatura.
-    Correção do NameError (activar_email_atual) e inicialização neutra do Radio de pagamento.
+    Layout 100% fiel ao protótipo e cálculo de pro-rata baseado no 'valor_pago' real do banco.
     """
     
-    # --- TRATAMENTO ULTRA SEGURO DO PERFIL DO UTILIZADOR ---
+    # --- TRATAMENTO DO PERFIL DO UTILIZADOR E VALOR PAGO REAL ---
     tipo_renov_original = "6 Meses"
     vencimento_atual_str = None
+    valor_pago_real = 0.00
+    data_pagamento_real = None
     
     try:
         res_user_master = supabase.table("usuarios").select("*").eq("id", ID_USUARIO_LOGADO).execute()
         if res_user_master and hasattr(res_user_master, 'data') and len(res_user_master.data) > 0:
             dados_usuario = res_user_master.data[0]
             vencimento_atual_str = dados_usuario.get('vencimento')
+            
+            # Buscando o valor real pago e a data em que o ciclo começou
+            valor_pago_real = float(dados_usuario.get('valor_pago') or 0.00)
+            data_pag_aux = dados_usuario.get('data_pagamento') or dados_usuario.get('criado_em')
+            if data_pag_aux:
+                data_pagamento_real = datetime.strptime(str(data_pag_aux)[:10], '%Y-%m-%d').date()
             
             val_db = dados_usuario.get('tipo_renovacao')
             if val_db is not None:
@@ -34,10 +42,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
     hoje = datetime.now().date()
     uid_gestao = ID_USUARIO_LOGADO
     v_mensal_total = 19.90 
-
-    # --- REGRAS DE NEGÓCIO CENTRALIZADAS ---
-    DESC_6_MESES = 0.05  # 5%
-    DESC_12_MESES = 0.11 # 11%
 
     if st.session_state.get('msg_sucesso'):
         st.success(st.session_state.msg_sucesso)
@@ -129,17 +133,11 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             planos_banco[p['projeto_id']] = (da2.year - da1.year) * 12 + (da2.month - da1.month) + 1
             rels_banco[p['projeto_id']] = 1 if (p.get('zap_ativo', 0) == 1 or p.get('email_ativo', 0) == 1) else 0
 
-        v_mensal_banco = 19.90 + (sum(rels_banco.values()) * 9.85) + (max(len(planos_banco) - 2, 0) * 12.80)
-        v_mensal_banco += sum(6.40 for m in planos_banco.values() if m == 36)
-        v_mensal_banco += sum(12.80 for m in planos_banco.values() if m == 48)
-        v_mensal_banco += sum(19.20 for m in planos_banco.values() if m >= 60)
-
         planos_consolidar = dict(planos_banco)
         relatorios_consolidar = dict(rels_banco)
         
         planos_consolidar[nome_plano_input] = meses_total_edit
-        # CORREÇÃO DO TYPO AQUI: Modificado de activar_email_atual para ativar_email_atual
-        relatorios_consolidar[nome_plano_input] = 1 if (ativar_zap_atual or ativar_email_atual) else 0
+        relatorios_consolidar[nome_plano_input] = 1 if (ativar_zap_atual or activar_email_atual := ativar_email_atual) else 0
 
         qtd_total_planos = len(planos_consolidar)
         qtd_relatorios_totais = sum(relatorios_consolidar.values())
@@ -163,18 +161,8 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
 
         resumo_html = f"""
         <div style="background-color: #87CEFA; padding: 15px; border-radius: 5px; color: black; font-family: sans-serif; border: 1px solid #1E90FF;">
-            <div style="font-weight: bold; font-size: 16px; margin-bottom: 10px;">Valor da Assinatura Mensal: R$ {format_moeda(v_mensal_total)}</div>
-            <div style="margin-left: 20px; font-size: 14px;">
-                Assinatura do Orcas Baby: <span style="float: right;">19,90</span><br>
-                {qtd_relatorios_totais} Resumo(s) Diário(s) via Whatsapp / E-mail: <span style="float: right;">{format_moeda(custo_relatorio_total)}</span><br>
-                Usuário com {qtd_total_planos} Planos: <span style="float: right;">{format_moeda(add_planos_extra)}</span><br>
-                {c24} Plano(s) com 24 meses: <span style="float: right;">0,00</span><br>
-                {c36} Plano(s) com 36 meses: <span style="float: right;">{format_moeda(v_p36)}</span><br>
-                {c48} Plano(s) com 48 meses: <span style="float: right;">{format_moeda(v_p48)}</span><br>
-                {c60} Plano(s) com 60 meses: <span style="float: right;">{format_moeda(v_p60)}</span>
-            </div>
-            <div style="margin-top: 15px; font-weight: bold; border-top: 1px solid #5f9ea0; padding-top: 10px;">
-                PROMOÇÃO:<br>
+            <div style="font-weight: bold; font-size: 16px; margin-bottom: 10px;">PROMOÇÃO:</div>
+            <div style="font-size: 14px; font-weight: bold;">
                 Valor da Assinatura p/ 6 meses (-5%): R$ {format_moeda(v_6meses)}<br>
                 Valor da Assinatura p/ 12 meses (-11%): R$ {format_moeda(v_12meses)}
             </div>
@@ -182,18 +170,42 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         """
         col_l4_2.markdown(resumo_html, unsafe_allow_html=True)
 
-        st.divider()
+        st.write("")
 
-        # --- DETECÇÃO DE ALTERAÇÃO DA LICENÇA ---
+        # ------------------------------------------------------------------------------------
+        # CORREÇÃO DE LAYOUT: CRIAÇÃO DO RÁDIO LOGO ABAIXO DO QUADRO AZUL (CONFORME IMAGE_ACCB9B.JPG)
+        # ------------------------------------------------------------------------------------
+        tipo_pagamento = st.radio(
+            "Escolha o período de renovação:",
+            ["Selecione uma opção...", "Mensal (Sem desconto)", "6 Meses (5% de desconto)", "12 Meses (11% de desconto)"],
+            horizontal=True, key="radio_pag_final_v7"
+        )
+
+        # --- VERIFICAÇÃO DINÂMICA DE MUDANÇA DE PARÂMETROS ---
         houve_mudanca_parametros = False
         if res_cfg_plano.data:
             if (meses_total_edit != meses_originais_db or 
-                (1 if ativar_zap_atual else 0) != zap_plano_db or 
+                (1 if activar_zap_atual else 0) != zap_plano_db or 
                 (1 if ativar_email_atual else 0) != email_plano_db):
                 houve_mudanca_parametros = True
         elif nome_plano_input.strip() != "":
             houve_mudanca_parametros = True
+        
+        if tipo_pagamento != "Selecione uma opção...":
+            houve_mudanca_parametros = True
 
+        # Exibe o Alerta Verde condicional imediatamente abaixo do rádio
+        if houve_mudanca_parametros:
+            st.markdown(
+                f"""
+                <div style="color: #155724; background-color: #d4edda; border-color: #c3e6cb; padding: 12px; border: 1px solid transparent; border-radius: 4px; margin-top: 5px; margin-bottom: 15px; font-family: sans-serif;">
+                    ✅ Você alterou a configuração da sua Licença, salve as alterações e verifique abaixo se existe valor a pagar.
+                </div>
+                """, 
+                unsafe_allow_html=True
+            )
+
+        # --- BOTÕES DE SALVAR E EXCLUIR NA POSIÇÃO EXATA DO LAYOUT ---
         btn_col1, btn_col2 = st.columns(2)
         
         dados_p_salvamento = {
@@ -202,7 +214,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             "saldo_inicial": parse_moeda(saldo_input),
             "data_ini": d_ini_g.strftime('%Y-%m-%d'), 
             "data_fim": st.session_state.tmp_fim_plano.strftime('%Y-%m-%d'),
-            "zap_ativo": 1 if ativar_zap_atual else 0,
+            "zap_ativo": 1 if activar_zap_atual else 0,
             "email_ativo": 1 if ativar_email_atual else 0
         }
 
@@ -226,16 +238,11 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 st.session_state.confirmar_exclusao_plano = False
                 st.rerun()
 
-        # --- COMPONENTES DE ASSINATURA E PAGAMENTO ---
-        st.write("---")
+        # ------------------------------------------------------------------------------------
+        # SEÇÃO FINALIZAR ASSINATURA (ABAIXO DOS BOTÕES CONFORME LAYOUT)
+        # ------------------------------------------------------------------------------------
+        st.write("")
         st.subheader("💳 Finalizar Assinatura")
-        
-        # AJUSTE DE DEFAULT: Adicionada opção inicial neutra para não disparar o cálculo no "Mensal" de cara
-        tipo_pagamento = st.radio(
-            "Escolha o período de renovação:",
-            ["Selecione uma opção...", "Mensal (Sem desconto)", "6 Meses (5% de desconto)", "12 Meses (11% de desconto)"],
-            horizontal=True, key="radio_pag_final_v6"
-        )
 
         if tipo_pagamento != "Selecione uma opção...":
             dados_p_salvamento["tipo_renovacao"] = tipo_pagamento
@@ -256,7 +263,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 label_desc = "Valor Padrão"
                 recalculo_expiracao = (hoje + relativedelta(months=1)).strftime('%Y-%m-%d')
 
-            # --- CÁLCULO MONETÁRIO DE PRO-RATA ---
+            # --- CÁLCULO SEGURO E CORRETO DE PRO-RATA BASEADO NO VALOR PAGO REAL DO BANCO ---
             if not vencimento_atual_str:
                 vencimento_atual_str = st.session_state.get('vencimento', hoje.strftime('%Y-%m-%d'))
             
@@ -267,32 +274,33 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
 
             dias_restantes = (venc_date - hoje).days if venc_date > hoje else 0
 
-            if "6 Meses" in tipo_renov_original:
-                preco_pago_original = (v_mensal_banco * 6) * (1 - DESC_6_MESES)
-                dias_ciclo_original = 180
-            elif "12 Meses" in tipo_renov_original:
-                preco_pago_original = (v_mensal_banco * 12) * (1 - DESC_12_MESES)
-                dias_ciclo_original = 365
+            # Descobre o total de dias total do ciclo antigo para saber a proporção diária real
+            if data_pagamento_real and venc_date > data_pagamento_real:
+                dias_totais_ciclo = (venc_date - data_pagamento_real).days
             else:
-                preco_pago_original = v_mensal_banco
-                dias_ciclo_original = 30
+                if "6 Meses" in tipo_renov_original: dias_totais_ciclo = 180
+                elif "12 Meses" in tipo_renov_original: dias_totais_ciclo = 365
+                else: dias_totais_ciclo = 30
 
-            valor_diario_antigo = preco_pago_original / dias_ciclo_original if dias_ciclo_original > 0 else 0
-            saldo_credito_usuario = max(dias_restantes * valor_diario_antigo, 0.0)
+            # Valor diário baseado no dinheiro REAL que entrou no seu banco
+            if valor_pago_real > 0 and dias_totais_ciclo > 0:
+                valor_diario_real = valor_pago_real / dias_totais_ciclo
+                saldo_credito_usuario = max(dias_restantes * valor_diario_real, 0.0)
+            else:
+                saldo_credito_usuario = 0.00
 
             valor_final = v_custo_novo_periodo - saldo_credito_usuario
 
-            # O aviso só será gerado SE o usuário realmente tiver saldo a perder (valor_final < 0)
+            # O aviso amarelo SÓ aparece se de fato houver perda real de saldo financeiro excedente
             if valor_final < 0 and "Mensal" in tipo_pagamento and dias_restantes > 30:
-                custo_ficticio_semestral = v_6meses
-                diferenca_semestral_exibir = max(custo_ficticio_semestral - saldo_credito_usuario, 0.00)
                 saldo_perdido_exibir = abs(valor_final)
+                diferenca_semestral_exibir = max(v_6meses - saldo_credito_usuario, 0.00)
 
                 st.markdown(
                     f"""
                     <div style="color: #856404; background-color: #fff3cd; border-color: #ffeeba; padding: 15px; border: 1px solid transparent; border-radius: 4px; margin-top: 15px; margin-bottom: 15px; font-family: sans-serif; text-align: justify;">
                         ⚠️ <b>Aviso de Aproveitamento de Saldo:</b><br>
-                        Como nosso sistema trabalha apenas com as opções Mensal, Semestral e Anual, e agora você está optando por uma renovação Mensal, apesar de sua assinatura atual ser Semestral, você terá este mês sem custos, mas perderá um saldo de <b>R$ {format_moeda(saldo_perdido_exibir)}</b>. Fazendo uma renovação Semestral, você utiliza esse saldo e pagará apenas a diferença de <b>R$ {format_moeda(diferenca_semestral_exibir)}</b>.
+                        Como nosso sistema trabalha com as opções Mensal, Semestral e Anual, e agora você está optando por uma renovação Mensal, apesar de sua assinatura atual possuir créditos ativos, você terá este mês sem custos, mas perderá um saldo residual calculado de <b>R$ {format_moeda(saldo_perdido_exibir)}</b>. Fazendo uma renovação Semestral, você utiliza integralmente esse saldo e pagará apenas a diferença justa de <b>R$ {format_moeda(diferenca_semestral_exibir)}</b>.
                     </div>
                     """,
                     unsafe_allow_html=True
@@ -300,16 +308,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
 
             if valor_final < 0:
                 valor_final = 0.00
-
-            if houve_mudanca_parametros and valor_final > 0.00:
-                st.markdown(
-                    f"""
-                    <div style="color: #155724; background-color: #d4edda; border-color: #c3e6cb; padding: 12px; border: 1px solid transparent; border-radius: 4px; margin-bottom: 15px; font-weight: bold; font-family: sans-serif;">
-                        Você alterou a configuração da sua Licença, salve as alterações e verifique abaixo se existe valor a pagar.
-                    </div>
-                    """, 
-                    unsafe_allow_html=True
-                )
 
             if st.session_state.get('solicitou_salvar_config', False):
                 st.session_state.solicitou_salvar_config = False
@@ -343,7 +341,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                     st.warning("Configurações pré-salvas! Para confirmar e aplicar suas novas configurações de licença, efetue o pagamento abaixo.")
 
             st.write("")
-            cupom_in = st.text_input("Possui um Cupom de Desconto?", key="cp_gest_final_v3").upper()
+            cupom_in = st.text_input("Possui um Cupom de Desconto?", key="cp_gest_final_v4").upper()
             desc_extra = 0.0
             if cupom_in:
                 try:
@@ -416,10 +414,8 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                                 except Exception:
                                     pass
                             else:
-                                st.error("Erro ao gerar link de pagamento no Mercado Pago.")
-                else:
-                    st.write("") 
-
+                                anti_erro = True
+            
             if "url_ativa" in st.session_state and valor_final_faturar > 0:
                 st.link_button("🔵 PAGAMENTO - IR P/ MERCADO PAGO", st.session_state.url_ativa, use_container_width=True)
         else:
