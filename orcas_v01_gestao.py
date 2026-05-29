@@ -136,7 +136,8 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         relatorios_consolidar = dict(rels_banco)
         
         planos_consolidar[nome_plano_input] = meses_total_edit
-        relatorios_consolidar[nome_plano_input] = 1 if (ativar_zap_atual or activar_email_atual) else 0
+        # CORREÇÃO AQUI: Mudado de activar_email_atual para ativar_email_atual
+        relatorios_consolidar[nome_plano_input] = 1 if (ativar_zap_atual or ativar_email_atual) else 0
 
         qtd_total_planos = len(planos_consolidar)
         qtd_relatorios_totais = sum(relatorios_consolidar.values())
@@ -158,7 +159,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         v_6meses = (v_mensal_total * 6) * 0.95
         v_12meses = (v_mensal_total * 12) * 0.89 
 
-        # --- COMPOSIÇÃO COMPLETA E DETALHADA DO QUADRO AZUL RESTAURADA ---
+        # --- COMPOSIÇÃO DO QUADRO AZUL ---
         resumo_html = f"""
         <div style="background-color: #87CEFA; padding: 15px; border-radius: 5px; color: black; font-family: sans-serif; border: 1px solid #1E90FF;">
             <div style="font-weight: bold; font-size: 16px; margin-bottom: 10px;">Valor da Assinatura Mensal: R$ {format_moeda(v_mensal_total)}</div>
@@ -182,16 +183,13 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
 
         st.write("")
 
-        # ------------------------------------------------------------------------------------
-        # DISPOSIÇÃO DO LAYOUT: LOGO APÓS O QUADRO AZUL VEM A ESCOLHA DO PERÍODO DE RENOVAÇÃO
-        # ------------------------------------------------------------------------------------
+        # Choice layout block
         tipo_pagamento = st.radio(
             "Escolha o período de renovação:",
             ["Selecione uma opção...", "Mensal (Sem desconto)", "6 Meses (5% de desconto)", "12 Meses (11% de desconto)"],
             horizontal=True, key="radio_pag_final_v9"
         )
 
-        # Rastreamento de alteração de parâmetros
         houve_mudanca_parametros = False
         if res_cfg_plano.data:
             if (meses_total_edit != meses_originais_db or 
@@ -204,7 +202,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         if tipo_pagamento != "Selecione uma opção...":
             houve_mudanca_parametros = True
 
-        # Exibição ou não da mensagem de aviso de alteração de configuração
         if houve_mudanca_parametros:
             st.markdown(
                 f"""
@@ -215,7 +212,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 unsafe_allow_html=True
             )
 
-        # Os dois botões lado a lado (Salvar e Excluir)
         btn_col1, btn_col2 = st.columns(2)
         
         dados_p_salvamento = {
@@ -248,9 +244,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 st.session_state.confirmar_exclusao_plano = False
                 st.rerun()
 
-        # ------------------------------------------------------------------------------------
-        # TÍTULO "FINALIZAR ASSINATURA" VINDO LOGO ABAIXO DOS BOTÕES
-        # ------------------------------------------------------------------------------------
         st.write("")
         st.subheader("💳 Finalizar Assinatura")
 
@@ -273,7 +266,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 label_desc = "Valor Padrão"
                 recalculo_expiracao = (hoje + relativedelta(months=1)).strftime('%Y-%m-%d')
 
-            # --- MATEMÁTICA PROTEGIDA BASEADA NA COLUNA DATA_ULT_ASSINAT ---
             if not vencimento_atual_str:
                 vencimento_atual_str = st.session_state.get('vencimento', hoje.strftime('%Y-%m-%d'))
             
@@ -308,7 +300,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                     f"""
                     <div style="color: #856404; background-color: #fff3cd; border-color: #ffeeba; padding: 15px; border: 1px solid transparent; border-radius: 4px; margin-top: 15px; margin-bottom: 15px; font-family: sans-serif; text-align: justify;">
                         ⚠️ <b>Aviso de Aproveitamento de Saldo:</b><br>
-                        Como nosso sistema trabalha com as opções Mensal, Semestral e Anual, e agora você está optando por uma renovação Mensal, apesar de sua assinatura atual possuir créditos ativos, você terá este mês sem custos, mas perderá um saldo residual calculated de <b>R$ {format_moeda(saldo_perdido_exibir)}</b>. Fazendo uma renovação Semestral, você utiliza integralmente esse saldo e pagará apenas a diferença justa de <b>R$ {format_moeda(diferenca_semestral_exibir)}</b>.
+                        Como nosso sistema trabalha com as opções Mensal, Semestral e Anual, e agora você está optando por uma renovação Mensal, apesar de sua assinatura atual possuir créditos ativos, você terá este mês sem custos, mas perderá um saldo residual calculado de <b>R$ {format_moeda(saldo_perdido_exibir)}</b>. Fazendo uma renovação Semestral, você utiliza integralmente esse saldo e pagará apenas a diferença justa de <b>R$ {format_moeda(diferenca_semestral_exibir)}</b>.
                     </div>
                     """,
                     unsafe_allow_html=True
