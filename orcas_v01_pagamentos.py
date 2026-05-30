@@ -72,7 +72,7 @@ def criar_link_final(user_id, valor, descricao, email_usuario, qtd_meses, url_or
                 "failure": url_retorno_com_bypass,
             },
             "notification_url": "https://hook.us2.make.com/youbq3bhry3422tjjahaqqmyrsr2o81e",
-            "auto_return": "all"
+            "auto_return": "approved"
         }
         
         res = sdk.preference().create(preference_data)

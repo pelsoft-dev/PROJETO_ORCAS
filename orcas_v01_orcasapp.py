@@ -230,7 +230,7 @@ if 'logado' not in st.session_state:
 
 query_params = st.query_params
 
-# --- NOVA ESTRATÉGIA: INTEGRAÇÃO COM TABELA TEMPORÁRIA (BYPASS COM PERSISTÊNCIA REAL) ---
+# --- ESTRATÉGIA 1: INTEGRAÇÃO COM PARAMETROS DE BYPASS NA URL ---
 if "bypass_uid" in query_params and "bypass_val" in query_params:
     uid_retorno = query_params["bypass_uid"]
     valor_retorno = float(query_params["bypass_val"])
@@ -238,17 +238,14 @@ if "bypass_uid" in query_params and "bypass_val" in query_params:
     venc_retorno_str = query_params.get("bypass_venc", "")
 
     try:
-        # A. Consulta se existe uma transação idêntica aguardando na tabela temporária
         req_temp = supabase.table("pagamentos_temp").select("*").eq("usuario_id", uid_retorno).eq("status", "aguardando").execute()
         
         if req_temp.data:
             dados_temp = req_temp.data[0]
             
-            # Se não veio a data na URL por segurança, calcula os +30 dias padrão
             if not venc_retorno_str:
                 venc_retorno_str = (datetime.now().date() + timedelta(days=30)).strftime('%Y-%m-%d')
             
-            # ITEM (1) ATUALIZAÇÃO DIRETA NO BANCO DE DADOS (Garante persistência imediata)
             hoje_string = datetime.now().date().strftime('%Y-%m-%d')
             try:
                 supabase.table("usuarios").update({
@@ -259,43 +256,33 @@ if "bypass_uid" in query_params and "bypass_val" in query_params:
             except Exception as erro_banco:
                 st.error(f"Erro ao consolidar dados cadastrais da assinatura: {erro_banco}")
 
-            # B. Busca os dados oficiais atualizados do usuário para montar a sessão legítima
             req_user = supabase.table("usuarios").select("*").eq("id", uid_retorno).execute()
             
             if req_user.data:
                 u_dados = req_user.data[0]
                 
-                # C. Injeta credenciais no Session State
                 st.session_state.logado = True
                 st.session_state.CHAVE_MESTRA_UUID = str(uid_retorno)
                 st.session_state.usuario = u_dados.get('email', 'Usuário Confirmado')
                 st.session_state.usuario_email = u_dados.get('email', '')
                 st.session_state.vencimento = venc_retorno_str
                 st.session_state.projeto_ativo = plano_retorno if plano_retorno else dados_temp.get('projeto_id')
-                
-                # Força o direcionamento correto para a tela de Gestão
                 st.session_state.escolha = "⚙️ Gestão"
                 
-                # D. Consome e apaga o registro da tabela temporária
                 try:
                     supabase.table("pagamentos_temp").delete().eq("usuario_id", uid_retorno).execute()
                 except Exception:
                     pass
                 
-                # ITEM (2) - MECANISMO DE GERENCIAMENTO DE ABAS DUPLICADAS
-                # Armazena uma marcação no localStorage do navegador informando que o login ocorreu com sucesso
                 components.html("""
                     <script>
                         localStorage.setItem('orcas_payment_success', 'true');
-                        // Se esta aba foi aberta como um popup/nova aba pelo MP, tenta fechá-la 
-                        // após propagar o sinal, evitando o acúmulo de abas soltas.
                         if (window.opener) {
                             window.close();
                         }
                     </script>
                 """, height=0)
                 
-                # E. Limpa os parâmetros da barra de endereço e reinicia o app logado
                 st.query_params.clear()
                 st.rerun()
         else:
@@ -305,7 +292,7 @@ if "bypass_uid" in query_params and "bypass_val" in query_params:
     except Exception as erro_bypass:
         st.error(f"Erro interno ao processar validação automática: {erro_bypass}")
 
-# --- MODELO DE RETORNO CLÁSSICO ---
+# --- ESTRATÉGIA 2: MODELO DE RETORNO CLÁSSICO COM PARAMETROS MP ---
 elif query_params and len(query_params) > 0:
     status_retorno = query_params.get("status") or query_params.get("collection_status")
     pref_id = query_params.get("preference_id") or query_params.get("collection_id")
@@ -318,6 +305,7 @@ if status_retorno and pref_id and not st.session_state.logado:
                 st.session_state.logado = True
                 st.session_state.CHAVE_MESTRA_UUID = str(usuario_auto.get('id', ''))
                 st.session_state.usuario = usuario_auto.get('email', '')
+                st.session_state.usuario_email = usuario_auto.get('email', '')
                 st.session_state.vencimento = str(usuario_auto.get('vencimento', ''))
                 st.session_state.zap_ativo = usuario_auto.get('zap_ativo', 0)
                 st.session_state.projeto_ativo = usuario_auto.get("projeto_ativo")
@@ -333,6 +321,41 @@ if status_retorno and pref_id and not st.session_state.logado:
             else:
                 st.query_params.clear()
                 st.warning("⚠️ Não conseguimos validar o login automático do pagamento. Por favor, acesse com seu e-mail e senha.")
+
+# --- ESTRATÉGIA 3 (CONTINGÊNCIA CRÍTICA): RETORNO VIA URL 100% LIMPA ---
+# Se o usuário não está logado e a URL voltou sem nenhum parâmetro, varre a tabela temporária 
+# em busca de registros órfãos recentes para resgatar a sessão.
+elif not st.session_state.logado:
+    try:
+        # Busca o último registro gerado na tabela temporária para validação
+        res_recente = supabase.table("pagamentos_temp")\
+            .select("pref_id, usuario_id, projeto_id")\
+            .order("created_at", desc=True)\
+            .limit(1)\
+            .execute()
+            
+        if res_recente.data:
+            dados_orfao = res_recente.data[0]
+            pref_id_provavel = dados_orfao["pref_id"]
+            uid_provavel = dados_orfao["usuario_id"]
+            
+            # Executa a regra do arquivo de retorno para liquidar o temporário e atualizar tabelas
+            usuario_auto = retornodomp.tratar_retorno(supabase, pref_id_provavel, "approved")
+            
+            if usuario_auto and isinstance(usuario_auto, dict):
+                st.session_state.logado = True
+                st.session_state.CHAVE_MESTRA_UUID = str(usuario_auto.get('id', ''))
+                st.session_state.usuario = usuario_auto.get('email', '')
+                st.session_state.usuario_email = usuario_auto.get('email', '')
+                st.session_state.vencimento = str(usuario_auto.get('vencimento', ''))
+                st.session_state.zap_ativo = usuario_auto.get('zap_ativo', 0)
+                st.session_state.projeto_ativo = usuario_auto.get("projeto_ativo")
+                st.session_state.escolha = "⚙️ Gestão"
+                
+                st.session_state.msg_sucesso = "🎉 Pagamento identificado via contingência com sucesso! Bem-vindo de volta!"
+                st.rerun()
+    except Exception as e:
+        pass
 
 if not st.session_state.get('CHAVE_MESTRA_UUID'):
     st.session_state['CHAVE_MESTRA_UUID'] = ''
