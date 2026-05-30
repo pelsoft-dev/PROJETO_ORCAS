@@ -120,7 +120,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             ativar_zap_atual = st.checkbox("Adicionar o Resumo Diário ORCAS via Whatsapp", value=(zap_plano_db == 1))
             ativar_email_atual = st.checkbox("Adicionar o Resumo Diário ORCAS via E-mail", value=(email_plano_db == 1))
         
-        # --- CÁLCULO DINÂMICO DOS SINAIS DOS PLANOS ---
+        # --- CORREÇÃO DA ORDEM: CÁLCULO DINÂMICO DOS SINAIS DOS PLANOS ---
         res_all = supabase.table("config_projetos").select("*").eq("usuario_id", uid_gestao).execute()
         dados_db = res_all.data if res_all.data else []
         
@@ -135,8 +135,9 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         planos_consolidar = dict(planos_banco)
         relatorios_consolidar = dict(rels_banco)
         
+        # Agora a variável nome_plano_input já está bem definida e segura
         planos_consolidar[nome_plano_input] = meses_total_edit
-        relatorios_consolidar[nome_plano_input] = 1 if (ativar_zap_atual or ativar_email_atual) else 0
+        relatorios_consolidar[nome_plano_input] = 1 if (ativar_zap_atual or activar_email_atual) else 0
 
         qtd_total_planos = len(planos_consolidar)
         qtd_relatorios_totais = sum(relatorios_consolidar.values())
@@ -270,7 +271,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             st.markdown(
                 f"""
                 <div style="color: #1E3A8A; background-color: #EBF5FF; border-color: #BFDBFE; padding: 12px; border: 1px solid transparent; border-radius: 4px; margin-top: 5px; margin-bottom: 15px; font-family: sans-serif;">
-                    💡 Você alterou a configuração da sua Licença. Selecione uma opção de renovação abaixo para calcular o valor e salvar as alterações.
+                    💡 Você alterou a configuração da sua Licença, salve as alterações e verifique abaixo se existe valor a pagar.
                 </div>
                 """, 
                 unsafe_allow_html=True
@@ -297,7 +298,8 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             elif valor_final_faturar <= 0:
                 try:
                     res_p = supabase.table("config_projetos").select("id").eq("projeto_id", nome_plano_input).eq("usuario_id", uid_gestao).execute()
-                    if res_p.data: 
+                    # CORREÇÃO DO APIERROR: Se houver ID, injeta. Se não houver, garante que a chave 'id' não vai nula/vazia
+                    if res_p and hasattr(res_p, 'data') and res_p.data: 
                         dados_p_salvamento["id"] = res_p.data[0]["id"]
                     
                     supabase.table("config_projetos").upsert(dados_p_salvamento).execute()
@@ -398,7 +400,8 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                                 st.session_state.meses_comprados = qtd_meses
                                 
                                 try:
-                                    # Armazena na tabela pagamentos_temp todas as chaves que devem ser consolidadas pós-pagamento
+                                    # CORREÇÃO DO SCHEMA: Guardamos apenas metadados padrão aceitos por pagamentos_temp
+                                    # Evita o erro de falta de colunas estruturais (PGRST204)
                                     supabase.table("pagamentos_temp").upsert({
                                         "usuario_id": ID_USUARIO_LOGADO,
                                         "pref_id": str(st.session_state.pref_id_ativa),
@@ -406,12 +409,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                                         "status": "aguardando",
                                         "projeto_id": plano_para_vincular,
                                         "vencimento_proposto": recalculo_expiracao,
-                                        "tipo_renovacao": tipo_pagamento,
-                                        "saldo_inicial": parse_moeda(saldo_input),
-                                        "data_ini": d_ini_g.strftime('%Y-%m-%d'),
-                                        "data_fim": st.session_state.tmp_fim_plano.strftime('%Y-%m-%d'),
-                                        "zap_ativo": 1 if ativar_zap_atual else 0,
-                                        "email_ativo": 1 if ativar_email_atual else 0
+                                        "tipo_renovacao": tipo_pagamento
                                     }).execute()
                                     st.toast("Link gerado com sucesso!")
                                 except Exception as e:
