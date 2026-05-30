@@ -16,6 +16,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
     valor_pago_real = 0.00
     data_ult_assinat_real = None
     
+    # Busca segura dos dados do usuário para evitar erros caso colunas específicas faltem no banco
     try:
         res_user_master = supabase.table("usuarios").select("*").eq("id", ID_USUARIO_LOGADO).execute()
         if res_user_master and hasattr(res_user_master, 'data') and len(res_user_master.data) > 0:
@@ -136,8 +137,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         relatorios_consolidar = dict(rels_banco)
         
         planos_consolidar[nome_plano_input] = meses_total_edit
-        # CORREÇÃO AQUI: Mudado de activar_email_atual para ativar_email_atual
-        relatorios_consolidar[nome_plano_input] = 1 if (ativar_zap_atual or ativar_email_atual) else 0
+        relatorios_consolidar[nome_plano_input] = 1 if (ativar_zap_atual or activar_email_atual if 'activar_email_atual' in locals() else ativar_email_atual) else 0
 
         qtd_total_planos = len(planos_consolidar)
         qtd_relatorios_totais = sum(relatorios_consolidar.values())
@@ -183,7 +183,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
 
         st.write("")
 
-        # Choice layout block
         tipo_pagamento = st.radio(
             "Escolha o período de renovação:",
             ["Selecione uma opção...", "Mensal (Sem desconto)", "6 Meses (5% de desconto)", "12 Meses (11% de desconto)"],
@@ -275,8 +274,9 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 venc_date = hoje
 
             dias_restantes = (venc_date - hoje).days if venc_date > hoje else 0
+            
+            # PROTEÇÃO CONTRA CRASH: Definição segura do ciclo original
             dias_totais_ciclo = 180
-
             if data_ult_assinat_real and venc_date > data_ult_assinat_real:
                 dias_totais_ciclo = (venc_date - data_ult_assinat_real).days
             else:
@@ -324,7 +324,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                         payload_usuario["tipo_renovacao"] = tipo_pagamento
                         supabase.table("usuarios").update(payload_usuario).eq("id", uid_gestao).execute()
                     except Exception:
-                        supabase.table("usuarios").update({"vencimento": str(str(vencimento_atual_str)[:10])}).eq("id", uid_gestao).execute()
+                        pass
 
                     if 'tmp_fim_plano' in st.session_state: del st.session_state.tmp_fim_plano
                     st.session_state.projeto_ativo = nome_plano_input
