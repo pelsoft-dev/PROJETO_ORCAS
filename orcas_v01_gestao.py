@@ -1,5 +1,5 @@
 import streamlit as st
-import streamlit.components.v1
+import streamlit.components.v1 as components
 import pandas as pd
 from datetime import datetime, date, timedelta
 from dateutil.relativedelta import relativedelta
@@ -7,7 +7,7 @@ from dateutil.relativedelta import relativedelta
 def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, format_moeda, parse_moeda, security):
     """
     Sub-rotina da Tela Gestão - Controle de Planos, Saldos e Assinatura.
-    Layout estruturado estritamente conforme o protótipo e cálculos baseados em 'data_ult_assinat'.
+    Lógica de proteção: salvamento na tabela oficial só ocorre direto se o valor a pagar for R$ 0,00.
     """
     
     # --- TRATAMENTO DO PERFIL DO UTILIZADOR E VALOR PAGO REAL ---
@@ -188,66 +188,13 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             horizontal=True, key="radio_pag_final_v9"
         )
 
-        houve_mudanca_parametros = False
-        if res_cfg_plano.data:
-            if (meses_total_edit != meses_originais_db or 
-                (1 if ativar_zap_atual else 0) != zap_plano_db or 
-                (1 if ativar_email_atual else 0) != email_plano_db):
-                houve_mudanca_parametros = True
-        elif nome_plano_input.strip() != "":
-            houve_mudanca_parametros = True
-        
-        if tipo_pagamento != "Selecione uma opção...":
-            houve_mudanca_parametros = True
-
-        if houve_mudanca_parametros:
-            st.markdown(
-                f"""
-                <div style="color: #155724; background-color: #d4edda; border-color: #c3e6cb; padding: 12px; border: 1px solid transparent; border-radius: 4px; margin-top: 5px; margin-bottom: 15px; font-family: sans-serif;">
-                    ✅ Você alterou a configuração da sua Licença, salve as alterações e verifique abaixo se existe valor a pagar.
-                </div>
-                """, 
-                unsafe_allow_html=True
-            )
-
-        btn_col1, btn_col2 = st.columns(2)
-        
-        dados_p_salvamento = {
-            "projeto_id": nome_plano_input, 
-            "usuario_id": uid_gestao, 
-            "saldo_inicial": parse_moeda(saldo_input),
-            "data_ini": d_ini_g.strftime('%Y-%m-%d'), 
-            "data_fim": st.session_state.tmp_fim_plano.strftime('%Y-%m-%d'),
-            "zap_ativo": 1 if ativar_zap_atual else 0,
-            "email_ativo": 1 if ativar_email_atual else 0
-        }
-
-        if btn_col1.button("Salvar alterações ou Criar o novo Plano", use_container_width=True):
-            st.session_state.solicitou_salvar_config = True
-
-        if st.session_state.get('projeto_ativo'):
-            if btn_col2.button("Excluir Plano", type="primary", use_container_width=True):
-                st.session_state.confirmar_exclusao_plano = True
-
-        if st.session_state.get('confirmar_exclusao_plano', False):
-            st.error(f"Deseja mesmo excluir o plano {st.session_state.projeto_ativo}?")
-            ce1, ce2 = st.columns(2)
-            if ce1.button("CONFIRMAR EXCLUSÃO"):
-                supabase.table("lancamentos").delete().eq("projeto_id", st.session_state.projeto_ativo).eq("usuario_id", uid_gestao).execute()
-                supabase.table("config_projetos").delete().eq("projeto_id", st.session_state.projeto_ativo).eq("usuario_id", uid_gestao).execute()
-                st.session_state.projeto_ativo = None
-                st.session_state.confirmar_exclusao_plano = False
-                st.rerun()
-            if ce2.button("CANCELAR"):
-                st.session_state.confirmar_exclusao_plano = False
-                st.rerun()
-
-        st.write("")
-        st.subheader("💳 Finalizar Assinatura")
+        # --- PREPARAÇÃO DOS VALORES E CRÉDITOS ---
+        valor_final_faturar = 0.00
+        recalculo_expiracao = hoje.strftime('%Y-%m-%d')
+        qtd_meses = 1
+        label_desc = "Valor Padrão"
 
         if tipo_pagamento != "Selecione uma opção...":
-            dados_p_salvamento["tipo_renovacao"] = tipo_pagamento
-
             if "6 Meses" in tipo_pagamento:
                 qtd_meses = 6
                 v_custo_novo_periodo = v_6meses
@@ -298,7 +245,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                     f"""
                     <div style="color: #856404; background-color: #fff3cd; border-color: #ffeeba; padding: 15px; border: 1px solid transparent; border-radius: 4px; margin-top: 15px; margin-bottom: 15px; font-family: sans-serif; text-align: justify;">
                         ⚠️ <b>Aviso de Aproveitamento de Saldo:</b><br>
-                        Como nosso sistema trabalha com as opções Mensal, Semestral e Anual, e agora você está optando por uma renovação Mensal, apesar de sua assinatura atual possuir créditos ativos, você terá este mês sem custos, mas perderá um saldo residual calculated de <b>R$ {format_moeda(saldo_perdido_exibir)}</b>. Fazendo uma renovação Semestral, você utiliza integralmente esse saldo e pagará apenas a diferença justa de <b>R$ {format_moeda(diferenca_semestral_exibir)}</b>.
+                        Como nosso sistema trabalha com as opções Mensal, Semestral e Anual, e agora você está optando por uma renovação Mensal, apesar de sua assinatura atual possuir créditos activos, você terá este mês sem custos, mas perderá um saldo residual calculado de <b>R$ {format_moeda(saldo_perdido_exibir)}</b>. Fazendo uma renovação Semestral, você utiliza integralmente esse saldo e pagará apenas a diferença justa de <b>R$ {format_moeda(diferenca_semestral_exibir)}</b>.
                     </div>
                     """,
                     unsafe_allow_html=True
@@ -307,36 +254,88 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             if valor_final < 0:
                 valor_final = 0.00
 
-            if st.session_state.get('solicitou_salvar_config', False):
-                st.session_state.solicitou_salvar_config = False
-                
-                if valor_final <= 0.00:
+            valor_final_faturar = valor_final
+
+        # --- CONTROLE DE MUDANÇA VISUAL DE PARAMETROS ---
+        houve_mudanca_parametros = False
+        if res_cfg_plano.data:
+            if (meses_total_edit != meses_originais_db or 
+                (1 if ativar_zap_atual else 0) != zap_plano_db or 
+                (1 if ativar_email_atual else 0) != email_plano_db):
+                houve_mudanca_parametros = True
+        elif nome_plano_input.strip() != "":
+            houve_mudanca_parametros = True
+
+        if houve_mudanca_parametros:
+            st.markdown(
+                f"""
+                <div style="color: #1E3A8A; background-color: #EBF5FF; border-color: #BFDBFE; padding: 12px; border: 1px solid transparent; border-radius: 4px; margin-top: 5px; margin-bottom: 15px; font-family: sans-serif;">
+                    💡 Você alterou a configuração da sua Licença. Selecione uma opção de renovação abaixo para calcular o valor e salvar as alterações.
+                </div>
+                """, 
+                unsafe_allow_html=True
+            )
+
+        btn_col1, btn_col2 = st.columns(2)
+        
+        dados_p_salvamento = {
+            "projeto_id": nome_plano_input, 
+            "usuario_id": uid_gestao, 
+            "saldo_inicial": parse_moeda(saldo_input),
+            "data_ini": d_ini_g.strftime('%Y-%m-%d'), 
+            "data_fim": st.session_state.tmp_fim_plano.strftime('%Y-%m-%d'),
+            "zap_ativo": 1 if ativar_zap_atual else 0,
+            "email_ativo": 1 if ativar_email_atual else 0
+        }
+
+        # --- 🛡️ LOGICA DE PROTEÇÃO DO BOTÃO DE SALVAMENTO DIRETO ---
+        if btn_col1.button("Salvar alterações ou Criar o novo Plano", use_container_width=True):
+            if tipo_pagamento == "Selecione uma opção...":
+                st.error("⚠️ Por favor, selecione um período de renovação abaixo para calcular se há valores a pagar antes de salvar.")
+            
+            # CAMINHO A: Custo R$ 0,00 -> Salva no banco oficial agora mesmo
+            elif valor_final_faturar <= 0:
+                try:
                     res_p = supabase.table("config_projetos").select("id").eq("projeto_id", nome_plano_input).eq("usuario_id", uid_gestao).execute()
-                    if res_p.data: dados_p_salvamento["id"] = res_p.data[0]["id"]
+                    if res_p.data: 
+                        dados_p_salvamento["id"] = res_p.data[0]["id"]
                     
                     supabase.table("config_projetos").upsert(dados_p_salvamento).execute()
                     supabase.table("lancamentos").delete().eq("projeto_id", nome_plano_input).eq("usuario_id", uid_gestao).gt("data", st.session_state.tmp_fim_plano.strftime('%Y-%m-%d')).execute()
                     
-                    payload_usuario = {"vencimento": str(str(vencimento_atual_str)[:10])}
-                    try:
-                        payload_usuario["tipo_renovacao"] = tipo_pagamento
-                        supabase.table("usuarios").update(payload_usuario).eq("id", uid_gestao).execute()
-                    except Exception:
-                        pass
-
                     if 'tmp_fim_plano' in st.session_state: del st.session_state.tmp_fim_plano
                     st.session_state.projeto_ativo = nome_plano_input
-                    st.session_state.msg_sucesso = "Configurações atualizadas e salvas com sucesso imediato!"
-                    if "alteracao_licenca_pendente" in st.session_state: del st.session_state.alteracao_licenca_pendente
+                    st.session_state.msg_sucesso = "🎉 Alterações aplicadas com sucesso! Seus créditos cobriram a mudança (Custo: R$ 0,00)."
                     st.rerun()
-                else:
-                    st.session_state.alteracao_licenca_pendente = {
-                        "dados_projeto": dados_p_salvamento,
-                        "novo_vencimento": recalculo_expiracao,
-                        "valor_a_pagar": valor_final,
-                        "tipo_renovacao": tipo_pagamento
-                    }
-                    st.warning("Configurações pré-salvas! Para confirmar e aplicar suas novas configurações de licença, efetue o pagamento abaixo.")
+                except Exception as e:
+                    st.error(f"Erro ao salvar plano: {e}")
+            
+            # CAMINHO B: Custo maior que zero -> Bloqueia salvamento sem pagamento prévio
+            else:
+                st.warning("⚠️ Esta alteração altera o valor da sua licença. Utilize o botão 'GERAR LINK DE PAGAMENTO' abaixo para concluir.")
+
+        if st.session_state.get('projeto_ativo'):
+            if btn_col2.button("Excluir Plano", type="primary", use_container_width=True):
+                st.session_state.confirmar_exclusao_plano = True
+
+        if st.session_state.get('confirmar_exclusao_plano', False):
+            st.error(f"Deseja mesmo excluir o plano {st.session_state.projeto_ativo}?")
+            ce1, ce2 = st.columns(2)
+            if ce1.button("CONFIRMAR EXCLUSÃO"):
+                supabase.table("lancamentos").delete().eq("projeto_id", st.session_state.projeto_ativo).eq("usuario_id", uid_gestao).execute()
+                supabase.table("config_projetos").delete().eq("projeto_id", st.session_state.projeto_ativo).eq("usuario_id", uid_gestao).execute()
+                st.session_state.projeto_ativo = None
+                st.session_state.confirmar_exclusao_plano = False
+                st.rerun()
+            if ce2.button("CANCELAR"):
+                st.session_state.confirmar_exclusao_plano = False
+                st.rerun()
+
+        st.write("")
+        st.subheader("💳 Finalizar Assinatura")
+
+        if tipo_pagamento != "Selecione uma opção...":
+            dados_p_salvamento["tipo_renovacao"] = tipo_pagamento
 
             st.write("")
             cupom_in = st.text_input("Possui um Cupom de Desconto?", key="cp_gest_final_v6").upper()
@@ -348,18 +347,18 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                         d = res_c.data[0]
                         v_p = float(d.get('percentual_desconto', 0) or 0)
                         v_a = float(d.get('valor_desconto', 0) or 0)
-                        desc_extra = valor_final * (v_p / 100) if v_p > 0 else v_a
+                        desc_extra = valor_final_faturar * (v_p / 100) if v_p > 0 else v_a
                         st.success("✅ Cupom aplicado!")
                     else:
                         st.error("❌ Cupom inválido.")
                 except: pass
 
-            valor_final_faturar = max(valor_final - desc_extra, 0.00)
+            valor_final_faturar = max(valor_final_faturar - desc_extra, 0.00)
 
             st.markdown("""
                 <style>
                 div.stButton > button:has(div:contains("🚀")) { background-color: #28a745 !important; color: white !important; border: none !important; }
-                div.stButton > button:has(div:contains("CLIQUE")) { background-color: #009EE3 !important; color: white !important; border: none !important; font-weight: bold !important; }
+                div.stButton > button:has(div:contains("PAGAMENTO")) { background-color: #009EE3 !important; color: white !important; border: none !important; font-weight: bold !important; }
                 </style>
             """, unsafe_allow_html=True)
 
@@ -375,7 +374,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             with col_res2:
                 if valor_final_faturar > 0:
                     if st.button("🚀 GERAR LINK DE PAGAMENTO", use_container_width=True):
-                        with st.spinner("Efetuando salvamento automático e gerando fatura segura..."):
+                        with st.spinner("Preparando fatura segura e registrando intenção..."):
                             plano_para_vincular = nome_plano_input.strip() if nome_plano_input else None
                             import orcas_v01_pagamentos as pag
                             email_user = st.session_state.get('usuario_email', "cliente@email.com")
@@ -399,6 +398,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                                 st.session_state.meses_comprados = qtd_meses
                                 
                                 try:
+                                    # Armazena na tabela pagamentos_temp todas as chaves que devem ser consolidadas pós-pagamento
                                     supabase.table("pagamentos_temp").upsert({
                                         "usuario_id": ID_USUARIO_LOGADO,
                                         "pref_id": str(st.session_state.pref_id_ativa),
@@ -406,11 +406,16 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                                         "status": "aguardando",
                                         "projeto_id": plano_para_vincular,
                                         "vencimento_proposto": recalculo_expiracao,
-                                        "tipo_renovacao": tipo_pagamento
+                                        "tipo_renovacao": tipo_pagamento,
+                                        "saldo_inicial": parse_moeda(saldo_input),
+                                        "data_ini": d_ini_g.strftime('%Y-%m-%d'),
+                                        "data_fim": st.session_state.tmp_fim_plano.strftime('%Y-%m-%d'),
+                                        "zap_ativo": 1 if ativar_zap_atual else 0,
+                                        "email_ativo": 1 if ativar_email_atual else 0
                                     }).execute()
                                     st.toast("Link gerado com sucesso!")
-                                except Exception:
-                                    pass
+                                except Exception as e:
+                                    st.error(f"Erro ao registrar transação temporária: {e}")
             
             if "url_ativa" in st.session_state and valor_final_faturar > 0:
                 st.link_button("🔵 PAGAMENTO - IR P/ MERCADO PAGO", st.session_state.url_ativa, use_container_width=True)
