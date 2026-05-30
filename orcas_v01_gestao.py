@@ -373,6 +373,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             with col_res2:
                 if valor_final_faturar > 0:
                     if st.button("🚀 GERAR LINK DE PAGAMENTO", use_container_width=True):
+                        st.session_state.dados_p_salvamento = dados_p_salvamento
                         with st.spinner("Preparando fatura segura..."):
                             plano_para_vincular = nome_plano_input.strip() if nome_plano_input else None
                             import orcas_v01_pagamentos as pag

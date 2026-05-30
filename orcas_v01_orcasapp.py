@@ -299,7 +299,7 @@ elif query_params and len(query_params) > 0:
 
 if status_retorno and pref_id and not st.session_state.logado:
     if status_retorno in ["approved", "authorized", "pending"]:
-        with st.spinner("🚀 Processando seu pagamento e preparando seu ambiente..."):
+        with st.spinner("🚀 Processando seu pagamento e aplicando as alterações do seu plano..."):
             usuario_auto = retornodomp.tratar_retorno(supabase, pref_id, status_retorno)
             if usuario_auto and isinstance(usuario_auto, dict):
                 st.session_state.logado = True
@@ -316,18 +316,15 @@ if status_retorno and pref_id and not st.session_state.logado:
                 if status_retorno == "pending":
                     st.session_state.msg_sucesso = "⏳ Seu Pix está sendo processado pelo banco! Liberamos seu acesso antecipado."
                 else:
-                    st.session_state.msg_sucesso = "🎉 Assinatura renovada com sucesso! Bem-vindo de volta!"
+                    st.session_state.msg_sucesso = "🎉 Assinatura e alterações do plano aplicadas com sucesso! Bem-vindo de volta!"
                 st.rerun()
             else:
                 st.query_params.clear()
                 st.warning("⚠️ Não conseguimos validar o login automático do pagamento. Por favor, acesse com seu e-mail e senha.")
 
 # --- ESTRATÉGIA 3 (CONTINGÊNCIA CRÍTICA): RETORNO VIA URL 100% LIMPA ---
-# Se o usuário não está logado e a URL voltou sem nenhum parâmetro, varre a tabela temporária 
-# em busca de registros órfãos recentes para resgatar a sessão.
 elif not st.session_state.logado:
     try:
-        # Busca o último registro gerado na tabela temporária para validação
         res_recente = supabase.table("pagamentos_temp")\
             .select("pref_id, usuario_id, projeto_id")\
             .order("created_at", desc=True)\
@@ -337,9 +334,7 @@ elif not st.session_state.logado:
         if res_recente.data:
             dados_orfao = res_recente.data[0]
             pref_id_provavel = dados_orfao["pref_id"]
-            uid_provavel = dados_orfao["usuario_id"]
             
-            # Executa a regra do arquivo de retorno para liquidar o temporário e atualizar tabelas
             usuario_auto = retornodomp.tratar_retorno(supabase, pref_id_provavel, "approved")
             
             if usuario_auto and isinstance(usuario_auto, dict):
@@ -352,7 +347,7 @@ elif not st.session_state.logado:
                 st.session_state.projeto_ativo = usuario_auto.get("projeto_ativo")
                 st.session_state.escolha = "⚙️ Gestão"
                 
-                st.session_state.msg_sucesso = "🎉 Pagamento identificado via contingência com sucesso! Bem-vindo de volta!"
+                st.session_state.msg_sucesso = "🎉 Pagamento identificado via contingência com sucesso! Alterações salvas."
                 st.rerun()
     except Exception as e:
         pass
