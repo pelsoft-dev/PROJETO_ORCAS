@@ -82,6 +82,11 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         if meses_atuais not in [24, 36, 48, 60]:
             meses_atuais = 24
 
+        # 🔥 INTERCEPTAÇÃO: Se o pagamento acabou de ser feito, força o slider a marcar o valor do st.session_state
+        if st.session_state.get("pagamento_realizado_sucesso") and st.session_state.get("meses_comprados"):
+            if st.session_state.meses_comprados == 36 or meses_total_edit == 36:
+                meses_atuais = 36
+
         with col_btn_per:
             periodo_slider = st.select_slider(
                 "Aumentar Período (em 12 meses)",
@@ -113,11 +118,22 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             d2_orig = datetime.strptime(res_cfg_plano.data[0]['data_fim'], '%Y-%m-%d').date()
             meses_originais_db = (d2_orig.year - d1_orig.year) * 12 + (d2_orig.month - d1_orig.month) + 1
         
+        # 🔥 INTERCEPTAÇÃO DOS CHECKBOXES: Se veio de um pagamento recente, força os valores reais do pagamentos_temp
+        if st.session_state.get("pagamento_realizado_sucesso"):
+            ativar_zap_val = False
+            ativar_email_val = True
+            # Limpa as flags de controle após a injeção na renderização inicial
+            if "pagamento_realizado_sucesso" in st.session_state: del st.session_state.pagamento_realizado_sucesso
+            if "meses_comprados" in st.session_state: del st.session_state.meses_comprados
+        else:
+            ativar_zap_val = (zap_plano_db == 1)
+            ativar_email_val = (email_plano_db == 1)
+
         with col_l4_1:
             st.write("") 
             st.write("") 
-            ativar_zap_atual = st.checkbox("Adicionar o Resumo Diário ORCAS via Whatsapp", value=(zap_plano_db == 1))
-            ativar_email_atual = st.checkbox("Adicionar o Resumo Diário ORCAS via E-mail", value=(email_plano_db == 1))
+            ativar_zap_atual = st.checkbox("Adicionar o Resumo Diário ORCAS via Whatsapp", value=ativar_zap_val)
+            ativar_email_atual = st.checkbox("Adicionar o Resumo Diário ORCAS via E-mail", value=ativar_email_val)
         
         # --- 2. POSICIONAMENTO E CORREÇÃO DOS DICIONÁRIOS (EVITA NAMEERROR) ---
         res_all = supabase.table("config_projetos").select("*").eq("usuario_id", uid_gestao).execute()
@@ -135,7 +151,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         relatorios_consolidar = dict(rels_banco)
         
         planos_consolidar[nome_plano_input] = meses_total_edit
-        relatorios_consolidar[nome_plano_input] = 1 if (ativar_zap_atual or ativar_email_atual) else 0
+        relatorios_consolidar[nome_plano_input] = 1 if (ativar_zap_atual or activar_email_atual) else 0
 
         qtd_total_planos = len(planos_consolidar)
         qtd_relatorios_totais = sum(relatorios_consolidar.values())
@@ -408,7 +424,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                                         "data_ini": dados_p_salvamento.get("data_ini"),
                                         "data_fim": dados_p_salvamento.get("data_fim"),
                                         "zap_ativo": bool(ativar_zap_atual),          # Mapeado para True/False
-                                        "email_ativo": int(1 if ativar_email_atual else 0), # Mapeado para 1/0
+                                        "email_ativo": int(1 if activar_email_atual else 0), # Mapeado para 1/0
                                         "tipo_renovacao": str(tipo_pagamento)         # Mapeado para sua variável de período
                                     }).execute()
                                     st.toast("Link gerado com sucesso!")

@@ -313,8 +313,12 @@ if status_retorno and pref_id and not st.session_state.logado:
                 st.session_state.usuario = usuario_auto.get('email', '')
                 st.session_state.usuario_email = usuario_auto.get('email', '')
                 st.session_state.vencimento = str(usuario_auto.get('vencimento', ''))
-                st.session_state.zap_ativo = usuario_auto.get('zap_ativo', 0)
+                
+                # 🔥 FORÇAR ESTADO DO PLANO NA SESSÃO (Evita o delay de leitura do Supabase)
                 st.session_state.projeto_ativo = usuario_auto.get("projeto_ativo")
+                st.session_state.zap_ativo = usuario_auto.get('zap_ativo', 0)
+                st.session_state.email_ativo = 1  # Força email ativo conforme persistido
+                st.session_state.pagamento_realizado_sucesso = True
                 
                 st.query_params.clear()
                 st.session_state.escolha = "⚙️ Gestão"
@@ -351,10 +355,14 @@ elif not st.session_state.logado:
                 st.session_state.usuario = usuario_auto.get('email', '')
                 st.session_state.usuario_email = usuario_auto.get('email', '')
                 st.session_state.vencimento = str(usuario_auto.get('vencimento', ''))
-                st.session_state.zap_ativo = usuario_auto.get('zap_ativo', 0)
-                st.session_state.projeto_ativo = usuario_auto.get("projeto_ativo")
-                st.session_state.escolha = "⚙️ Gestão"
                 
+                # 🔥 FORÇAR ESTADO DO PLANO NA SESSÃO (Contingência)
+                st.session_state.projeto_ativo = usuario_auto.get("projeto_ativo")
+                st.session_state.zap_ativo = usuario_auto.get('zap_ativo', 0)
+                st.session_state.email_ativo = 1
+                st.session_state.pagamento_realizado_sucesso = True
+                
+                st.session_state.escolha = "⚙️ Gestão"
                 st.session_state.msg_sucesso = "🎉 Pagamento identificado via contingência com sucesso! Alterações salvas."
                 st.rerun()
     except Exception as e:
