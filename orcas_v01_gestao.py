@@ -373,9 +373,12 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             with col_res2:
                 if valor_final_faturar > 0:
                     if st.button("🚀 GERAR LINK DE PAGAMENTO", use_container_width=True):
-                        st.session_state.dados_p_salvamento = dados_p_salvamento
                         with st.spinner("Preparando fatura segura..."):
-                            plano_para_vincular = nome_plano_input.strip() if nome_plano_input else None
+                            # 📦 SERIALIZAÇÃO COMPACTA PARA SUPERAR A PERDA DE SESSÃO ENTRE ABAS
+                            # Formato string: Nome do Plano|Meses|Zap Ativo|Email Ativo
+                            nome_limpo = nome_plano_input.strip() if nome_plano_input else "Plano"
+                            plano_para_vincular = f"{nome_limpo}|{meses_total_edit}|{1 if ativar_zap_atual else 0}|{1 if ativar_email_atual else 0}"
+                            
                             import orcas_v01_pagamentos as pag
                             email_user = st.session_state.get('usuario_email', "cliente@email.com")
 
@@ -398,8 +401,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                                 st.session_state.meses_comprados = qtd_meses
                                 
                                 try:
-                                    # CORREÇÃO CRÍTICA DO SCHEMA 'pagamentos_temp': 
-                                    # Removidos campos inexistentes que quebravam o cache do PostgREST.
+                                    # O payload viaja na coluna 'projeto_id' sem alterar a estrutura do banco de dados
                                     supabase.table("pagamentos_temp").upsert({
                                         "usuario_id": ID_USUARIO_LOGADO,
                                         "pref_id": str(st.session_state.pref_id_ativa),
