@@ -1,67 +1,45 @@
 import requests
-from datetime import datetime, timedelta
-import zoneinfo  # <-- Para fixar o fuso horário do Brasil
+from datetime import datetime
+import zoneinfo
 from dateutil.relativedelta import relativedelta
 import streamlit as st
 
 def tratar_retorno(supabase, pref_id, status_retorno):
     """
-    Processa o retorno de forma resiliente: localiza o pagamento pendente do usuário,
-    atualiza sua assinatura calculando o vencimento comercial correto, recupera o plano 
-    ativo salvo temporariamente, efetua o salvamento das novas configurações do plano (ex: 36 meses, e-mail),
-    limpa o registro temporário e faz o login automático.
+    Processa o retorno mapeando diretamente as colunas salvas no pagamentos_temp.
+    Altera o status para 'concluido' em vez de deletar para evitar perdas em múltiplos reruns.
     """
     if status_retorno not in ["approved", "authorized", "pending"]:
         return None
 
-    # 🔥 CORREÇÃO DO FUSO HORÁRIO: Garante a data correta do Brasil (GMT-3)
+    # 🌎 FIXAÇÃO DO FUSO HORÁRIO DO BRASIL (Evita o erro do dia seguinte)
     fuso_br = zoneinfo.ZoneInfo("America/Sao_Paulo")
-    agora_br = datetime.now(fuso_br)
-    hoje = agora_br.date()
-    hoje_string = hoje.strftime('%Y-%m-%d')
+    hoje_br = datetime.now(fuso_br).date()
+    hoje_string = hoje_br.strftime('%Y-%m-%d')
 
     try:
-        # 1. LOCALIZAÇÃO DO REGISTRO TEMPORÁRIO
+        # 1. BUSCA O REGISTRO TEMPORÁRIO QUE AINDA ESTÁ AGUARDANDO
         res_temp = supabase.table("pagamentos_temp")\
-            .select("usuario_id, valor, pref_id, projeto_id, vencimento_proposto, tipo_renovacao")\
+            .select("usuario_id, valor, pref_id, projeto_id, vencimento_proposto, tipo_renovacao, data_ini, data_fim, zap_ativo, email_ativo")\
             .eq("pref_id", str(pref_id))\
+            .eq("status", "aguardando")\
             .execute()
             
-        # CONTINGÊNCIA 1: Caso o Webhook já tenha processado rápido demais e apagado o registro
-        if not res_temp.data and "alteracao_licenca_pendente" in st.session_state:
-            dados_pendentes = st.session_state.alteracao_licenca_pendente
-            uid_usuario = dados_pendentes["dados_projeto"]["usuario_id"]
-            
-            res_user_direto = supabase.table("usuarios")\
-                .select("id, nome, email, vencimento, zap_ativo")\
-                .eq("id", uid_usuario)\
-                .execute()
-                
-            if res_user_direto.data:
-                user_db = res_user_direto.data[0]
-                if user_db["vencimento"] >= hoje_string:
-                    return {
-                        "id": user_db["id"],
-                        "nome": user_db["nome"],
-                        "email": user_db["email"],
-                        "vencimento": user_db["vencimento"],
-                        "zap_ativo": user_db["zap_ativo"],
-                        "projeto_ativo": dados_pendentes["dados_projeto"]["projeto_id"]
-                    }
-
-        # CONTINGÊNCIA 2: Busca retroativa baseada na sessão ativa
+        # Se não encontrou com o pref_id, tenta buscar o último pendente do próprio usuário logado
         if not res_temp.data and "usuario_id" in st.session_state:
             res_temp = supabase.table("pagamentos_temp")\
-                .select("usuario_id, valor, pref_id, projeto_id, vencimento_proposto, tipo_renovacao")\
+                .select("usuario_id, valor, pref_id, projeto_id, vencimento_proposto, tipo_renovacao, data_ini, data_fim, zap_ativo, email_ativo")\
                 .eq("usuario_id", st.session_state.usuario_id)\
+                .eq("status", "aguardando")\
                 .order("created_at", desc=True)\
                 .limit(1)\
                 .execute()
 
-        # Fallback definitivo de emergência por e-mail
+        # Se a tabela já foi processada (status 'concluido'), faz o login com base no estado atual do banco
         if not res_temp.data:
-            if st.session_state.get("usuario_email"):
-                res_user_final = supabase.table("usuarios").select("*").eq("email", st.session_state.usuario_email).execute()
+            email_sessao = st.session_state.get("usuario_email")
+            if email_sessao:
+                res_user_final = supabase.table("usuarios").select("*").eq("email", email_sessao).execute()
                 if res_user_final.data:
                     u = res_user_final.data[0]
                     return {
@@ -75,11 +53,17 @@ def tratar_retorno(supabase, pref_id, status_retorno):
         uid_usuario = dados_pag_temp["usuario_id"]
         valor_esperado = dados_pag_temp["valor"]
         pref_id_original = dados_pag_temp["pref_id"]
-        plano_salvo = dados_pag_temp.get("projeto_id")
+        nome_plano = dados_pag_temp.get("projeto_id")
         vencimento_proposto = dados_pag_temp.get("vencimento_proposto")
         tipo_renov_escolhido = dados_pag_temp.get("tipo_renovacao")
         
-        # 2. RECUPERAÇÃO DE INFORMAÇÕES DO USUÁRIO
+        # Dados do escopo do plano vindos diretamente do banco temporário
+        p_data_ini = dados_pag_temp.get("data_ini")
+        p_data_fim = dados_pag_temp.get("data_fim")
+        p_zap = dados_pag_temp.get("zap_ativo", 0)
+        p_email = dados_pag_temp.get("email_ativo", 0)
+        
+        # 2. RECUPERAÇÃO DE INFORMAÇÕES CADASTRUTURAIS DO USUÁRIO
         res_user_atual = supabase.table("usuarios")\
             .select("vencimento, id, nome, email, zap_ativo")\
             .eq("id", uid_usuario)\
@@ -90,74 +74,48 @@ def tratar_retorno(supabase, pref_id, status_retorno):
             
         user_db = res_user_atual.data[0]
         
-        # 3. TRATAMENTO DO NOVO VENCIMENTO DA ASSINATURA
+        # 3. TRATAMENTO DO VENCIMENTO DA ASSINATURA GERAL
         if vencimento_proposto:
             nova_data_vencimento_str = vencimento_proposto
         else:
-            meses_comprados = 1
-            if valor_esperado > 150.00: meses_comprados = 12
-            elif valor_esperado > 50.00: meses_comprados = 6
-                
-            nova_data_vencimento_str = (hoje + relativedelta(months=meses_comprados)).strftime("%Y-%m-%d")
+            meses_comprados = 12 if valor_esperado > 150.00 else (6 if valor_esperado > 50.00 else 1)
+            nova_data_vencimento_str = (hoje_br + relativedelta(months=meses_comprados)).strftime("%Y-%m-%d")
         
-        # 4. 🚀 CONSOLIDAR AS ALTERAÇÕES DO PLANO DE LICENÇA (Sincronização Real)
-        nome_real_plano = plano_salvo
-        if plano_salvo:
+        # 4. 🚀 SALVAMENTO DIRETO E SIMPLIFICADO NA CONFIG_PROJETOS
+        if nome_plano:
             try:
-                # Se a string contiver o pipeline '|', extraímos os dados salvos na tela de gestão
-                if "|" in str(plano_salvo):
-                    partes = str(plano_salvo).split("|")
-                    nome_real_plano = partes[0]
-                    meses_escolhidos = int(partes[1])
-                    zap_status = int(partes[2])
-                    email_status = int(partes[3])
-                else:
-                    # Fallback clássico caso venha apenas o nome puro
-                    nome_real_plano = plano_salvo
-                    meses_escolhidos = 36 if valor_esperado > 50.00 else 24
-                    zap_status = 0
-                    email_status = 1
-
-                # Busca o histórico do projeto oficial para herdar metadados ou ID existente
-                res_projeto_oficial = supabase.table("config_projetos").select("*").eq("projeto_id", nome_real_plano).eq("usuario_id", uid_usuario).execute()
-                
-                # Define a data de início (padrão dia 1 do mês atual baseado no fuso correto)
-                data_ini_calc = hoje.replace(day=1).strftime("%Y-%m-%d")
-                if res_projeto_oficial.data:
-                    data_ini_calc = res_projeto_oficial.data[0].get("data_ini", data_ini_calc)
-                
-                # Calcula a nova data fim somando os meses escolhidos pelo slider
-                dt_ini_parsed = datetime.strptime(data_ini_calc, "%Y-%m-%d").date()
-                dt_fim_calculada = (dt_ini_parsed + relativedelta(months=meses_escolhidos - 1))
-                data_fim_calc = (dt_fim_calculada.replace(day=1) + relativedelta(months=1, days=-1)).strftime("%Y-%m-%d")
+                res_projeto_oficial = supabase.table("config_projetos")\
+                    .select("id")\
+                    .eq("projeto_id", nome_plano)\
+                    .eq("usuario_id", uid_usuario)\
+                    .execute()
                 
                 payload_plano = {
-                    "projeto_id": nome_real_plano,
+                    "projeto_id": nome_plano,
                     "usuario_id": uid_usuario,
-                    "data_ini": data_ini_calc,
-                    "data_fim": data_fim_calc,
-                    "zap_ativo": zap_status,
-                    "email_ativo": email_status
+                    "data_ini": p_data_ini if p_data_ini else hoje_string,
+                    "data_fim": p_data_fim,
+                    "zap_ativo": p_zap,
+                    "email_ativo": p_email
                 }
                 
-                # Se o plano já existia, anexa o ID da chave primária para garantir o UPSERT correto
+                # Se já existir o registro do plano, herda o ID para realizar o UPSERT correto
                 if res_projeto_oficial.data:
                     payload_plano["id"] = res_projeto_oficial.data[0]["id"]
                 
-                # Salva de forma definitiva as alterações calculadas na tabela config_projetos
                 supabase.table("config_projetos").upsert(payload_plano).execute()
                 
-                # Remove lançamentos futuros que ultrapassem o novo escopo do plano
-                supabase.table("lancamentos").delete().eq("projeto_id", nome_real_plano).eq("usuario_id", uid_usuario).gt("data", data_fim_calc).execute()
-                
+                # Limpa lançamentos que porventura fiquem fora do novo limite de vigência do plano
+                if p_data_fim:
+                    supabase.table("lancamentos").delete().eq("projeto_id", nome_plano).eq("usuario_id", uid_usuario).gt("data", p_data_fim).execute()
+                    
             except Exception as erro_plano:
-                # Se der erro aqui, vamos expor na tela para você saber exatamente o que o banco recusou
-                st.error(f"Erro ao sincronizar configuração do plano ({nome_real_plano}): {erro_plano}")
+                st.error(f"Erro ao persistir configuração do plano oficial: {erro_plano}")
 
-        # 5. ATUALIZA OS DADOS DA LICENÇA NA TABELA PRINCIPAL DE USUÁRIOS
+        # 5. ATUALIZA A VALIDADE DA LICENÇA NA TABELA DE USUÁRIOS
         dados_atualizacao_usuario = {
             "vencimento": nova_data_vencimento_str,
-            "data_ult_assinat": hoje_string,  # <-- Usando a string com fuso corrigido
+            "data_ult_assinat": hoje_string,
             "valor_pago": float(valor_esperado)
         }
         
@@ -166,25 +124,22 @@ def tratar_retorno(supabase, pref_id, status_retorno):
 
         supabase.table("usuarios").update(dados_atualizacao_usuario).eq("id", uid_usuario).execute()
         
-        # 6. LIMPEZA DOS TEMPORÁRIOS E MEMÓRIA DE SESSÃO
+        # 6. 🔒 NÃO DELETA: Apenas muda o status para 'concluido' protegendo contra perdas
         try:
-            supabase.table("pagamentos_temp").delete().eq("pref_id", pref_id_original).execute()
+            supabase.table("pagamentos_temp").update({"status": "concluido"}).eq("pref_id", pref_id_original).execute()
         except: 
             pass
         
-        if "alteracao_licenca_pendente" in st.session_state: del st.session_state.alteracao_licenca_pendente
-        if "dados_p_salvamento" in st.session_state: del st.session_state.dados_p_salvamento
-        
-        # 7. RETORNA O MAPA CORRETO PARA LOGIN AUTOMÁTICO IMEDIATO COM O PLANO CARREGADO
+        # 7. RETORNA O DICIONÁRIO DE LOGIN COM O PLANO ATUALIZADO CARREGADO
         return {
             "id": user_db["id"],
             "nome": user_db["nome"],
             "email": user_db["email"],
             "vencimento": nova_data_vencimento_str,
             "zap_ativo": user_db["zap_ativo"],
-            "projeto_ativo": nome_real_plano  # <-- Garante o retorno do nome limpo do plano carregado
+            "projeto_ativo": nome_plano
         }
 
     except Exception as e:
-        st.error(f"Erro crítico no processamento geral do retorno MP: {e}")
+        st.error(f"Erro crítico no processamento do retorno: {e}")
         return None

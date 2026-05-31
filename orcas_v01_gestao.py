@@ -374,10 +374,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 if valor_final_faturar > 0:
                     if st.button("🚀 GERAR LINK DE PAGAMENTO", use_container_width=True):
                         with st.spinner("Preparando fatura segura..."):
-                            # 📦 SERIALIZAÇÃO COMPACTA PARA SUPERAR A PERDA DE SESSÃO ENTRE ABAS
-                            # Formato string: Nome do Plano|Meses|Zap Ativo|Email Ativo
-                            nome_limpo = nome_plano_input.strip() if nome_plano_input else "Plano"
-                            plano_para_vincular = f"{nome_limpo}|{meses_total_edit}|{1 if ativar_zap_atual else 0}|{1 if ativar_email_atual else 0}"
+                            plano_para_vincular = nome_plano_input.strip() if nome_plano_input else "Plano"
                             
                             import orcas_v01_pagamentos as pag
                             email_user = st.session_state.get('usuario_email', "cliente@email.com")
@@ -401,13 +398,18 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                                 st.session_state.meses_comprados = qtd_meses
                                 
                                 try:
-                                    # O payload viaja na coluna 'projeto_id' sem alterar a estrutura do banco de dados
+                                    # 💾 SALVAMENTO DIRETAMENTE NAS COLUNAS COM AS VARIÁVEIS DA SUA TELA
                                     supabase.table("pagamentos_temp").upsert({
                                         "usuario_id": ID_USUARIO_LOGADO,
                                         "pref_id": str(st.session_state.pref_id_ativa),
                                         "valor": float(valor_final_faturar),
                                         "status": "aguardando",
-                                        "projeto_id": plano_para_vincular
+                                        "projeto_id": plano_para_vincular,
+                                        "data_ini": dados_p_salvamento.get("data_ini"),
+                                        "data_fim": dados_p_salvamento.get("data_fim"),
+                                        "zap_ativo": bool(ativar_zap_atual),          # Mapeado para True/False
+                                        "email_ativo": int(1 if ativar_email_atual else 0), # Mapeado para 1/0
+                                        "tipo_renovacao": str(tipo_pagamento)         # Mapeado para sua variável de período
                                     }).execute()
                                     st.toast("Link gerado com sucesso!")
                                 except Exception as e:
