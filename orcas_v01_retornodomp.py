@@ -19,8 +19,9 @@ def tratar_retorno(supabase, pref_id, status_retorno):
 
     try:
         # 1. BUSCA O REGISTRO TEMPORÁRIO QUE AINDA ESTÁ AGUARDANDO
+        # 🟢 CORREÇÃO: Removido 'vencimento_proposto' para evitar que a query retorne vazia.
         res_temp = supabase.table("pagamentos_temp")\
-            .select("usuario_id, valor, pref_id, projeto_id, vencimento_proposto, tipo_renovacao, data_ini, data_fim, zap_ativo, email_ativo")\
+            .select("usuario_id, valor, pref_id, projeto_id, tipo_renovacao, data_ini, data_fim, zap_ativo, email_ativo")\
             .eq("pref_id", str(pref_id))\
             .eq("status", "aguardando")\
             .execute()
@@ -28,7 +29,7 @@ def tratar_retorno(supabase, pref_id, status_retorno):
         # Se não encontrou com o pref_id, tenta buscar o último pendente do próprio usuário logado
         if not res_temp.data and "usuario_id" in st.session_state:
             res_temp = supabase.table("pagamentos_temp")\
-                .select("usuario_id, valor, pref_id, projeto_id, vencimento_proposto, tipo_renovacao, data_ini, data_fim, zap_ativo, email_ativo")\
+                .select("usuario_id, valor, pref_id, projeto_id, tipo_renovacao, data_ini, data_fim, zap_ativo, email_ativo")\
                 .eq("usuario_id", st.session_state.usuario_id)\
                 .eq("status", "aguardando")\
                 .order("created_at", desc=True)\
@@ -44,7 +45,7 @@ def tratar_retorno(supabase, pref_id, status_retorno):
                     u = res_user_final.data[0]
                     return {
                         "id": u["id"], "nome": u["nome"], "email": u["email"],
-                        "vencimento": u["vencimento"], "zap_ativo": u.get("zap_ativo", 0),
+                        "vencimento": u["vencimento"], "zap_ativo": u.get("zap_ativo", False),
                         "projeto_ativo": st.session_state.get("projeto_ativo")
                     }
             return None
@@ -54,14 +55,15 @@ def tratar_retorno(supabase, pref_id, status_retorno):
         valor_esperado = dados_pag_temp["valor"]
         pref_id_original = dados_pag_temp["pref_id"]
         nome_plano = dados_pag_temp.get("projeto_id")
-        vencimento_proposto = dados_pag_temp.get("vencimento_proposto")
         tipo_renov_escolhido = dados_pag_temp.get("tipo_renovacao")
         
         # Dados do escopo do plano vindos diretamente do banco temporário
         p_data_ini = dados_pag_temp.get("data_ini")
         p_data_fim = dados_pag_temp.get("data_fim")
-        p_zap = dados_pag_temp.get("zap_ativo", 0)
-        p_email = dados_pag_temp.get("email_ativo", 0)
+        
+        # 🟢 CORREÇÃO: Passando os valores de forma idêntica e sem conversões forçadas (respeitando seus tipos nativos)
+        p_zap = dados_pag_temp.get("zap_ativo")
+        p_email = dados_pag_temp.get("email_ativo")
         
         # 2. RECUPERAÇÃO DE INFORMAÇÕES CADASTRUTURAIS DO USUÁRIO
         res_user_atual = supabase.table("usuarios")\
@@ -75,11 +77,18 @@ def tratar_retorno(supabase, pref_id, status_retorno):
         user_db = res_user_atual.data[0]
         
         # 3. TRATAMENTO DO VENCIMENTO DA ASSINATURA GERAL
-        if vencimento_proposto:
-            nova_data_vencimento_str = vencimento_proposto
+        # Calcula os meses dinamicamente baseado na string salva no pacote temporário (Ex: "36 Meses")
+        if tipo_renov_escolhido and "12" in str(tipo_renov_escolhido):
+            meses_comprados = 12
+        elif tipo_renov_escolhido and "6" in str(tipo_renov_escolhido):
+            meses_comprados = 6
+        elif tipo_renov_escolhido and "36" in str(tipo_renov_escolhido):
+            meses_comprados = 36
         else:
+            # Fallback caso não identifique o texto, calcula aproximado por valor
             meses_comprados = 12 if valor_esperado > 150.00 else (6 if valor_esperado > 50.00 else 1)
-            nova_data_vencimento_str = (hoje_br + relativedelta(months=meses_comprados)).strftime("%Y-%m-%d")
+            
+        nova_data_vencimento_str = (hoje_br + relativedelta(months=meses_comprados)).strftime("%Y-%m-%d")
         
         # 4. 🚀 SALVAMENTO DIRETO E SIMPLIFICADO NA CONFIG_PROJETOS
         if nome_plano:
@@ -136,7 +145,7 @@ def tratar_retorno(supabase, pref_id, status_retorno):
             "nome": user_db["nome"],
             "email": user_db["email"],
             "vencimento": nova_data_vencimento_str,
-            "zap_ativo": user_db["zap_ativo"],
+            "zap_ativo": p_zap, 
             "projeto_ativo": nome_plano
         }
 
