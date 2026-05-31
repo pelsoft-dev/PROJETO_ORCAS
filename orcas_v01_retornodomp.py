@@ -1,5 +1,6 @@
 import requests
-from datetime import datetime, date, timedelta
+from datetime import datetime, timedelta
+import zoneinfo  # <-- Para fixar o fuso horário do Brasil
 from dateutil.relativedelta import relativedelta
 import streamlit as st
 
@@ -13,7 +14,11 @@ def tratar_retorno(supabase, pref_id, status_retorno):
     if status_retorno not in ["approved", "authorized", "pending"]:
         return None
 
-    hoje = date.today()
+    # 🔥 CORREÇÃO DO FUSO HORÁRIO: Garante a data correta do Brasil (GMT-3)
+    fuso_br = zoneinfo.ZoneInfo("America/Sao_Paulo")
+    agora_br = datetime.now(fuso_br)
+    hoje = agora_br.date()
+    hoje_string = hoje.strftime('%Y-%m-%d')
 
     try:
         # 1. LOCALIZAÇÃO DO REGISTRO TEMPORÁRIO
@@ -34,7 +39,7 @@ def tratar_retorno(supabase, pref_id, status_retorno):
                 
             if res_user_direto.data:
                 user_db = res_user_direto.data[0]
-                if user_db["vencimento"] >= hoje.strftime("%Y-%m-%d"):
+                if user_db["vencimento"] >= hoje_string:
                     return {
                         "id": user_db["id"],
                         "nome": user_db["nome"],
@@ -94,13 +99,13 @@ def tratar_retorno(supabase, pref_id, status_retorno):
             elif valor_esperado > 50.00: meses_comprados = 6
                 
             nova_data_vencimento_str = (hoje + relativedelta(months=meses_comprados)).strftime("%Y-%m-%d")
-
+        
         # 4. 🚀 CONSOLIDAR AS ALTERAÇÕES DO PLANO DE LICENÇA (Sincronização Real)
+        nome_real_plano = plano_salvo
         if plano_salvo:
             try:
-                # Verifica se a string contém o caractere delimitador pipeline '|'
+                # Se a string contiver o pipeline '|', extraímos os dados salvos na tela de gestão
                 if "|" in str(plano_salvo):
-                    # Decodifica a string compactada guardada na ida
                     partes = str(plano_salvo).split("|")
                     nome_real_plano = partes[0]
                     meses_escolhidos = int(partes[1])
@@ -113,18 +118,15 @@ def tratar_retorno(supabase, pref_id, status_retorno):
                     zap_status = 0
                     email_status = 1
 
-                # Redefine o nome real do plano para ser devolvido corretamente ao sistema
-                plano_salvo = nome_real_plano 
-
                 # Busca o histórico do projeto oficial para herdar metadados ou ID existente
                 res_projeto_oficial = supabase.table("config_projetos").select("*").eq("projeto_id", nome_real_plano).eq("usuario_id", uid_usuario).execute()
                 
-                # Define a data de início (padrão dia 1 do mês atual)
+                # Define a data de início (padrão dia 1 do mês atual baseado no fuso correto)
                 data_ini_calc = hoje.replace(day=1).strftime("%Y-%m-%d")
                 if res_projeto_oficial.data:
                     data_ini_calc = res_projeto_oficial.data[0].get("data_ini", data_ini_calc)
                 
-                # Calcula a nova data fim somando rigorosamente os meses escolhidos pelo slider (ex: 36 meses)
+                # Calcula a nova data fim somando os meses escolhidos pelo slider
                 dt_ini_parsed = datetime.strptime(data_ini_calc, "%Y-%m-%d").date()
                 dt_fim_calculada = (dt_ini_parsed + relativedelta(months=meses_escolhidos - 1))
                 data_fim_calc = (dt_fim_calculada.replace(day=1) + relativedelta(months=1, days=-1)).strftime("%Y-%m-%d")
@@ -138,23 +140,24 @@ def tratar_retorno(supabase, pref_id, status_retorno):
                     "email_ativo": email_status
                 }
                 
-                # Evita duplicidades ou restrições de chave única anexando o ID caso o plano já existisse
+                # Se o plano já existia, anexa o ID da chave primária para garantir o UPSERT correto
                 if res_projeto_oficial.data:
                     payload_plano["id"] = res_projeto_oficial.data[0]["id"]
                 
                 # Salva de forma definitiva as alterações calculadas na tabela config_projetos
                 supabase.table("config_projetos").upsert(payload_plano).execute()
                 
-                # Remove limpezas futuras incoerentes com o novo prazo estendido
+                # Remove lançamentos futuros que ultrapassem o novo escopo do plano
                 supabase.table("lancamentos").delete().eq("projeto_id", nome_real_plano).eq("usuario_id", uid_usuario).gt("data", data_fim_calc).execute()
                 
             except Exception as erro_plano:
-                print(f"Aviso: Falha ao reconstruir dados serializados do plano: {erro_plano}")
+                # Se der erro aqui, vamos expor na tela para você saber exatamente o que o banco recusou
+                st.error(f"Erro ao sincronizar configuração do plano ({nome_real_plano}): {erro_plano}")
 
         # 5. ATUALIZA OS DADOS DA LICENÇA NA TABELA PRINCIPAL DE USUÁRIOS
         dados_atualizacao_usuario = {
             "vencimento": nova_data_vencimento_str,
-            "data_ult_assinat": hoje.strftime("%Y-%m-%d"),
+            "data_ult_assinat": hoje_string,  # <-- Usando a string com fuso corrigido
             "valor_pago": float(valor_esperado)
         }
         
@@ -166,7 +169,8 @@ def tratar_retorno(supabase, pref_id, status_retorno):
         # 6. LIMPEZA DOS TEMPORÁRIOS E MEMÓRIA DE SESSÃO
         try:
             supabase.table("pagamentos_temp").delete().eq("pref_id", pref_id_original).execute()
-        except: pass
+        except: 
+            pass
         
         if "alteracao_licenca_pendente" in st.session_state: del st.session_state.alteracao_licenca_pendente
         if "dados_p_salvamento" in st.session_state: del st.session_state.dados_p_salvamento
@@ -178,9 +182,9 @@ def tratar_retorno(supabase, pref_id, status_retorno):
             "email": user_db["email"],
             "vencimento": nova_data_vencimento_str,
             "zap_ativo": user_db["zap_ativo"],
-            "projeto_ativo": plano_salvo
+            "projeto_ativo": nome_real_plano  # <-- Garante o retorno do nome limpo do plano carregado
         }
 
     except Exception as e:
-        print(f"Erro crítico no processamento do retorno MP: {e}")
+        st.error(f"Erro crítico no processamento geral do retorno MP: {e}")
         return None
