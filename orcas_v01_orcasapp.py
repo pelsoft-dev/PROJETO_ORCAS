@@ -221,6 +221,8 @@ def parse_moeda(t):
 # INÍCIO INSERÇÃO: INTERCEPTAÇÃO INTELIGENTE DE RETORNO DO MERCADO PAGO E LOGIN AUTOMÁTICO
 # ==============================================================================
 import streamlit.components.v1 as components
+import zoneinfo
+from datetime import datetime, timedelta
 
 status_retorno = None
 pref_id = None
@@ -243,13 +245,16 @@ if "bypass_uid" in query_params and "bypass_val" in query_params:
         if req_temp.data:
             dados_temp = req_temp.data[0]
             
-            if not venc_retorno_str:
-                venc_retorno_str = (datetime.now().date() + timedelta(days=30)).strftime('%Y-%m-%d')
+            # 🔥 CORREÇÃO DE FUSO HORÁRIO NO BYPASS: Garante horário de Brasília
+            fuso_br = zoneinfo.ZoneInfo("America/Sao_Paulo")
+            hoje_br_string = datetime.now(fuso_br).strftime('%Y-%m-%d')
             
-            hoje_string = datetime.now().date().strftime('%Y-%m-%d')
+            if not venc_retorno_str:
+                venc_retorno_str = (datetime.now(fuso_br).date() + timedelta(days=30)).strftime('%Y-%m-%d')
+            
             try:
                 supabase.table("usuarios").update({
-                    "data_ult_assinat": hoje_string,
+                    "data_ult_assinat": hoje_br_string,
                     "valor_pago": valor_retorno,
                     "vencimento": venc_retorno_str
                 }).eq("id", uid_retorno).execute()
@@ -270,7 +275,8 @@ if "bypass_uid" in query_params and "bypass_val" in query_params:
                 st.session_state.escolha = "⚙️ Gestão"
                 
                 try:
-                    supabase.table("pagamentos_temp").delete().eq("usuario_id", uid_retorno).execute()
+                    # Mudamos para 'concluido' em vez de deletar para manter o histórico
+                    supabase.table("pagamentos_temp").update({"status": "concluido"}).eq("usuario_id", uid_retorno).execute()
                 except Exception:
                     pass
                 
@@ -325,8 +331,10 @@ if status_retorno and pref_id and not st.session_state.logado:
 # --- ESTRATÉGIA 3 (CONTINGÊNCIA CRÍTICA): RETORNO VIA URL 100% LIMPA ---
 elif not st.session_state.logado:
     try:
+        # 🔑 CORREÇÃO CRÍTICA: Agora o select busca todas as novas colunas e filtra apenas as que estão 'aguardando'
         res_recente = supabase.table("pagamentos_temp")\
-            .select("pref_id, usuario_id, projeto_id")\
+            .select("pref_id, usuario_id, projeto_id, status, data_ini, data_fim, zap_ativo, email_ativo")\
+            .eq("status", "aguardando")\
             .order("created_at", desc=True)\
             .limit(1)\
             .execute()
