@@ -56,11 +56,6 @@ def tratar_retorno(supabase, pref_id, status_retorno):
         nome_plano = dados_pag_temp.get("projeto_id")
         tipo_renov_escolhido = dados_pag_temp.get("tipo_renovacao")
         
-        p_data_ini = dados_pag_temp.get("data_ini")
-        p_data_fim = dados_pag_temp.get("data_fim")
-        p_zap = dados_pag_temp.get("zap_ativo")
-        p_email = dados_pag_temp.get("email_ativo")
-        
         # 2. RECUPERAÇÃO DE INFORMAÇÕES CADASTRUTURAIS DO USUÁRIO
         res_user_atual = supabase.table("usuarios").select("vencimento, id, nome, email, zap_ativo").eq("id", uid_usuario).execute()
         user_db = res_user_atual.data[0]
@@ -77,40 +72,7 @@ def tratar_retorno(supabase, pref_id, status_retorno):
             
         nova_data_vencimento_str = (hoje_br + relativedelta(months=meses_comprados)).strftime("%Y-%m-%d")
         
-        # 4. 🚀 SALVAMENTO SEGURO NA CONFIG_PROJETOS
-        # Proteção: Caso o nome do plano venha vazio por falha de input, garante uma string preenchida para o banco aceitar
-        if not nome_plano:
-            nome_plano = "Plano Ativo"
-
-        try:
-            res_projeto_oficial = supabase.table("config_projetos")\
-                .select("id")\
-                .eq("projeto_id", nome_plano)\
-                .eq("usuario_id", uid_usuario)\
-                .execute()
-            
-            payload_plano = {
-                "projeto_id": nome_plano,
-                "usuario_id": uid_usuario,
-                "data_ini": p_data_ini if p_data_ini else hoje_string,
-                "data_fim": p_data_fim,
-                "zap_ativo": p_zap,
-                "email_ativo": p_email
-            }
-            
-            # Se encontrar o registro existente do plano, herda o id para fazer o UPSERT correto em vez de duplicar
-            if res_projeto_oficial.data:
-                payload_plano["id"] = res_projeto_oficial.data[0]["id"]
-            
-            supabase.table("config_projetos").upsert(payload_plano).execute()
-            
-            # Limpa lançamentos fora dos limites do novo plano se data_fim existir
-            if p_data_fim:
-                supabase.table("lancamentos").delete().eq("projeto_id", nome_plano).eq("usuario_id", uid_usuario).gt("data", p_data_fim).execute()
-        
-        except Exception as erro_interno_projeto:
-            # Imprime no terminal do servidor caso ocorra alguma rejeição de constraints do Supabase
-            print(f"--- [AVISO BANCO DE DADOS] Erro ao salvar config_projetos: {erro_interno_projeto} ---")
+        # 🟢 4. DESFEITO: Lógica antiga do payload removida deste ponto conforme solicitado.
 
         # 5. ATUALIZA VALIDADE NA TABELA DE USUÁRIOS
         supabase.table("usuarios").update({
@@ -123,14 +85,37 @@ def tratar_retorno(supabase, pref_id, status_retorno):
         # 6. ATUALIZA STATUS DA TEMPORÁRIA PARA CONCLUÍDO
         supabase.table("pagamentos_temp").update({"status": "concluido"}).eq("pref_id", pref_id_original).execute()
         
-        # 7. RETORNA O DICIONÁRIO COMPLETO DE SESSÃO COM OS DADOS ATUALIZADOS DO PLANO COMPRADO
+        # 7. 🚀 REESTRUTURADO: LÊ A TABELA pagamentos_temp E ATUALIZA A TABELA config_projetos DIRETAMENTE
+        # Busca o registro que acabou de ser concluído para garantir a leitura fresca dos dados exatos pré-MP
+        res_dados_frescos = supabase.table("pagamentos_temp")\
+            .select("projeto_id, data_ini, data_fim, zap_ativo, email_ativo, tipo_renovacao")\
+            .eq("pref_id", str(pref_id_original))\
+            .execute()
+            
+        if res_dados_frescos.data:
+            dados_frescos = res_dados_frescos.data[0]
+            plano_alvo = dados_frescos.get("projeto_id") if dados_frescos.get("projeto_id") else "Plano Ativo"
+            
+            # Dá o update direto na tabela oficial baseando-se nas colunas reais do banco de dados temporário
+            supabase.table("config_projetos").update({
+                "data_ini": dados_frescos.get("data_ini") if dados_frescos.get("data_ini") else hoje_string,
+                "data_fim": dados_frescos.get("data_fim"),
+                "zap_ativo": dados_frescos.get("zap_ativo"),
+                "email_ativo": dados_frescos.get("email_ativo")
+            }).eq("projeto_id", plano_alvo).eq("usuario_id", uid_usuario).execute()
+
+            # Limpa lançamentos que porventura fiquem fora do novo limite de vigência se houver data_fim
+            if dados_frescos.get("data_fim"):
+                supabase.table("lancamentos").delete().eq("projeto_id", plano_alvo).eq("usuario_id", uid_usuario).gt("data", dados_frescos.get("data_fim")).execute()
+
+        # 8. RETORNA O DICIONÁRIO COMPLETO DE SESSÃO COM OS DADOS ATUALIZADOS DO PLANO COMPRADO
         return {
             "id": user_db["id"], 
             "nome": user_db["nome"], 
             "email": user_db["email"],
             "vencimento": nova_data_vencimento_str, 
-            "zap_ativo": p_zap, 
-            "projeto_ativo": nome_plano
+            "zap_ativo": dados_pag_temp.get("zap_ativo"), 
+            "projeto_ativo": nome_plano if nome_plano else "Plano Ativo"
         }
 
     except Exception as e:
