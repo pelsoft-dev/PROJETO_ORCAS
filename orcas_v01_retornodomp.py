@@ -5,12 +5,14 @@ from dateutil.relativedelta import relativedelta
 import streamlit as st
 
 def tratar_retorno(supabase, pref_id, status_retorno):
-    st.info(f"🔍 [LOG 1] Função chamada! pref_id: {pref_id} | status: {status_retorno}")
-    
+    """
+    Processa o retorno mapeando diretamente as colunas salvas no pagamentos_temp.
+    Altera o status para 'concluido' em vez de deletar para evitar perdas em múltiplos reruns.
+    """
     if status_retorno not in ["approved", "authorized", "pending"]:
-        st.warning(f"⚠️ [LOG 2] Status inválido recebido: {status_retorno}")
         return None
 
+    # 🌎 FIXAÇÃO DO FUSO HORÁRIO DO BRASIL (Evita o erro do dia seguinte)
     fuso_br = zoneinfo.ZoneInfo("America/Sao_Paulo")
     hoje_br = datetime.now(fuso_br).date()
     hoje_string = hoje_br.strftime('%Y-%m-%d')
@@ -23,10 +25,8 @@ def tratar_retorno(supabase, pref_id, status_retorno):
             .eq("status", "aguardando")\
             .execute()
             
-        st.info(f"🔍 [LOG 3] Resultado da busca por pref_id: {res_temp.data}")
-            
+        # Se não encontrou com o pref_id, tenta buscar o último pendente do próprio usuário logado
         if not res_temp.data and "usuario_id" in st.session_state:
-            st.info(f"🔍 [LOG 4] Tentando buscar pelo ID do usuário da sessão: {st.session_state.usuario_id}")
             res_temp = supabase.table("pagamentos_temp")\
                 .select("usuario_id, valor, pref_id, projeto_id, tipo_renovacao, data_ini, data_fim, zap_ativo, email_ativo")\
                 .eq("usuario_id", st.session_state.usuario_id)\
@@ -34,10 +34,9 @@ def tratar_retorno(supabase, pref_id, status_retorno):
                 .order("created_at", desc=True)\
                 .limit(1)\
                 .execute()
-            st.info(f"🔍 [LOG 5] Resultado da busca secundária: {res_temp.data}")
 
+        # Se a tabela já foi processada (status 'concluido'), faz o login preventivo com base no estado atual do banco
         if not res_temp.data:
-            st.error("🚨 [LOG 6] NENHUM dado encontrado em pagamentos_temp com status 'aguardando'. Saindo da função.")
             email_sessao = st.session_state.get("usuario_email")
             if email_sessao:
                 res_user_final = supabase.table("usuarios").select("*").eq("email", email_sessao).execute()
@@ -62,13 +61,11 @@ def tratar_retorno(supabase, pref_id, status_retorno):
         p_zap = dados_pag_temp.get("zap_ativo")
         p_email = dados_pag_temp.get("email_ativo")
         
-        st.success(f"✅ [LOG 7] Dados recuperados da temporária! Preparando payload para projeto: {nome_plano}")
-        
-        # 2. RECUPERAÇÃO DE INFORMAÇÕES CADASTRUTURAIS
+        # 2. RECUPERAÇÃO DE INFORMAÇÕES CADASTRUTURAIS DO USUÁRIO
         res_user_atual = supabase.table("usuarios").select("vencimento, id, nome, email, zap_ativo").eq("id", uid_usuario).execute()
         user_db = res_user_atual.data[0]
         
-        # 3. TRATAMENTO DO VENCIMENTO
+        # 3. TRATAMENTO DO VENCIMENTO DA LICENÇA GERAL
         if tipo_renov_escolhido and "12" in str(tipo_renov_escolhido):
             meses_comprados = 12
         elif tipo_renov_escolhido and "6" in str(tipo_renov_escolhido):
@@ -80,9 +77,17 @@ def tratar_retorno(supabase, pref_id, status_retorno):
             
         nova_data_vencimento_str = (hoje_br + relativedelta(months=meses_comprados)).strftime("%Y-%m-%d")
         
-        # 4. SALVAMENTO NA CONFIG_PROJETOS
-        if nome_plano:
-            res_projeto_oficial = supabase.table("config_projetos").select("id").eq("projeto_id", nome_plano).eq("usuario_id", uid_usuario).execute()
+        # 4. 🚀 SALVAMENTO SEGURO NA CONFIG_PROJETOS
+        # Proteção: Caso o nome do plano venha vazio por falha de input, garante uma string preenchida para o banco aceitar
+        if not nome_plano:
+            nome_plano = "Plano Ativo"
+
+        try:
+            res_projeto_oficial = supabase.table("config_projetos")\
+                .select("id")\
+                .eq("projeto_id", nome_plano)\
+                .eq("usuario_id", uid_usuario)\
+                .execute()
             
             payload_plano = {
                 "projeto_id": nome_plano,
@@ -93,25 +98,41 @@ def tratar_retorno(supabase, pref_id, status_retorno):
                 "email_ativo": p_email
             }
             
+            # Se encontrar o registro existente do plano, herda o id para fazer o UPSERT correto em vez de duplicar
             if res_projeto_oficial.data:
                 payload_plano["id"] = res_projeto_oficial.data[0]["id"]
             
-            st.info(f"🚀 [LOG 8] Enviando Upsert para config_projetos: {payload_plano}")
-            __ret = supabase.table("config_projetos").upsert(payload_plano).execute()
-            st.success(f"✅ [LOG 9] Resposta do Upsert: {__ret.data}")
+            supabase.table("config_projetos").upsert(payload_plano).execute()
+            
+            # Limpa lançamentos fora dos limites do novo plano se data_fim existir
+            if p_data_fim:
+                supabase.table("lancamentos").delete().eq("projeto_id", nome_plano).eq("usuario_id", uid_usuario).gt("data", p_data_fim).execute()
+        
+        except Exception as erro_interno_projeto:
+            # Imprime no terminal do servidor caso ocorra alguma rejeição de constraints do Supabase
+            print(f"--- [AVISO BANCO DE DADOS] Erro ao salvar config_projetos: {erro_interno_projeto} ---")
 
-        # 5. ATUALIZA USUÁRIO
-        supabase.table("usuarios").update({"vencimento": nova_data_vencimento_str, "data_ult_assinat": hoje_string, "valor_pago": float(valor_esperado)}).eq("id", uid_usuario).execute()
+        # 5. ATUALIZA VALIDADE NA TABELA DE USUÁRIOS
+        supabase.table("usuarios").update({
+            "vencimento": nova_data_vencimento_str, 
+            "data_ult_assinat": hoje_string, 
+            "valor_pago": float(valor_esperado),
+            "tipo_renovacao": tipo_renov_escolhido if tipo_renov_escolhido else "Personalizado"
+        }).eq("id", uid_usuario).execute()
         
-        # 6. ATUALIZA TEMPORÁRIA
+        # 6. ATUALIZA STATUS DA TEMPORÁRIA PARA CONCLUÍDO
         supabase.table("pagamentos_temp").update({"status": "concluido"}).eq("pref_id", pref_id_original).execute()
-        st.success("🎉 [LOG 10] Tudo finalizado com sucesso!")
         
+        # 7. RETORNA O DICIONÁRIO COMPLETO DE SESSÃO COM OS DADOS ATUALIZADOS DO PLANO COMPRADO
         return {
-            "id": user_db["id"], "nome": user_db["nome"], "email": user_db["email"],
-            "vencimento": nova_data_vencimento_str, "zap_ativo": p_zap, "projeto_ativo": nome_plano
+            "id": user_db["id"], 
+            "nome": user_db["nome"], 
+            "email": user_db["email"],
+            "vencimento": nova_data_vencimento_str, 
+            "zap_ativo": p_zap, 
+            "projeto_ativo": nome_plano
         }
 
     except Exception as e:
-        st.error(f"❌ [ERRO CRÍTICO] Falha na função tratar_retorno: {e}")
+        print(f"--- [ERRO CRÍTICO RETORNO MP]: {e} ---")
         return None
