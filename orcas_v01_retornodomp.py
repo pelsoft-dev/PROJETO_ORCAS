@@ -85,14 +85,13 @@ def tratar_retorno(supabase, pref_id, status_retorno):
             
         nova_data_vencimento_str = (hoje_br + relativedelta(months=meses_comprados)).strftime("%Y-%m-%d")
         
-        # 4. 🚀 SALVAMENTO DIRETO, INDIVIDUAL E SIMPLIFICADO NA CONFIG_PROJETOS
+# 4. 🚀 SALVAMENTO DIRETO, INDIVIDUAL E SIMPLIFICADO NA CONFIG_PROJETOS
         if nome_plano:
             try:
-                # Caso o data_ini do banco temporário venha em branco, assume o dia de hoje por segurança
                 v_data_ini_final = p_data_ini if p_data_ini else hoje_string
 
-                # Executa o upsert direto com os campos individuais mapeados na leitura inicial da pagamentos_temp
-                supabase.table("config_projetos").upsert({
+                # Captura o retorno do banco em uma variável para inspecionarmos
+                retorno_banco = supabase.table("config_projetos").upsert({
                     "projeto_id": nome_plano,
                     "usuario_id": uid_usuario,
                     "data_ini": v_data_ini_final,
@@ -101,12 +100,20 @@ def tratar_retorno(supabase, pref_id, status_retorno):
                     "email_ativo": p_email
                 }).execute()
                 
-                # Limpa lançamentos que porventura fiquem fora do novo limite de vigência do plano
+                # Se o banco respondeu mas veio vazio, avisa na tela
+                if not retorno_banco.data:
+                    st.error(f"⚠️ O Supabase executou o comando, mas NENHUMA linha foi afetada na config_projetos. Verifique se o projeto_id '{nome_plano}' existe.")
+                else:
+                    st.success(f"🔥 Sucesso na config_projetos! Dados gravados: {retorno_banco.data}")
+                
                 if p_data_fim:
                     supabase.table("lancamentos").delete().eq("projeto_id", nome_plano).eq("usuario_id", uid_usuario).gt("data", p_data_fim).execute()
                     
             except Exception as erro_plano:
-                st.error(f"Erro ao persistir configuração do plano oficial: {erro_plano}")
+                # Mostra o erro técnico exato do banco na tela em letras garrafais
+                st.error(f"🚨 [ERRO REAL DO SUPABASE NA TABELA CONFIG_PROJETOS]: {erro_plano}")
+                # Força o script a parar aqui para o Streamlit não dar rerun e sumir com o erro
+                st.stop()
 
         # 5. ATUALIZA A VALIDADE DA LICENÇA NA TABELA DE USUÁRIOS
         dados_atualizacao_usuario = {
