@@ -18,7 +18,7 @@ def tratar_retorno(supabase, pref_id, status_retorno):
     hoje_string = hoje_br.strftime('%Y-%m-%d')
 
     try:
-        # 1. BUSCA O REGISTRO TEMPORÁRIO
+        # 1. BUSCA O REGISTRO TEMPORÁRIO QUE AINDA ESTÁ AGUARDANDO
         res_temp = supabase.table("pagamentos_temp")\
             .select("usuario_id, valor, pref_id, projeto_id, tipo_renovacao, data_ini, data_fim, zap_ativo, email_ativo")\
             .eq("pref_id", str(pref_id))\
@@ -35,7 +35,7 @@ def tratar_retorno(supabase, pref_id, status_retorno):
                 .limit(1)\
                 .execute()
 
-        # Se a tabela já foi processada (status 'concluido'), faz o login preventivo com base no estado atual do banco
+        # Se a tabela já foi processada (status 'concluido'), faz o login com base no estado atual do banco
         if not res_temp.data:
             email_sessao = st.session_state.get("usuario_email")
             if email_sessao:
@@ -56,11 +56,24 @@ def tratar_retorno(supabase, pref_id, status_retorno):
         nome_plano = dados_pag_temp.get("projeto_id")
         tipo_renov_escolhido = dados_pag_temp.get("tipo_renovacao")
         
+        # Dados do escopo do plano vindos diretamente do banco temporário
+        p_data_ini = dados_pag_temp.get("data_ini")
+        p_data_fim = dados_pag_temp.get("data_fim")
+        p_zap = dados_pag_temp.get("zap_ativo")
+        p_email = dados_pag_temp.get("email_ativo")
+        
         # 2. RECUPERAÇÃO DE INFORMAÇÕES CADASTRUTURAIS DO USUÁRIO
-        res_user_atual = supabase.table("usuarios").select("vencimento, id, nome, email, zap_ativo").eq("id", uid_usuario).execute()
+        res_user_atual = supabase.table("usuarios")\
+            .select("vencimento, id, nome, email, zap_ativo")\
+            .eq("id", uid_usuario)\
+            .execute()
+            
+        if not res_user_atual.data:
+            return None
+            
         user_db = res_user_atual.data[0]
         
-        # 3. TRATAMENTO DO VENCIMENTO DA LICENÇA GERAL
+        # 3. TRATAMENTO DO VENCIMENTO DA ASSINATURA GERAL
         if tipo_renov_escolhido and "12" in str(tipo_renov_escolhido):
             meses_comprados = 12
         elif tipo_renov_escolhido and "6" in str(tipo_renov_escolhido):
@@ -71,77 +84,58 @@ def tratar_retorno(supabase, pref_id, status_retorno):
             meses_comprados = 12 if valor_esperado > 150.00 else (6 if valor_esperado > 50.00 else 1)
             
         nova_data_vencimento_str = (hoje_br + relativedelta(months=meses_comprados)).strftime("%Y-%m-%d")
-
-        # 5. ATUALIZA VALIDADE NA TABELA DE USUÁRIOS
-        supabase.table("usuarios").update({
-            "vencimento": nova_data_vencimento_str, 
-            "data_ult_assinat": hoje_string, 
-            "valor_pago": float(valor_esperado),
-            "tipo_renovacao": tipo_renov_escolhido if tipo_renov_escolhido else "Personalizado"
-        }).eq("id", uid_usuario).execute()
         
-        # 6. ATUALIZA STATUS DA TEMPORÁRIA PARA CONCLUÍDO
-        supabase.table("pagamentos_temp").update({"status": "concluido"}).eq("pref_id", pref_id_original).execute()
-        
-        # 7. 🚀 EXECUÇÃO CAMPO A CAMPO (Sem agrupamento/payload)
-        # Primeiro, buscamos de forma fresca os campos isolados da pagamentos_temp
-        res_dados_frescos = supabase.table("pagamentos_temp")\
-            .select("projeto_id, data_ini, data_fim, zap_ativo, email_ativo")\
-            .eq("pref_id", str(pref_id_original))\
-            .execute()
-            
-        if res_dados_frescos.data:
-            dados_frescos = res_dados_frescos.data[0]
-            
-            # Extração individual campo a campo
-            v_projeto_id = dados_frescos.get("projeto_id") if dados_frescos.get("projeto_id") else "Plano Ativo"
-            v_data_ini = dados_frescos.get("data_ini") if dados_frescos.get("data_ini") else hoje_string
-            v_data_fim = dados_frescos.get("data_fim")
-            v_zap_ativo = dados_frescos.get("zap_ativo")
-            v_email_ativo = dados_frescos.get("email_ativo")
-            
-            # Verifica explicitamente se esse plano específico já tem um ID na config_projetos
-            res_existente = supabase.table("config_projetos")\
-                .select("id")\
-                .eq("projeto_id", v_projeto_id)\
-                .eq("usuario_id", uid_usuario)\
-                .execute()
+        # 4. 🚀 SALVAMENTO DIRETO, INDIVIDUAL E SIMPLIFICADO NA CONFIG_PROJETOS
+        if nome_plano:
+            try:
+                # Caso o data_ini do banco temporário venha em branco, assume o dia de hoje por segurança
+                v_data_ini_final = p_data_ini if p_data_ini else hoje_string
 
-            # Se o registro já existir, nós fazemos um UPDATE direto mirando no ID numérico dele
-            if res_existente.data:
-                id_registro_oficial = res_existente.data[0]["id"]
-                
-                # Executa atualizações campo por campo no registro existente
-                supabase.table("config_projetos").update({"data_ini": v_data_ini}).eq("id", id_registro_oficial).execute()
-                supabase.table("config_projetos").update({"data_fim": v_data_fim}).eq("id", id_registro_oficial).execute()
-                supabase.table("config_projetos").update({"zap_ativo": v_zap_ativo}).eq("id", id_registro_oficial).execute()
-                supabase.table("config_projetos").update({"email_ativo": v_email_ativo}).eq("id", id_registro_oficial).execute()
-            
-            # Se o plano NÃO existir na tabela oficial, nós inserimos ele do zero com campos explícitos
-            else:
-                supabase.table("config_projetos").insert({
-                    "projeto_id": v_projeto_id,
+                # Executa o upsert direto com os campos individuais mapeados na leitura inicial da pagamentos_temp
+                supabase.table("config_projetos").upsert({
+                    "projeto_id": nome_plano,
                     "usuario_id": uid_usuario,
-                    "data_ini": v_data_ini,
-                    "data_fim": v_data_fim,
-                    "zap_ativo": v_zap_ativo,
-                    "email_ativo": v_email_ativo
+                    "data_ini": v_data_ini_final,
+                    "data_fim": p_data_fim,
+                    "zap_ativo": p_zap,
+                    "email_ativo": p_email
                 }).execute()
+                
+                # Limpa lançamentos que porventura fiquem fora do novo limite de vigência do plano
+                if p_data_fim:
+                    supabase.table("lancamentos").delete().eq("projeto_id", nome_plano).eq("usuario_id", uid_usuario).gt("data", p_data_fim).execute()
+                    
+            except Exception as erro_plano:
+                st.error(f"Erro ao persistir configuração do plano oficial: {erro_plano}")
 
-            # Limpa lançamentos fora dos limites se houver data_fim
-            if v_data_fim:
-                supabase.table("lancamentos").delete().eq("projeto_id", v_projeto_id).eq("usuario_id", uid_usuario).gt("data", v_data_fim).execute()
+        # 5. ATUALIZA A VALIDADE DA LICENÇA NA TABELA DE USUÁRIOS
+        dados_atualizacao_usuario = {
+            "vencimento": nova_data_vencimento_str,
+            "data_ult_assinat": hoje_string,
+            "valor_pago": float(valor_esperado)
+        }
+        
+        if tipo_renov_escolhido:
+            dados_atualizacao_usuario["tipo_renovacao"] = tipo_renov_escolhido
 
-        # 8. RETORNA O DICIONÁRIO COMPLETO DE SESSÃO COM OS DADOS ATUALIZADOS DO PLANO COMPRADO
+        supabase.table("usuarios").update(dados_atualizacao_usuario).eq("id", uid_usuario).execute()
+        
+        # 6. 🔒 NÃO DELETA: Apenas muda o status para 'concluido' protegendo contra perdas
+        try:
+            supabase.table("pagamentos_temp").update({"status": "concluido"}).eq("pref_id", pref_id_original).execute()
+        except: 
+            pass
+        
+        # 7. RETORNA O DICIONÁRIO DE LOGIN COM O PLANO ATUALIZADO CARREGADO
         return {
-            "id": user_db["id"], 
-            "nome": user_db["nome"], 
+            "id": user_db["id"],
+            "nome": user_db["nome"],
             "email": user_db["email"],
-            "vencimento": nova_data_vencimento_str, 
-            "zap_ativo": dados_pag_temp.get("zap_ativo"), 
-            "projeto_ativo": nome_plano if nome_plano else "Plano Ativo"
+            "vencimento": nova_data_vencimento_str,
+            "zap_ativo": p_zap, 
+            "projeto_ativo": nome_plano
         }
 
     except Exception as e:
-        print(f"--- [ERRO CRÍTICO RETORNO MP]: {e} ---")
+        st.error(f"Erro crítico no processamento do retorno: {e}")
         return None
