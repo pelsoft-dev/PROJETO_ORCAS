@@ -244,8 +244,6 @@ if "bypass_uid" in query_params and "bypass_val" in query_params:
         
         if req_temp.data:
             dados_temp = req_temp.data[0]
-            
-            # 🔥 CORREÇÃO DE FUSO HORÁRIO NO BYPASS: Garante horário de Brasília
             fuso_br = zoneinfo.ZoneInfo("America/Sao_Paulo")
             hoje_br_string = datetime.now(fuso_br).strftime('%Y-%m-%d')
             
@@ -275,7 +273,6 @@ if "bypass_uid" in query_params and "bypass_val" in query_params:
                 st.session_state.escolha = "⚙️ Gestão"
                 
                 try:
-                    # Mudamos para 'concluido' em vez de deletar para manter o histórico
                     supabase.table("pagamentos_temp").update({"status": "concluido"}).eq("usuario_id", uid_retorno).execute()
                 except Exception:
                     pass
@@ -309,17 +306,19 @@ if status_retorno and pref_id and not st.session_state.logado:
             usuario_auto = retornodomp.tratar_retorno(supabase, pref_id, status_retorno)
             if usuario_auto and isinstance(usuario_auto, dict):
                 st.session_state.logado = True
+                st.session_state.CHERA_MESTRA_UUID = str(usuario_auto.get('id', ''))
                 st.session_state.CHAVE_MESTRA_UUID = str(usuario_auto.get('id', ''))
                 st.session_state.usuario = usuario_auto.get('email', '')
                 st.session_state.usuario_email = usuario_auto.get('email', '')
                 st.session_state.vencimento = str(usuario_auto.get('vencimento', ''))
                 
-                # 🔥 FORÇAR ESTADO DO PLANO NA SESSÃO (Evita o delay de leitura do Supabase)
+                # 🟢 ALTERAÇÃO CRÍTICA: Carrega os estados visuais exatamente como vieram do banco temporário
                 st.session_state.projeto_ativo = usuario_auto.get("projeto_ativo")
-                st.session_state.zap_ativo = usuario_auto.get('zap_ativo', 0)
-                st.session_state.email_ativo = 1  # Força email ativo conforme persistido
-                st.session_state.pagamento_realizado_sucesso = True
+                st.session_state.zap_ativo = usuario_auto.get('zap_ativo', False)
+                # Seta o e-mail na sessão baseado no valor real retornado para a interface não resetar
+                st.session_state.email_ativo = usuario_auto.get('email_ativo', True)
                 
+                st.session_state.pagamento_realizado_sucesso = True
                 st.query_params.clear()
                 st.session_state.escolha = "⚙️ Gestão"
                 
@@ -332,10 +331,9 @@ if status_retorno and pref_id and not st.session_state.logado:
                 st.query_params.clear()
                 st.warning("⚠️ Não conseguimos validar o login automático do pagamento. Por favor, acesse com seu e-mail e senha.")
 
-# --- ESTRATÉGIA 3 (CONTINGÊNCIA CRÍTICA): RETORNO VIA URL 100% LIMPA ---
-elif not st.session_state.logado:
+# --- ESTRATÉGIA 3 (CONTINGÊNCIA CRÍTICA): SÓ EXECUTA SE NÃO TIVER VINDO DE UM RERUN DA ESTRATÉGIA 2 ---
+elif not st.session_state.logado and not st.session_state.get('pagamento_realizado_sucesso'):
     try:
-        # 🔑 CORREÇÃO CRÍTICA: Agora o select busca todas as novas colunas e filtra apenas as que estão 'aguardando'
         res_recente = supabase.table("pagamentos_temp")\
             .select("pref_id, usuario_id, projeto_id, status, data_ini, data_fim, zap_ativo, email_ativo")\
             .eq("status", "aguardando")\
@@ -356,12 +354,12 @@ elif not st.session_state.logado:
                 st.session_state.usuario_email = usuario_auto.get('email', '')
                 st.session_state.vencimento = str(usuario_auto.get('vencimento', ''))
                 
-                # 🔥 FORÇAR ESTADO DO PLANO NA SESSÃO (Contingência)
+                # 🟢 ALTERAÇÃO CRÍTICA NA CONTINGÊNCIA
                 st.session_state.projeto_ativo = usuario_auto.get("projeto_ativo")
-                st.session_state.zap_ativo = usuario_auto.get('zap_ativo', 0)
-                st.session_state.email_ativo = 1
-                st.session_state.pagamento_realizado_sucesso = True
+                st.session_state.zap_ativo = usuario_auto.get('zap_ativo', False)
+                st.session_state.email_ativo = usuario_auto.get('email_ativo', True)
                 
+                st.session_state.pagamento_realizado_sucesso = True
                 st.session_state.escolha = "⚙️ Gestão"
                 st.session_state.msg_sucesso = "🎉 Pagamento identificado via contingência com sucesso! Alterações salvas."
                 st.rerun()
