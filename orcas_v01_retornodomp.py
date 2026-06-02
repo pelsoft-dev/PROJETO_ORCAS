@@ -90,30 +90,40 @@ def tratar_retorno(supabase, pref_id, status_retorno):
             try:
                 v_data_ini_final = p_data_ini if p_data_ini else hoje_string
 
-                # Captura o retorno do banco em uma variável para inspecionarmos
-                retorno_banco = supabase.table("config_projetos").upsert({
-                    "projeto_id": nome_plano,
-                    "usuario_id": uid_usuario,
-                    "data_ini": v_data_ini_final,
-                    "data_fim": p_data_fim,
-                    "zap_ativo": p_zap,
-                    "email_ativo": p_email
-                }).execute()
+                # 🔍 PASSO A: Verifica explicitamente se esse plano já existe para o usuário
+                checagem = supabase.table("config_projetos")\
+                    .select("id")\
+                    .eq("projeto_id", nome_plano)\
+                    .eq("usuario_id", uid_usuario)\
+                    .execute()
+
+                # 🟢 PASSO B: Se o plano JÁ EXISTIR, fazemos um UPDATE mirando no ID dele
+                if checagem.data:
+                    id_existente = checagem.data[0]["id"]
+                    supabase.table("config_projetos").update({
+                        "data_ini": v_data_ini_final,
+                        "data_fim": p_data_fim,
+                        "zap_ativo": p_zap,
+                        "email_ativo": p_email
+                    }).eq("id", id_existente).execute()
                 
-                # Se o banco respondeu mas veio vazio, avisa na tela
-                if not retorno_banco.data:
-                    st.error(f"⚠️ O Supabase executou o comando, mas NENHUMA linha foi afetada na config_projetos. Verifique se o projeto_id '{nome_plano}' existe.")
+                # 🔵 PASSO C: Se o plano NÃO EXISTIR, fazemos um INSERT limpo do zero
                 else:
-                    st.success(f"🔥 Sucesso na config_projetos! Dados gravados: {retorno_banco.data}")
+                    supabase.table("config_projetos").insert({
+                        "projeto_id": nome_plano,
+                        "usuario_id": uid_usuario,
+                        "data_ini": v_data_ini_final,
+                        "data_fim": p_data_fim,
+                        "zap_ativo": p_zap,
+                        "email_ativo": p_email
+                    }).execute()
                 
+                # Limpa lançamentos que porventura fiquem fora do novo limite de vigência do plano
                 if p_data_fim:
                     supabase.table("lancamentos").delete().eq("projeto_id", nome_plano).eq("usuario_id", uid_usuario).gt("data", p_data_fim).execute()
                     
             except Exception as erro_plano:
-                # Mostra o erro técnico exato do banco na tela em letras garrafais
-                st.error(f"🚨 [ERRO REAL DO SUPABASE NA TABELA CONFIG_PROJETOS]: {erro_plano}")
-                # Força o script a parar aqui para o Streamlit não dar rerun e sumir com o erro
-                st.stop()
+                st.error(f"Erro ao persistir configuração do plano oficial: {erro_plano}")
 
         # 5. ATUALIZA A VALIDADE DA LICENÇA NA TABELA DE USUÁRIOS
         dados_atualizacao_usuario = {
