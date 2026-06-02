@@ -4,6 +4,15 @@ import zoneinfo
 from dateutil.relativedelta import relativedelta
 import streamlit as st
 
+def pausar_e_analisar(tag, variaveis):
+    """
+    Função auxiliar para depuração. Mostra as variáveis na tela e trava o Streamlit.
+    """
+    st.warning(f"🛑 INTERRUPÇÃO DE SEGURANÇA ATIVADA NA TAG: {tag}")
+    for nome, valor in variaveis.items():
+        st.write(f"**{nome}:**", valor)
+    st.stop()
+
 def tratar_retorno(supabase, pref_id, status_retorno):
     """
     Processa o retorno mapeando diretamente as colunas salvas no pagamentos_temp.
@@ -34,6 +43,9 @@ def tratar_retorno(supabase, pref_id, status_retorno):
                 .limit(1)\
                 .execute()
 
+# PPP001 (Descomente a linha abaixo para inspecionar o retorno bruto do banco)
+        pausar_e_analisar("PPP001", {"Retorno pagamentos_temp": res_temp.data})
+
         # Se a tabela já foi processada (status 'concluido'), faz o login com base no estado atual do banco
         if not res_temp.data:
             email_sessao = st.session_state.get("usuario_email")
@@ -60,6 +72,9 @@ def tratar_retorno(supabase, pref_id, status_retorno):
         p_data_fim = dados_pag_temp.get("data_fim")
         p_zap = dados_pag_temp.get("zap_ativo")
         p_email = dados_pag_temp.get("email_ativo")
+
+# PPP002 (Descomente a linha abaixo para avaliar todas as variáveis extraídas da temporária)
+        pausar_e_analisar("PPP002", {"uid_usuario": uid_usuario, "valor_esperado": valor_esperado, "nome_plano": nome_plano, "tipo_renov_escolhido": tipo_renov_escolhido, "p_data_ini": p_data_ini, "p_data_fim": p_data_fim})
         
         # 2. RECUPERAÇÃO DE INFORMAÇÕES CADASTRUTURAIS DO USUÁRIO
         res_user_atual = supabase.table("usuarios")\
@@ -83,6 +98,9 @@ def tratar_retorno(supabase, pref_id, status_retorno):
             meses_comprados = 12 if valor_esperado > 150.00 else (6 if valor_esperado > 50.00 else 1)
             
         nova_data_vencimento_str = (hoje_br + relativedelta(months=meses_comprados)).strftime("%Y-%m-%d")
+
+# PPP003 (Descomente a linha abaixo para verificar o cálculo de meses e a nova data de vencimento calculada)
+        pausar_e_analisar("PPP003", {"meses_comprados": meses_comprados, "nova_data_vencimento": nova_data_vencimento_str, "dados_atuais_user_no_db": user_db})
         
         # 4. 🚀 SALVAMENTO DIRETO E EXPLICÍTICO NA CONFIG_PROJETOS (SEM PAYLOADS EXTERNOS)
         if nome_plano:
@@ -124,6 +142,9 @@ def tratar_retorno(supabase, pref_id, status_retorno):
             except Exception as erro_plano:
                 st.error(f"Erro ao persistir configuração do plano oficial: {erro_plano}")
 
+# PPP004 (Descomente a linha abaixo para testar se a config_projetos gravou antes de mexer na tabela de usuarios)
+        pausar_e_analisar("PPP004", {"status": "config_projetos executada com sucesso. Pronto para atualizar a tabela usuarios."})
+
         # ==============================================================================
         # 5. 🚀 ATUALIZAÇÃO DA TABELA usuarios (ÚNICO COMANDO, CAMPOS EXPLICITADOS DIRETO)
         # ==============================================================================
@@ -159,6 +180,9 @@ def tratar_retorno(supabase, pref_id, status_retorno):
             "zap_ativo": p_zap, 
             "projeto_ativo": nome_plano
         }
+
+# PPP005 (Descomente a linha abaixo para analisar o payload final de login gerado antes do encerramento da função)
+        pausar_e_analisar("PPP005", {"vencimento_final": nova_data_vencimento_str, "nome_plano": nome_plano})
 
     except Exception as e:
         st.error(f"Erro crítico no processamento do retorno: {e}")
