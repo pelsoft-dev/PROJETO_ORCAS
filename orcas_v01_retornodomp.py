@@ -86,9 +86,8 @@ def tratar_retorno(supabase, pref_id, status_retorno):
         supabase.table("pagamentos_temp").update({"status": "concluido"}).eq("pref_id", pref_id_original).execute()
         
         # 7. 🚀 REESTRUTURADO: LÊ A TABELA pagamentos_temp E ATUALIZA A TABELA config_projetos DIRETAMENTE
-        # Busca o registro que acabou de ser concluído para garantir a leitura fresca dos dados exatos pré-MP
         res_dados_frescos = supabase.table("pagamentos_temp")\
-            .select("projeto_id, data_ini, data_fim, zap_ativo, email_ativo, tipo_renovacao")\
+            .select("projeto_id, data_ini, data_fim, zap_ativo, email_ativo")\
             .eq("pref_id", str(pref_id_original))\
             .execute()
             
@@ -96,15 +95,31 @@ def tratar_retorno(supabase, pref_id, status_retorno):
             dados_frescos = res_dados_frescos.data[0]
             plano_alvo = dados_frescos.get("projeto_id") if dados_frescos.get("projeto_id") else "Plano Ativo"
             
-            # Dá o update direto na tabela oficial baseando-se nas colunas reais do banco de dados temporário
-            supabase.table("config_projetos").update({
+            # 🔍 BUSCA ANTES: Descobre se já existe esse plano para esse usuário para pegar o ID correto
+            res_existente = supabase.table("config_projetos")\
+                .select("id")\
+                .eq("projeto_id", plano_alvo)\
+                .eq("usuario_id", uid_usuario)\
+                .execute()
+
+            # Monta o payload de gravação direto com os dados frescos do banco temporário
+            payload_oficial = {
+                "projeto_id": plano_alvo,
+                "usuario_id": uid_usuario,
                 "data_ini": dados_frescos.get("data_ini") if dados_frescos.get("data_ini") else hoje_string,
                 "data_fim": dados_frescos.get("data_fim"),
                 "zap_ativo": dados_frescos.get("zap_ativo"),
                 "email_ativo": dados_frescos.get("email_ativo")
-            }).eq("projeto_id", plano_alvo).eq("usuario_id", uid_usuario).execute()
+            }
 
-            # Limpa lançamentos que porventura fiquem fora do novo limite de vigência se houver data_fim
+            # Se o plano já existia na tabela oficial, injeta o ID para forçar a ATUALIZAÇÃO em vez de inserção
+            if res_existente.data:
+                payload_oficial["id"] = res_existente.data[0]["id"]
+
+            # Grava com UPSERT (Garante a escrita independente se o registro existe ou não)
+            supabase.table("config_projetos").upsert(payload_oficial).execute()
+
+            # Limpa lançamentos fora dos limites do novo plano se data_fim existir
             if dados_frescos.get("data_fim"):
                 supabase.table("lancamentos").delete().eq("projeto_id", plano_alvo).eq("usuario_id", uid_usuario).gt("data", dados_frescos.get("data_fim")).execute()
 
