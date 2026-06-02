@@ -7,7 +7,7 @@ import streamlit as st
 def tratar_retorno(supabase, pref_id, status_retorno):
     """
     Processa o retorno mapeando diretamente as colunas salvas no pagamentos_temp.
-    Altera o status para 'concluido' em vez de deletar para evitar perdas em múltiplos reruns.
+    Altera o status para 'concluido' e, ao final, limpa o histórico temporário do usuário.
     """
     if status_retorno not in ["approved", "authorized", "pending"]:
         return None
@@ -31,7 +31,6 @@ def tratar_retorno(supabase, pref_id, status_retorno):
                 .select("usuario_id, valor, pref_id, projeto_id, tipo_renovacao, data_ini, data_fim, zap_ativo, email_ativo")\
                 .eq("usuario_id", st.session_state.usuario_id)\
                 .eq("status", "aguardando")\
-                .order("created_at", desc=True)\
                 .limit(1)\
                 .execute()
 
@@ -85,19 +84,19 @@ def tratar_retorno(supabase, pref_id, status_retorno):
             
         nova_data_vencimento_str = (hoje_br + relativedelta(months=meses_comprados)).strftime("%Y-%m-%d")
         
-# 4. 🚀 SALVAMENTO DIRETO, INDIVIDUAL E SIMPLIFICADO NA CONFIG_PROJETOS
+        # 4. 🚀 SALVAMENTO DIRETO E EXPLICÍTICO NA CONFIG_PROJETOS (SEM PAYLOADS EXTERNOS)
         if nome_plano:
             try:
                 v_data_ini_final = p_data_ini if p_data_ini else hoje_string
 
-                # 🔍 PASSO A: Verifica explicitamente se esse plano já existe para o usuário
+                # 🔍 PASSO A: Verifica se o plano já existe para o usuário
                 checagem = supabase.table("config_projetos")\
                     .select("id")\
                     .eq("projeto_id", nome_plano)\
                     .eq("usuario_id", uid_usuario)\
                     .execute()
 
-                # 🟢 PASSO B: Se o plano JÁ EXISTIR, fazemos um UPDATE mirando no ID dele
+                # 🟢 PASSO B: Se o plano JÁ EXISTIR, fazemos um UPDATE direto no ID dele
                 if checagem.data:
                     id_existente = checagem.data[0]["id"]
                     supabase.table("config_projetos").update({
@@ -107,7 +106,7 @@ def tratar_retorno(supabase, pref_id, status_retorno):
                         "email_ativo": p_email
                     }).eq("id", id_existente).execute()
                 
-                # 🔵 PASSO C: Se o plano NÃO EXISTIR, fazemos um INSERT limpo do zero
+                # 🔵 PASSO C: Se o plano NÃO EXISTIR, fazemos um INSERT limpo
                 else:
                     supabase.table("config_projetos").insert({
                         "projeto_id": nome_plano,
@@ -118,32 +117,40 @@ def tratar_retorno(supabase, pref_id, status_retorno):
                         "email_ativo": p_email
                     }).execute()
                 
-                # Limpa lançamentos que porventura fiquem fora do novo limite de vigência do plano
+                # Limpa lançamentos fora do limite de vigência do plano
                 if p_data_fim:
                     supabase.table("lancamentos").delete().eq("projeto_id", nome_plano).eq("usuario_id", uid_usuario).gt("data", p_data_fim).execute()
                     
             except Exception as erro_plano:
                 st.error(f"Erro ao persistir configuração do plano oficial: {erro_plano}")
 
-        # 5. ATUALIZA A VALIDADE DA LICENÇA NA TABELA DE USUÁRIOS
-        dados_atualizacao_usuario = {
-            "vencimento": nova_data_vencimento_str,
-            "data_ult_assinat": hoje_string,
-            "valor_pago": float(valor_esperado)
-        }
-        
-        if tipo_renov_escolhido:
-            dados_atualizacao_usuario["tipo_renovacao"] = tipo_renov_escolhido
+        # ==============================================================================
+        # 5. 🚀 ATUALIZAÇÃO DA TABELA usuarios (ÚNICO COMANDO, CAMPOS EXPLICITADOS DIRETO)
+        # ==============================================================================
+        try:
+            supabase.table("usuarios").update({
+                "vencimento": nova_data_vencimento_str,
+                "data_ult_assinat": hoje_string,
+                "valor_pago": float(valor_esperado),
+                "tipo_renovacao": tipo_renov_escolhido
+            }).eq("id", uid_usuario).execute()
+            
+        except Exception as erro_usuario:
+            st.error(f"Erro ao atualizar dados cadastrais do usuário: {erro_usuario}")
 
-        supabase.table("usuarios").update(dados_atualizacao_usuario).eq("id", uid_usuario).execute()
-        
-        # 6. 🔒 NÃO DELETA: Apenas muda o status para 'concluido' protegendo contra perdas
+        # 6. 🔒 ENCERRAMENTO DA TRANSAÇÃO: Muda o status para concluído
         try:
             supabase.table("pagamentos_temp").update({"status": "concluido"}).eq("pref_id", pref_id_original).execute()
         except: 
             pass
+            
+        # 7. 🧹 MANUTENÇÃO PREVENTIVA: Deleta os registros antigos 'concluido' deste usuário
+        try:
+            supabase.table("pagamentos_temp").delete().eq("usuario_id", uid_usuario).eq("status", "concluido").execute()
+        except:
+            pass
         
-        # 7. RETORNA O DICIONÁRIO DE LOGIN COM O PLANO ATUALIZADO CARREGADO
+        # 8. RETORNA O DICIONÁRIO DE LOGIN COM O PLANO ATUALIZADO CARREGADO
         return {
             "id": user_db["id"],
             "nome": user_db["nome"],
