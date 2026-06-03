@@ -5,15 +5,14 @@ from dateutil.relativedelta import relativedelta
 
 def tratar_retorno(supabase, pref_id, status_retorno):
     """
-    Processa o retorno de pagamento utilizando estritamente o núcleo de lógica 
-    do leeatu, baseando a busca principal no usuario_id.
+    Processa o retorno mapeando estritamente os dados validados no script de teste,
+    garantindo que variáveis nulas não quebrem a atualização no banco.
     """
-    # 🌎 Configuração básica de datas recomendada para o fluxo
     fuso_br = zoneinfo.ZoneInfo("America/Sao_Paulo")
     hoje_br = datetime.now(fuso_br).date()
     hoje_string = hoje_br.strftime('%Y-%m-%d')
 
-    # Identifica o usuário logado diretamente pela sessão do Streamlit
+    # Identificação do usuário logado na sessão
     uid_usuario = st.session_state.get("usuario_id")
     
     if not uid_usuario:
@@ -21,9 +20,8 @@ def tratar_retorno(supabase, pref_id, status_retorno):
 
     try:
         # ==============================================================================
-        # 1. LEITURA DO REGISTRO TEMPORÁRIO (Núcleo do leeatu baseado no usuario_id)
+        # 1. BUSCA DIRECIONADA DO REGISTRO TEMPORÁRIO
         # ==============================================================================
-        # Forçamos o select a trazer apenas as colunas existentes, evitando conflito com metadados
         res_temp = supabase.table("pagamentos_temp")\
             .select("usuario_id, valor, projeto_id, tipo_renovacao, data_ini, data_fim, zap_ativo, email_ativo")\
             .eq("usuario_id", uid_usuario)\
@@ -33,8 +31,9 @@ def tratar_retorno(supabase, pref_id, status_retorno):
         if not res_temp.data:
             return None
             
-        # Extração das variáveis locais idêntica ao script leeatu
         dados_frescos = res_temp.data[0]
+        
+        # Coleta das variáveis usando fallback explícito caso venham nulas
         v_projeto_id = dados_frescos.get("projeto_id")
         v_tipo_renovacao = dados_frescos.get("tipo_renovacao")
         valor_pago = dados_frescos.get("valor", 0.0)
@@ -48,20 +47,21 @@ def tratar_retorno(supabase, pref_id, status_retorno):
             v_data_ini = hoje_string
 
         # ==============================================================================
-        # 2. ATUALIZAÇÃO DA TABELA config_projetos (Núcleo do leeatu puro)
+        # 2. 🚀 ATUALIZAÇÃO DA TABELA config_projetos (DIRETA E CONDICIONAL)
         # ==============================================================================
-        if v_projeto_id:
+        # Só executa o update se v_projeto_id for uma string válida (evita passar None no .eq)
+        if v_projeto_id and str(v_projeto_id).strip():
             supabase.table("config_projetos").update({
                 "data_ini": v_data_ini,
                 "data_fim": v_data_fim,
                 "zap_ativo": v_zap_ativo,
                 "email_ativo": v_email_ativo
-            }).eq("projeto_id", v_projeto_id).eq("usuario_id", uid_usuario).execute()
+            }).eq("projeto_id", str(v_projeto_id).strip()).eq("usuario_id", uid_usuario).execute()
 
         # ==============================================================================
-        # 3. ATUALIZAÇÃO DA TABELA usuarios (Núcleo do leeatu unificado e expandido)
+        # 3. 🚀 ATUALIZAÇÃO DA TABELA usuarios (SEPARADA PARA FORÇAR GRAVAÇÃO)
         # ==============================================================================
-        # Cálculo dinâmico da nova data de vencimento
+        # Cálculo dos meses de vigência da assinatura
         meses_comprados = 12
         if v_tipo_renovacao and "6" in str(v_tipo_renovacao):
             meses_comprados = 6
@@ -72,16 +72,21 @@ def tratar_retorno(supabase, pref_id, status_retorno):
 
         nova_data_vencimento = (hoje_br + relativedelta(months=meses_comprados)).strftime("%Y-%m-%d")
 
-        # Injeta todos os campos de uma só vez para garantir consistência atômica no banco
+        # PASSO A: Atualiza os dados cadastrais e financeiros padrão
         supabase.table("usuarios").update({
             "vencimento": nova_data_vencimento,
             "data_ult_assinat": hoje_string,
-            "valor_pago": float(valor_pago) if valor_pago else 0.0,
-            "tipo_renovacao": v_tipo_renovacao
+            "valor_pago": float(valor_pago) if valor_pago else 0.0
         }).eq("id", uid_usuario).execute()
 
+        # PASSO B: Atualiza o tipo_renovacao de forma dedicada garantindo que o valor exista
+        if v_tipo_renovacao:
+            supabase.table("usuarios").update({
+                "tipo_renovacao": str(v_tipo_renovacao)
+            }).eq("id", uid_usuario).execute()
+
         # ==============================================================================
-        # 4. RETORNO ESTRUTURADO PARA O FLUXO PRINCIPAL
+        # 4. RETORNO PARA FLUXO DE LOGIN
         # ==============================================================================
         res_user_final = supabase.table("usuarios").select("id, nome, email, vencimento").eq("id", uid_usuario).execute()
         
