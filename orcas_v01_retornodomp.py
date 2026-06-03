@@ -18,6 +18,15 @@ def tratar_retorno(supabase, pref_id, status_retorno):
     Processa o retorno mapeando diretamente as colunas salvas no pagamentos_temp.
     Altera o status para 'concluido' e, ao final, limpa o histórico temporário do usuário.
     """
+    
+    # ==============================================================================
+    # 🔍 PPP000 - PONTO DE PARADA MÁXIMO (NO TOPO DA FUNÇÃO)
+    # ==============================================================================
+    # DESCOMENTE A LINHA ABAIXO para forçar o sistema a parar aqui e te mostrar
+    # exatamente os parâmetros que o Mercado Pago enviou para a URL.
+    # ------------------------------------------------------------------------------
+    pausar_e_analisar("PPP000", {"pref_id_recebido": pref_id, "status_retorno_recebido": status_retorno})
+
     if status_retorno not in ["approved", "authorized", "pending"]:
         return None
 
@@ -43,8 +52,8 @@ def tratar_retorno(supabase, pref_id, status_retorno):
                 .limit(1)\
                 .execute()
 
-# PPP001 (Descomente a linha abaixo para inspecionar o retorno bruto do banco)
-        pausar_e_analisar("PPP001", {"Retorno pagamentos_temp": res_temp.data})
+# PPP001 (Descomente para inspecionar o retorno bruto do banco)
+        # pausar_e_analisar("PPP001", {"Retorno pagamentos_temp": res_temp.data})
 
         # Se a tabela já foi processada (status 'concluido'), faz o login com base no estado atual do banco
         if not res_temp.data:
@@ -73,8 +82,8 @@ def tratar_retorno(supabase, pref_id, status_retorno):
         p_zap = dados_pag_temp.get("zap_ativo")
         p_email = dados_pag_temp.get("email_ativo")
 
-# PPP002 (Descomente a linha abaixo para avaliar todas as variáveis extraídas da temporária)
-        pausar_e_analisar("PPP002", {"uid_usuario": uid_usuario, "valor_esperado": valor_esperado, "nome_plano": nome_plano, "tipo_renov_escolhido": tipo_renov_escolhido, "p_data_ini": p_data_ini, "p_data_fim": p_data_fim})
+# PPP002 (Descomente para avaliar todas as variáveis extraídas da temporária)
+        # pausar_e_analisar("PPP002", {"uid_usuario": uid_usuario, "valor_esperado": valor_esperado, "nome_plano": nome_plano, "p_data_ini": p_data_ini, "p_data_fim": p_data_fim})
         
         # 2. RECUPERAÇÃO DE INFORMAÇÕES CADASTRUTURAIS DO USUÁRIO
         res_user_atual = supabase.table("usuarios")\
@@ -99,8 +108,8 @@ def tratar_retorno(supabase, pref_id, status_retorno):
             
         nova_data_vencimento_str = (hoje_br + relativedelta(months=meses_comprados)).strftime("%Y-%m-%d")
 
-# PPP003 (Descomente a linha abaixo para verificar o cálculo de meses e a nova data de vencimento calculada)
-        pausar_e_analisar("PPP003", {"meses_comprados": meses_comprados, "nova_data_vencimento": nova_data_vencimento_str, "dados_atuais_user_no_db": user_db})
+# PPP003 (Descomente para verificar o cálculo de meses e nova data de vencimento)
+        # pausar_e_analisar("PPP003", {"meses_comprados": meses_comprados, "nova_data_vencimento": nova_data_vencimento_str})
         
         # 4. 🚀 SALVAMENTO DIRETO E EXPLICÍTICO NA CONFIG_PROJETOS (SEM PAYLOADS EXTERNOS)
         if nome_plano:
@@ -142,8 +151,8 @@ def tratar_retorno(supabase, pref_id, status_retorno):
             except Exception as erro_plano:
                 st.error(f"Erro ao persistir configuração do plano oficial: {erro_plano}")
 
-# PPP004 (Descomente a linha abaixo para testar se a config_projetos gravou antes de mexer na tabela de usuarios)
-        pausar_e_analisar("PPP004", {"status": "config_projetos executada com sucesso. Pronto para atualizar a tabela usuarios."})
+# PPP004 (Descomente para testar se a config_projetos rodou o insert/update com sucesso)
+        # pausar_e_analisar("PPP004", {"status": "Seção 4 (config_projetos) finalizada."})
 
         # ==============================================================================
         # 5. 🚀 ATUALIZAÇÃO DA TABELA usuarios (ÚNICO COMANDO, CAMPOS EXPLICITADOS DIRETO)
@@ -181,8 +190,8 @@ def tratar_retorno(supabase, pref_id, status_retorno):
             "projeto_ativo": nome_plano
         }
 
-# PPP005 (Descomente a linha abaixo para analisar o payload final de login gerado antes do encerramento da função)
-        pausar_e_analisar("PPP005", {"vencimento_final": nova_data_vencimento_str, "nome_plano": nome_plano})
+# PPP005 (Descomente para ver o retorno final)
+        # pausar_e_analisar("PPP005", {"status": "Fim da função atingido com sucesso"})
 
     except Exception as e:
         st.error(f"Erro crítico no processamento do retorno: {e}")
