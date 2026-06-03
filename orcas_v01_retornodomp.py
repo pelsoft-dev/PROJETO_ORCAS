@@ -6,38 +6,35 @@ from dateutil.relativedelta import relativedelta
 def tratar_retorno(supabase, pref_id, status_retorno):
     """
     Processa o retorno de pagamento utilizando estritamente o núcleo de lógica 
-    testado no script isolado (leeatu.py).
+    do leeatu, baseando a busca principal no usuario_id.
     """
-    # 🌎 Configuração básica de datas recomendada para o fluxo de produção
+    # 🌎 Configuração básica de datas recomendada para o fluxo
     fuso_br = zoneinfo.ZoneInfo("America/Sao_Paulo")
     hoje_br = datetime.now(fuso_br).date()
     hoje_string = hoje_br.strftime('%Y-%m-%d')
 
+    # Identifica o usuário logado diretamente pela sessão do Streamlit
+    uid_usuario = st.session_state.get("usuario_id")
+    
+    if not uid_usuario:
+        return None
+
     try:
         # ==============================================================================
-        # 1. LEITURA DO REGISTRO TEMPORÁRIO (Núcleo do leeatu adaptado dinamicamente)
+        # 1. LEITURA DO REGISTRO TEMPORÁRIO (Núcleo do leeatu baseado no usuario_id)
         # ==============================================================================
-        # Buscamos o registro usando o pref_id que veio da URL
+        # Forçamos o select a trazer apenas as colunas existentes, evitando conflito com metadados
         res_temp = supabase.table("pagamentos_temp")\
-            .select("usuario_id, valor, pref_id, projeto_id, tipo_renovacao, data_ini, data_fim, zap_ativo, email_ativo")\
-            .eq("pref_id", str(pref_id))\
+            .select("usuario_id, valor, projeto_id, tipo_renovacao, data_ini, data_fim, zap_ativo, email_ativo")\
+            .eq("usuario_id", uid_usuario)\
             .limit(1)\
             .execute()
             
-        # Contingência mínima: se não achar por pref_id, tenta pelo usuário da sessão atual
-        if not res_temp.data and "usuario_id" in st.session_state:
-            res_temp = supabase.table("pagamentos_temp")\
-                .select("usuario_id, valor, pref_id, projeto_id, tipo_renovacao, data_ini, data_fim, zap_ativo, email_ativo")\
-                .eq("usuario_id", st.session_state.usuario_id)\
-                .limit(1)\
-                .execute()
-
         if not res_temp.data:
             return None
             
-        # Decomposição campo a campo idêntica ao leeatu
+        # Extração das variáveis locais idêntica ao script leeatu
         dados_frescos = res_temp.data[0]
-        uid_usuario = dados_frescos.get("usuario_id")
         v_projeto_id = dados_frescos.get("projeto_id")
         v_tipo_renovacao = dados_frescos.get("tipo_renovacao")
         valor_pago = dados_frescos.get("valor", 0.0)
@@ -47,14 +44,13 @@ def tratar_retorno(supabase, pref_id, status_retorno):
         v_zap_ativo = dados_frescos.get("zap_ativo")
         v_email_ativo = dados_frescos.get("email_ativo")
         
-        # Se por algum motivo a data_ini veio vazia da temporária, assume o dia de hoje
         if not v_data_ini:
             v_data_ini = hoje_string
 
         # ==============================================================================
         # 2. ATUALIZAÇÃO DA TABELA config_projetos (Núcleo do leeatu puro)
         # ==============================================================================
-        if v_projeto_id and uid_usuario:
+        if v_projeto_id:
             supabase.table("config_projetos").update({
                 "data_ini": v_data_ini,
                 "data_fim": v_data_fim,
@@ -63,32 +59,30 @@ def tratar_retorno(supabase, pref_id, status_retorno):
             }).eq("projeto_id", v_projeto_id).eq("usuario_id", uid_usuario).execute()
 
         # ==============================================================================
-        # 3. ATUALIZAÇÃO DA TABELA usuarios (Núcleo do leeatu expandido com dados vitais)
+        # 3. ATUALIZAÇÃO DA TABELA usuarios (Núcleo do leeatu unificado e expandido)
         # ==============================================================================
-        if uid_usuario:
-            # Cálculo dinâmico de meses para a renovação da assinatura geral
-            meses_comprados = 12
-            if v_tipo_renovacao and "6" in str(v_tipo_renovacao):
-                meses_comprados = 6
-            elif v_tipo_renovacao and "36" in str(v_tipo_renovacao):
-                meses_comprados = 36
-            elif valor_pago and valor_pago < 100.00:
-                meses_comprados = 6
+        # Cálculo dinâmico da nova data de vencimento
+        meses_comprados = 12
+        if v_tipo_renovacao and "6" in str(v_tipo_renovacao):
+            meses_comprados = 6
+        elif v_tipo_renovacao and "36" in str(v_tipo_renovacao):
+            meses_comprados = 36
+        elif valor_pago and valor_pago < 100.00:
+            meses_comprados = 6
 
-            nova_data_vencimento = (hoje_br + relativedelta(months=meses_comprados)).strftime("%Y-%m-%d")
+        nova_data_vencimento = (hoje_br + relativedelta(months=meses_comprados)).strftime("%Y-%m-%d")
 
-            # Atualização estrita dos campos da assinatura e do tipo_renovacao do leeatu
-            supabase.table("usuarios").update({
-                "vencimento": nova_data_vencimento,
-                "data_ult_assinat": hoje_string,
-                "valor_pago": float(valor_pago) if valor_pago else 0.0,
-                "tipo_renovacao": v_tipo_renovacao
-            }).eq("id", uid_usuario).execute()
+        # Injeta todos os campos de uma só vez para garantir consistência atômica no banco
+        supabase.table("usuarios").update({
+            "vencimento": nova_data_vencimento,
+            "data_ult_assinat": hoje_string,
+            "valor_pago": float(valor_pago) if valor_pago else 0.0,
+            "tipo_renovacao": v_tipo_renovacao
+        }).eq("id", uid_usuario).execute()
 
         # ==============================================================================
-        # 4. RETORNO ESTRUTURADO DE LOGIN PARA O FLUXO PRINCIPAL
+        # 4. RETORNO ESTRUTURADO PARA O FLUXO PRINCIPAL
         # ==============================================================================
-        # Buscamos os dados atualizados para alimentar o st.session_state do arquivo principal
         res_user_final = supabase.table("usuarios").select("id, nome, email, vencimento").eq("id", uid_usuario).execute()
         
         if res_user_final.data:
