@@ -6,7 +6,7 @@ from dateutil.relativedelta import relativedelta
 def tratar_retorno(supabase, pref_id, status_retorno):
     """
     Processa o retorno mapeando estritamente os dados validados no script de teste,
-    garantindo que variáveis nulas não quebrem a atualização no banco.
+    imprimindo os resultados diretamente no terminal para acompanhamento real.
     """
     fuso_br = zoneinfo.ZoneInfo("America/Sao_Paulo")
     hoje_br = datetime.now(fuso_br).date()
@@ -16,6 +16,7 @@ def tratar_retorno(supabase, pref_id, status_retorno):
     uid_usuario = st.session_state.get("usuario_id")
     
     if not uid_usuario:
+        print("❌ [RETORNO] Execução abortada: usuario_id não encontrado na st.session_state.")
         return None
 
     try:
@@ -29,11 +30,12 @@ def tratar_retorno(supabase, pref_id, status_retorno):
             .execute()
             
         if not res_temp.data:
+            print(f"⚠️ [RETORNO] Nenhum registro encontrado na 'pagamentos_temp' para o usuario_id: {uid_usuario}")
             return None
             
         dados_frescos = res_temp.data[0]
         
-        # Coleta das variáveis usando fallback explícito caso venham nulas
+        # Coleta das variáveis do registro temporário
         v_projeto_id = dados_frescos.get("projeto_id")
         v_tipo_renovacao = dados_frescos.get("tipo_renovacao")
         valor_pago = dados_frescos.get("valor", 0.0)
@@ -46,22 +48,32 @@ def tratar_retorno(supabase, pref_id, status_retorno):
         if not v_data_ini:
             v_data_ini = hoje_string
 
+        # 🟥 EXIBIÇÃO DE CONTROLE NO TERMINAL
+        print("\n=======================================================")
+        print("📥 VALORES RECUPERADOS DA TABELA TEMPORÁRIA:")
+        print(f" - ID do Usuário: {uid_usuario}")
+        print(f" - ID do Projeto: '{v_projeto_id}'")
+        print(f" - Tipo Renovação: '{v_tipo_renovacao}'")
+        print(f" - Valor Pago: {valor_pago}")
+        print("=======================================================\n")
+
         # ==============================================================================
-        # 2. 🚀 ATUALIZAÇÃO DA TABELA config_projetos (DIRETA E CONDICIONAL)
+        # 2. 🚀 ATUALIZAÇÃO DA TABELA config_projetos
         # ==============================================================================
-        # Só executa o update se v_projeto_id for uma string válida (evita passar None no .eq)
         if v_projeto_id and str(v_projeto_id).strip():
-            supabase.table("config_projetos").update({
+            print(f"⏳ [CONFIG_PROJETOS] Executando update para o plano '{v_projeto_id}'...")
+            res_config = supabase.table("config_projetos").update({
                 "data_ini": v_data_ini,
                 "data_fim": v_data_fim,
                 "zap_ativo": v_zap_ativo,
                 "email_ativo": v_email_ativo
             }).eq("projeto_id", str(v_projeto_id).strip()).eq("usuario_id", uid_usuario).execute()
+            
+            print(f"🟩 [CONFIG_PROJETOS] Retorno do banco (linhas afetadas): {res_config.data}")
 
         # ==============================================================================
-        # 3. 🚀 ATUALIZAÇÃO DA TABELA usuarios (SEPARADA PARA FORÇAR GRAVAÇÃO)
+        # 3. 🚀 ATUALIZAÇÃO DA TABELA usuarios (QUERY UNIFICADA ESTILO TESTE)
         # ==============================================================================
-        # Cálculo dos meses de vigência da assinatura
         meses_comprados = 12
         if v_tipo_renovacao and "6" in str(v_tipo_renovacao):
             meses_comprados = 6
@@ -72,18 +84,17 @@ def tratar_retorno(supabase, pref_id, status_retorno):
 
         nova_data_vencimento = (hoje_br + relativedelta(months=meses_comprados)).strftime("%Y-%m-%d")
 
-        # PASSO A: Atualiza os dados cadastrais e financeiros padrão
-        supabase.table("usuarios").update({
+        print(f"⏳ [USUARIOS] Gravando dados e tipo_renovacao '{v_tipo_renovacao}'...")
+        
+        # Enviando todos os campos de uma vez só na mesma transação
+        res_user = supabase.table("usuarios").update({
             "vencimento": nova_data_vencimento,
             "data_ult_assinat": hoje_string,
-            "valor_pago": float(valor_pago) if valor_pago else 0.0
+            "valor_pago": float(valor_pago) if valor_pago else 0.0,
+            "tipo_renovacao": v_tipo_renovacao
         }).eq("id", uid_usuario).execute()
-
-        # PASSO B: Atualiza o tipo_renovacao de forma dedicada garantindo que o valor exista
-        if v_tipo_renovacao:
-            supabase.table("usuarios").update({
-                "tipo_renovacao": str(v_tipo_renovacao)
-            }).eq("id", uid_usuario).execute()
+        
+        print(f"🟩 [USUARIOS] Retorno do banco (linhas afetadas): {res_user.data}")
 
         # ==============================================================================
         # 4. RETORNO PARA FLUXO DE LOGIN
@@ -92,6 +103,7 @@ def tratar_retorno(supabase, pref_id, status_retorno):
         
         if res_user_final.data:
             u = res_user_final.data[0]
+            print("✅ [RETORNO] Processamento concluído com sucesso total.")
             return {
                 "id": u["id"],
                 "nome": u["nome"],
@@ -103,5 +115,6 @@ def tratar_retorno(supabase, pref_id, status_retorno):
         return None
             
     except Exception as e:
+        print(f"🚨 [RETORNO] ERRO CRÍTICO CAPTURADO NO TERMINAL: {e}")
         st.error(f"🚨 Erro no processamento do retorno: {e}")
         return None
