@@ -414,8 +414,11 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                                 st.session_state.meses_comprados = qtd_meses
                                 
                                 try:
+                                    # LIMPA ESTE USUÁRIO DA TABELA pagamentos_temp
+                                    supabase.table("pagamentos_temp").delete().eq("usuario_id", ID_USUARIO_LOGADO).execute()
+                                    
                                     # 💾 SALVAMENTO DIRETAMENTE NAS COLUNAS COM AS VARIÁVEIS DA SUA TELA
-                                    supabase.table("pagamentos_temp").upsert({
+                                    supabase.table("pagamentos_temp").insert({
                                         "usuario_id": ID_USUARIO_LOGADO,
                                         "pref_id": str(st.session_state.pref_id_ativa),
                                         "valor": float(valor_final_faturar),
