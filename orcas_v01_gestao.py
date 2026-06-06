@@ -412,24 +412,29 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                                 st.session_state.url_ativa = link
                                 st.session_state.pref_id_ativa = pref_id if pref_id else ID_USUARIO_LOGADO
                                 st.session_state.meses_comprados = qtd_meses
+                                # st.write(f"ID que estou tentando deletar: '{ID_USUARIO_LOGADO}'")
                                 
                                 try:
-                                    # LIMPA ESTE USUÁRIO DA TABELA pagamentos_temp
-                                    supabase.table("pagamentos_temp").delete().eq("usuario_id", ID_USUARIO_LOGADO).execute()
-                                    
-                                    # 💾 SALVAMENTO DIRETAMENTE NAS COLUNAS COM AS VARIÁVEIS DA SUA TELA
+                                    # 1. CONVERTE O ID PARA STRING LIMPA ("1") PARA CASAR COM O TIPO 'TEXT' DO BANCO
+                                    id_filtro = str(ID_USUARIO_LOGADO).strip()
+                                
+                                    # 2. AGORA O BANCO CONSEGUE DELETAR SEM SE PERDER
+                                    supabase.table("pagamentos_temp").delete().eq("usuario_id", id_filtro).execute()
+                                
+                                    # 3. SALVAMENTO DO REGISTRO ATUAL (A coluna 'id' será gerada automática pelo banco)
                                     supabase.table("pagamentos_temp").insert({
-                                        "usuario_id": ID_USUARIO_LOGADO,
+                                        "usuario_id": id_filtro,
                                         "pref_id": str(st.session_state.pref_id_ativa),
                                         "valor": float(valor_final_faturar),
                                         "status": "aguardando",
                                         "projeto_id": plano_para_vincular,
                                         "data_ini": dados_p_salvamento.get("data_ini"),
                                         "data_fim": dados_p_salvamento.get("data_fim"),
-                                        "zap_ativo": bool(ativar_zap_atual),          # Mapeado para True/False
-                                        "email_ativo": int(1 if ativar_email_atual else 0), # Mapeado para 1/0
-                                        "tipo_renovacao": str(tipo_pagamento)         # Mapeado para sua variável de período
+                                        "zap_ativo": bool(ativar_zap_atual),
+                                        "email_ativo": bool(ativar_email_atual),
+                                        "tipo_renovacao": str(tipo_pagamento)
                                     }).execute()
+                                
                                     st.toast("Link gerado com sucesso!")
                                 except Exception as e:
                                     st.error(f"Erro ao registrar transação temporária: {e}")
