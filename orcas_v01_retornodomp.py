@@ -84,6 +84,13 @@ def tratar_retorno(supabase, pref_id, status_retorno):
             }).eq("id", uid_usuario).execute()
 
         # ==============================================================================
+        # 🔥 LIMPEZA DA TABELA TEMPORÁRIA APÓS O SUCESSO (Sua nova lógica)
+        # ==============================================================================
+        # O fluxo funcionou, salvou tudo, então agora limpamos o registro consumido
+        if uid_usuario:
+            supabase.table("pagamentos_temp").delete().eq("usuario_id", str(uid_usuario).strip()).execute()
+
+        # ==============================================================================
         # 4. RETORNO DE CONFIGURAÇÃO DE SESSÃO
         # ==============================================================================
         res_user_final = supabase.table("usuarios").select("id, nome, email, vencimento").eq("id", uid_usuario).execute()
