@@ -150,7 +150,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         relatorios_consolidar = dict(rels_banco)
         
         planos_consolidar[nome_plano_input] = meses_total_edit
-        relatorios_consolidar[nome_plano_input] = 1 if (ativar_zap_atual or activar_email_atual) else 0
+        relatorios_consolidar[nome_plano_input] = 1 if (ativar_zap_atual or ativar_email_atual) else 0
 
         qtd_total_planos = len(planos_consolidar)
         qtd_relatorios_totais = sum(relatorios_consolidar.values())
