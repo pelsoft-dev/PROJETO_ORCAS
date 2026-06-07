@@ -82,7 +82,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         if meses_atuais not in [24, 36, 48, 60]:
             meses_atuais = 24
 
-        # 🔥 INTERCEPTAÇÃO: Se o pagamento acabou de ser feito, força o slider a marcar o valor do st.session_state
         if st.session_state.get("pagamento_realizado_sucesso") and st.session_state.get("meses_comprados"):
             if st.session_state.meses_comprados == 36 or meses_total_edit == 36:
                 meses_atuais = 36
@@ -118,7 +117,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             d2_orig = datetime.strptime(res_cfg_plano.data[0]['data_fim'], '%Y-%m-%d').date()
             meses_originais_db = (d2_orig.year - d1_orig.year) * 12 + (d2_orig.month - d1_orig.month) + 1
         
-        # 🔥 INTERCEPTAÇÃO DOS CHECKBOXES: Se veio de um pagamento recente, força os valores reais do pagamentos_temp
         if st.session_state.get("pagamento_realizado_sucesso"):
             ativar_zap_val = False
             ativar_email_val = True
@@ -134,7 +132,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             ativar_zap_atual = st.checkbox("Adicionar o Resumo Diário ORCAS via Whatsapp", value=ativar_zap_val)
             ativar_email_atual = st.checkbox("Adicionar o Resumo Diário ORCAS via E-mail", value=ativar_email_val)
         
-        # --- 2. POSICIONAMENTO E CORREÇÃO DOS DICIONÁRIOS ---
+        # --- 2. POSICIONAMENTO E ATRIBUIÇÃO DOS DICIONÁRIOS ---
         res_all = supabase.table("config_projetos").select("*").eq("usuario_id", uid_gestao).execute()
         dados_db = res_all.data if res_all.data else []
         
@@ -150,7 +148,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         relatorios_consolidar = dict(rels_banco)
         
         planos_consolidar[nome_plano_input] = meses_total_edit
-        relatorios_consolidar[nome_plano_input] = 1 if (ativar_zap_atual or ativar_email_atual) else 0
+        relatorios_consolidar[nome_plano_input] = 1 if (ativar_zap_atual or activar_email_atual) else 0
 
         qtd_total_planos = len(planos_consolidar)
         qtd_relatorios_totais = sum(relatorios_consolidar.values())
@@ -172,7 +170,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         v_6meses = (v_mensal_total * 6) * 0.95
         v_12meses = (v_mensal_total * 12) * 0.89 
 
-        # --- QUADRO RESUMO AZUL ---
         resumo_html = f"""
         <div style="background-color: #87CEFA; padding: 15px; border-radius: 5px; color: black; font-family: sans-serif; border: 1px solid #1E90FF;">
             <div style="font-weight: bold; font-size: 16px; margin-bottom: 10px;">Valor da Assinatura Mensal: R$ {format_moeda(v_mensal_total)}</div>
@@ -196,7 +193,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
 
         st.write("")
 
-        # 🎯 CORREÇÃO DO PLANO APONTADO (Destaque em Azul): Descobre dinamicamente o index da opção salva no banco
         opcoes_renovacao = ["Selecione uma opção...", "Mensal (Sem desconto)", "6 Meses (5% de desconto)", "12 Meses (11% de desconto)"]
         index_inicial_radio = 0
         for i, opcao in enumerate(opcoes_renovacao):
@@ -271,7 +267,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                     f"""
                     <div style="color: #856404; background-color: #fff3cd; border-color: #ffeeba; padding: 15px; border: 1px solid transparent; border-radius: 4px; margin-top: 15px; margin-bottom: 15px; font-family: sans-serif; text-align: justify;">
                         ⚠️ <b>Aviso de Aproveitamento de Saldo:</b><br>
-                        Como o system trabalha com opções fechadas, optando por uma renovação Mensal com créditos ativos, você terá este mês sem custos, mas perderá um saldo residual de <b>R$ {format_moeda(saldo_perdido_exibir)}</b>. Fazendo uma renovação Semestral, utiliza integralmente esse saldo e pagará apenas a diferença de <b>R$ {format_moeda(diferenca_semestral_exibir)}</b>.
+                        Como o sistema trabalha com opções fechadas, optando por uma renovação Mensal com créditos ativos, você terá este mês sem custos, mas perderá um saldo residual de <b>R$ {format_moeda(saldo_perdido_exibir)}</b>. Fazendo uma renovação Semestral, utiliza integralmente esse saldo e pagará apenas a diferença de <b>R$ {format_moeda(diferenca_semestral_exibir)}</b>.
                     </div>
                     """,
                     unsafe_allow_html=True
@@ -327,7 +323,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                     supabase.table("config_projetos").upsert(dados_p_salvamento).execute()
                     supabase.table("lancamentos").delete().eq("projeto_id", nome_plano_input).eq("usuario_id", uid_gestao).gt("data", st.session_state.tmp_fim_plano.strftime('%Y-%m-%d')).execute()
                     
-                    # 🔥 SALVAMENTO IMEDIATO SEM MERCADO PAGO SE O VALOR FOR ZERO
                     if tipo_pagamento != "Selecione uma opção...":
                         supabase.table("usuarios").update({"tipo_renovacao": tipo_pagamento}).eq("id", uid_gestao).execute()
 
@@ -362,7 +357,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         if tipo_pagamento != "Selecione uma opção...":
             dados_p_salvamento["tipo_renovacao"] = tipo_pagamento
 
-            # 🔥 TRAVA DE EXIBIÇÃO CRÍTICA: O bloco inteiro destacado em amarelo só aparece se houver valor > 0
+            # 🔥 O bloco inteiro destacado só aparece se houver valor > 0
             if valor_final_faturar > 0:
                 st.subheader("💳 Finalizar Assinatura")
                 st.write("")
@@ -421,7 +416,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                                     id_filtro = str(ID_USUARIO_LOGADO).strip()
                                     supabase.table("pagamentos_temp").delete().eq("usuario_id", id_filtro).execute()
                                     
-                                    # 🔥 INTEGRALIDADE DAS VARIÁVEIS GARANTIDA (tipo smallint tratado como numérico 1 ou 0)
                                     supabase.table("pagamentos_temp").insert({
                                         "usuario_id": id_filtro,
                                         "pref_id": str(st.session_state.pref_id_ativa),
@@ -443,7 +437,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                     st.link_button("🔵 PAGAMENTO - IR P/ MERCADO PAGO", st.session_state.url_ativa, use_container_width=True)
             
             else:
-                # Se cair aqui, o valor é zero ou menor. O bloco amarelo some e mostra apenas o feedback em texto limpo.
                 col_res1, col_res2 = st.columns([2, 1])
                 with col_res1:
                     st.write(f"**Total a pagar:** :green[R$ 0,00] (Crédito residual cobre as alterações)")
