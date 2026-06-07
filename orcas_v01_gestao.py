@@ -122,7 +122,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         if st.session_state.get("pagamento_realizado_sucesso"):
             ativar_zap_val = False
             ativar_email_val = True
-            # Limpa as flags de controle após a injeção na renderização inicial
             if "pagamento_realizado_sucesso" in st.session_state: del st.session_state.pagamento_realizado_sucesso
             if "meses_comprados" in st.session_state: del st.session_state.meses_comprados
         else:
@@ -151,7 +150,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         relatorios_consolidar = dict(rels_banco)
         
         planos_consolidar[nome_plano_input] = meses_total_edit
-        relatorios_consolidar[nome_plano_input] = 1 if (ativar_zap_atual or ativar_email_atual) else 0
+        relatorios_consolidar[nome_plano_input] = 1 if (ativar_zap_atual or activar_email_atual) else 0
 
         qtd_total_planos = len(planos_consolidar)
         qtd_relatorios_totais = sum(relatorios_consolidar.values())
@@ -197,9 +196,18 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
 
         st.write("")
 
+        # 🎯 CORREÇÃO DO PLANO APONTADO (Destaque em Azul): Descobre dinamicamente o index da opção salva no banco
+        opcoes_renovacao = ["Selecione uma opção...", "Mensal (Sem desconto)", "6 Meses (5% de desconto)", "12 Meses (11% de desconto)"]
+        index_inicial_radio = 0
+        for i, opcao in enumerate(opcoes_renovacao):
+            if tipo_renov_original.lower() in opcao.lower() and tipo_renov_original != "":
+                index_inicial_radio = i
+                break
+
         tipo_pagamento = st.radio(
             "Escolha o período de renovação:",
-            ["Selecione uma opção...", "Mensal (Sem desconto)", "6 Meses (5% de desconto)", "12 Meses (11% de desconto)"],
+            opcoes_renovacao,
+            index=index_inicial_radio,
             horizontal=True, key="radio_pag_final_v10"
         )
 
@@ -236,7 +244,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
 
             dias_restantes = (venc_date - hoje).days if venc_date > hoje else 0
             
-            # Garante que dias_totais_ciclo nunca seja zero ou cause divisão por zero
             dias_totais_ciclo = 180
             if data_ult_assinat_real and venc_date > data_ult_assinat_real:
                 dias_totais_ciclo = (venc_date - data_ult_assinat_real).days
@@ -264,7 +271,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                     f"""
                     <div style="color: #856404; background-color: #fff3cd; border-color: #ffeeba; padding: 15px; border: 1px solid transparent; border-radius: 4px; margin-top: 15px; margin-bottom: 15px; font-family: sans-serif; text-align: justify;">
                         ⚠️ <b>Aviso de Aproveitamento de Saldo:</b><br>
-                        Como o sistema trabalha com opções fechadas, optando por uma renovação Mensal com créditos ativos, você terá este mês sem custos, mas perderá um saldo residual de <b>R$ {format_moeda(saldo_perdido_exibir)}</b>. Fazendo uma renovação Semestral, utiliza integralmente esse saldo e pagará apenas a diferença de <b>R$ {format_moeda(diferenca_semestral_exibir)}</b>.
+                        Como o system trabalha com opções fechadas, optando por uma renovação Mensal com créditos ativos, você terá este mês sem custos, mas perderá um saldo residual de <b>R$ {format_moeda(saldo_perdido_exibir)}</b>. Fazendo uma renovação Semestral, utiliza integralmente esse saldo e pagará apenas a diferença de <b>R$ {format_moeda(diferenca_semestral_exibir)}</b>.
                     </div>
                     """,
                     unsafe_allow_html=True
@@ -314,13 +321,16 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             elif valor_final_faturar <= 0:
                 try:
                     res_p = supabase.table("config_projetos").select("id").eq("projeto_id", nome_plano_input).eq("usuario_id", uid_gestao).execute()
-                    # CORREÇÃO DO APIERROR: Remove ou atualiza o ID dinamicamente apenas se o registro de fato existir
                     if res_p and hasattr(res_p, 'data') and res_p.data: 
                         dados_p_salvamento["id"] = res_p.data[0]["id"]
                     
                     supabase.table("config_projetos").upsert(dados_p_salvamento).execute()
                     supabase.table("lancamentos").delete().eq("projeto_id", nome_plano_input).eq("usuario_id", uid_gestao).gt("data", st.session_state.tmp_fim_plano.strftime('%Y-%m-%d')).execute()
                     
+                    # 🔥 SALVAMENTO IMEDIATO DO PLANO GRATUITO: Seta o tipo_renovacao direto na usuarios sem Mercado Pago
+                    if tipo_pagamento != "Selecione uma opção...":
+                        supabase.table("usuarios").update({"tipo_renovacao": tipo_pagamento}).eq("id", uid_gestao).execute()
+
                     if 'tmp_fim_plano' in st.session_state: del st.session_state.tmp_fim_plano
                     st.session_state.projeto_ativo = nome_plano_input
                     st.session_state.msg_sucesso = "🎉 Alterações aplicadas com sucesso! Seus créditos cobriram a mudança (Custo: R$ 0,00)."
@@ -353,41 +363,35 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         if tipo_pagamento != "Selecione uma opção...":
             dados_p_salvamento["tipo_renovacao"] = tipo_pagamento
 
-            st.write("")
-            cupom_in = st.text_input("Possui um Cupom de Desconto?", key="cp_gest_final_v7").upper()
-            desc_extra = 0.0
-            if cupom_in:
-                try:
-                    res_c = supabase.table("cupons").select("*").eq("codigo", cupom_in).eq("ativo", True).execute()
-                    if res_c.data:
-                        d = res_c.data[0]
-                        v_p = float(d.get('percentual_desconto', 0) or 0)
-                        v_a = float(d.get('valor_desconto', 0) or 0)
-                        desc_extra = valor_final_faturar * (v_p / 100) if v_p > 0 else v_a
-                        st.success("✅ Cupom aplicado!")
-                    else:
-                        st.error("❌ Cupom inválido.")
-                except: pass
-
-            valor_final_faturar = max(valor_final_faturar - desc_extra, 0.00)
-
-            col_res1, col_res2 = st.columns([2, 1])
-            with col_res1:
-                if valor_final_faturar <= 0:
-                    st.write(f"**Total a pagar:** :green[R$ 0,00] (Crédito residual cobre as alterações)")
+            # 🔥 CONDICIONAL DE CONTROLE (O seu "GOTO"): Todo o bloco destacado em amarelo só existirá e será exibido se o valor for maior que zero
+            if valor_final_faturar > 0:
+                st.write("")
+                cupom_in = st.text_input("Possui um Cupom de Desconto?", key="cp_gest_final_v7").upper()
+                desc_extra = 0.0
+                if cupom_in:
                     try:
-                        venc_f = datetime.strptime(str(vencimento_atual_str)[:10], '%Y-%m-%d').strftime('%d/%m/%Y')
-                        st.write(f"*(Sua validade atual de {venc_f} foi mantida intacta)*")
+                        res_c = supabase.table("cupons").select("*").eq("codigo", cupom_in).eq("ativo", True).execute()
+                        if res_c.data:
+                            d = res_c.data[0]
+                            v_p = float(d.get('percentual_desconto', 0) or 0)
+                            v_a = float(d.get('valor_desconto', 0) or 0)
+                            desc_extra = valor_final_faturar * (v_p / 100) if v_p > 0 else v_a
+                            st.success("✅ Cupom aplicado!")
+                        else:
+                            st.error("❌ Cupom inválido.")
                     except: pass
-                else:
+
+                valor_final_faturar = max(valor_final_faturar - desc_extra, 0.00)
+
+                col_res1, col_res2 = st.columns([2, 1])
+                with col_res1:
                     st.write(f"**Total a pagar:** :green[R$ {valor_final_faturar:.2f}] ({label_desc})")
                     try:
                         venc_proposto_f = datetime.strptime(recalculo_expiracao, '%Y-%m-%d').strftime('%d/%m/%Y')
                         st.write(f"*(Sua licença estenderá para a data: {venc_proposto_f})*")
                     except: pass
-            
-            with col_res2:
-                if valor_final_faturar > 0:
+                
+                with col_res2:
                     if st.button("🚀 GERAR LINK DE PAGAMENTO", use_container_width=True):
                         with st.spinner("Preparando fatura segura..."):
                             plano_para_vincular = nome_plano_input.strip() if nome_plano_input else "Plano"
@@ -412,16 +416,11 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                                 st.session_state.url_ativa = link
                                 st.session_state.pref_id_ativa = pref_id if pref_id else ID_USUARIO_LOGADO
                                 st.session_state.meses_comprados = qtd_meses
-                                # st.write(f"ID que estou tentando deletar: '{ID_USUARIO_LOGADO}'")
                                 
                                 try:
-                                    # 1. CONVERTE O ID PARA STRING LIMPA ("1") PARA CASAR COM O TIPO 'TEXT' DO BANCO
                                     id_filtro = str(ID_USUARIO_LOGADO).strip()
-                                
-                                    # 2. AGORA O BANCO CONSEGUE DELETAR SEM SE PERDER
                                     supabase.table("pagamentos_temp").delete().eq("usuario_id", id_filtro).execute()
-                                
-                                    # 3. SALVAMENTO DO REGISTRO ATUAL (A coluna 'id' será gerada automática pelo banco)
+                                    
                                     supabase.table("pagamentos_temp").insert({
                                         "usuario_id": id_filtro,
                                         "pref_id": str(st.session_state.pref_id_ativa),
@@ -431,16 +430,28 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                                         "data_ini": dados_p_salvamento.get("data_ini"),
                                         "data_fim": dados_p_salvamento.get("data_fim"),
                                         "zap_ativo": bool(ativar_zap_atual),
-                                        "email_ativo": int(1 if ativar_email_atual else 0), # Mantido como 0 ou 1 (smallint)
+                                        "email_ativo": int(1 if activar_email_atual else 0),
                                         "tipo_renovacao": str(tipo_pagamento)
                                     }).execute()
                                 
                                     st.toast("Link gerado com sucesso!")
                                 except Exception as e:
                                     st.error(f"Erro ao registrar transação temporária: {e}")
+                
+                if "url_ativa" in st.session_state and valor_final_faturar > 0:
+                    st.link_button("🔵 PAGAMENTO - IR P/ MERCADO PAGO", st.session_state.url_ativa, use_container_width=True)
             
-            if "url_ativa" in st.session_state and valor_final_faturar > 0:
-                st.link_button("🔵 PAGAMENTO - IR P/ MERCADO PAGO", st.session_state.url_ativa, use_container_width=True)
+            else:
+                # Se cair no else, significa que valor_final_faturar <= 0. O bloco amarelo some e exibe apenas a info de créditos.
+                col_res1, col_res2 = st.columns([2, 1])
+                with col_res1:
+                    st.write(f"**Total a pagar:** :green[R$ 0,00] (Crédito residual cobre as alterações)")
+                    try:
+                        venc_f = datetime.strptime(str(vencimento_atual_str)[:10], '%Y-%m-%d').strftime('%d/%m/%Y')
+                        st.write(f"*(Sua validade atual de {venc_f} foi mantida intacta)*")
+                    except: pass
+                with col_res2:
+                    st.info("💡 Salve no botão superior para confirmar.")
         else:
             st.info("ℹ️ Escolha um período de renovação acima para prosseguir com a finalização da assinatura.")
     else:
