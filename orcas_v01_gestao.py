@@ -430,7 +430,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                                         "data_ini": dados_p_salvamento.get("data_ini"),
                                         "data_fim": dados_p_salvamento.get("data_fim"),
                                         "zap_ativo": bool(ativar_zap_atual),
-                                        "email_ativo": int(1 if activar_email_atual else 0),
+                                        "email_ativo": int(1 if ativar_email_atual else 0),
                                         "tipo_renovacao": str(tipo_pagamento)
                                     }).execute()
                                 
