@@ -134,7 +134,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             ativar_zap_atual = st.checkbox("Adicionar o Resumo Diário ORCAS via Whatsapp", value=ativar_zap_val)
             ativar_email_atual = st.checkbox("Adicionar o Resumo Diário ORCAS via E-mail", value=ativar_email_val)
         
-        # --- 2. POSICIONAMENTO E CORREÇÃO DOS DICIONÁRIOS (EVITA NAMEERROR) ---
+        # --- 2. POSICIONAMENTO E CORREÇÃO DOS DICIONÁRIOS ---
         res_all = supabase.table("config_projetos").select("*").eq("usuario_id", uid_gestao).execute()
         dados_db = res_all.data if res_all.data else []
         
@@ -211,7 +211,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             horizontal=True, key="radio_pag_final_v10"
         )
 
-        # --- 3. CRÉDITOS E PROTEÇÃO DE CONVERSÃO DE DATAS (EVITA TYPEERROR) ---
+        # --- 3. CRÉDITOS E PROTEÇÃO DE CONVERSÃO DE DATAS ---
         valor_final_faturar = 0.00
         recalculo_expiracao = hoje.strftime('%Y-%m-%d')
         qtd_meses = 1
@@ -362,7 +362,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         if tipo_pagamento != "Selecione uma opção...":
             dados_p_salvamento["tipo_renovacao"] = tipo_pagamento
 
-            # 🔥 TRAVA E CONTROLE DE EXIBIÇÃO: O bloco inteiro destacado em amarelo some se valor for R$ 0,00
+            # 🔥 TRAVA DE EXIBIÇÃO CRÍTICA: O bloco inteiro destacado em amarelo só aparece se houver valor > 0
             if valor_final_faturar > 0:
                 st.subheader("💳 Finalizar Assinatura")
                 st.write("")
@@ -421,7 +421,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                                     id_filtro = str(ID_USUARIO_LOGADO).strip()
                                     supabase.table("pagamentos_temp").delete().eq("usuario_id", id_filtro).execute()
                                     
-                                    # 🔥 TRATAMENTO DO SMALLINT: Alterado de bool() para int (1 ou 0) para o Supabase aceitar
+                                    # 🔥 INTEGRALIDADE DAS VARIÁVEIS GARANTIDA (tipo smallint tratado como numérico 1 ou 0)
                                     supabase.table("pagamentos_temp").insert({
                                         "usuario_id": id_filtro,
                                         "pref_id": str(st.session_state.pref_id_ativa),
@@ -443,7 +443,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                     st.link_button("🔵 PAGAMENTO - IR P/ MERCADO PAGO", st.session_state.url_ativa, use_container_width=True)
             
             else:
-                # Caso o valor seja zero ou menor, exibe apenas a informação dos créditos sem bloco amarelo
+                # Se cair aqui, o valor é zero ou menor. O bloco amarelo some e mostra apenas o feedback em texto limpo.
                 col_res1, col_res2 = st.columns([2, 1])
                 with col_res1:
                     st.write(f"**Total a pagar:** :green[R$ 0,00] (Crédito residual cobre as alterações)")
