@@ -218,9 +218,11 @@ def parse_moeda(t):
         return 0.0
 
 # ==============================================================================
-# INÍCIO INSERÇÃO: INTERCEPTAÇÃO INTELIGENTE REORGANIZADA
+# INÍCIO INSERÇÃO: INTERCEPTAÇÃO INTELIGENTE DE RETORNO DO MERCADO PAGO E LOGIN AUTOMÁTICO
 # ==============================================================================
 import streamlit.components.v1 as components
+import zoneinfo
+from datetime import datetime, timedelta
 
 status_retorno = None
 pref_id = None
@@ -230,56 +232,112 @@ if 'logado' not in st.session_state:
 
 query_params = st.query_params
 
-# --- ESTRATÉGIA 1: SE VIER POR BYPASS ---
+# --- ESTRATÉGIA 1: INTEGRAÇÃO COM PARAMETROS DE BYPASS NA URL ---
 if "bypass_uid" in query_params and "bypass_val" in query_params:
-    uid_retorno = query_params["bypass_uid"]
+    uid_retorno = str(query_params["bypass_uid"]).strip()
     valor_retorno = float(query_params["bypass_val"])
-    
-    with st.spinner("🚀 Processando retorno rápido..."):
-        # Repassa o trabalho para o retornodomp fazer tudo de forma completa!
-        usuario_auto = retornodomp.tratar_retorno(supabase, None, "approved", uid_forcado=uid_retorno, valor_forcado=valor_retorno)
-        
-        if usuario_auto and isinstance(usuario_auto, dict):
-            st.session_state.logado = True
-            st.session_state.CHAVE_MESTRA_UUID = str(usuario_auto.get('id', ''))
-            st.session_state.usuario = usuario_auto.get('email', '')
-            st.session_state.usuario_email = usuario_auto.get('email', '')
-            st.session_state.vencimento = str(usuario_auto.get('vencimento', ''))
-            st.session_state.projeto_ativo = usuario_auto.get("projeto_ativo")
-            st.session_state.zap_ativo = usuario_auto.get('zap_ativo', False)
-            st.session_state.email_ativo = usuario_auto.get('email_ativo', True)
-            st.session_state.escolha = "⚙️ Gestão"
-            
-            components.html("""
-                <script>
-                    localStorage.setItem('orcas_payment_success', 'true');
-                    if (window.opener) { window.close(); }
-                </script>
-            """, height=0)
-            
-            st.query_params.clear()
-            st.rerun()
+    plano_retorno = query_params.get("bypass_plano", "")
+    venc_retorno_str = query_params.get("bypass_venc", "")
 
-# --- ESTRATÉGIA 2: RETORNO CLÁSSICO DO MERCADO PAGO ---
+    try:
+        # Busca o registro temporário para não perder as definições da tela
+        req_temp = supabase.table("pagamentos_temp").select("*").eq("usuario_id", uid_retorno).execute()
+        
+        if req_temp.data:
+            dados_temp = req_temp.data[0]
+            fuso_br = zoneinfo.ZoneInfo("America/Sao_Paulo")
+            hoje_br_string = datetime.now(fuso_br).strftime('%Y-%m-%d')
+            
+            v_tipo_renovacao = dados_temp.get("tipo_renovacao")
+            
+            if not venc_retorno_str:
+                venc_retorno_str = (datetime.now(fuso_br).date() + timedelta(days=30)).strftime('%Y-%m-%d')
+            
+            # Atualiza o usuário contendo explicitamente o tipo_renovacao que estava faltando
+            try:
+                supabase.table("usuarios").update({
+                    "data_ult_assinat": hoje_br_string,
+                    "valor_pago": valor_retorno,
+                    "vencimento": venc_retorno_str,
+                    "tipo_renovacao": v_tipo_renovacao  # Grava o plano escolhido na tela (ex: 48 meses)
+                }).eq("id", uid_retorno).execute()
+            except Exception as erro_banco:
+                st.error(f"Erro ao consolidar dados cadastrais da assinatura: {erro_banco}")
+
+            # Atualiza a tabela config_projetos com os estados de zap e email correspondentes
+            v_projeto_id = plano_retorno if plano_retorno else dados_temp.get('projeto_id')
+            if v_projeto_id:
+                try:
+                    supabase.table("config_projetos").update({
+                        "data_ini": dados_temp.get("data_ini"),
+                        "data_fim": dados_temp.get("data_fim"),
+                        "zap_ativo": dados_temp.get("zap_ativo"),
+                        "email_ativo": dados_temp.get("email_ativo")
+                    }).eq("projeto_id", v_projeto_id).eq("usuario_id", uid_retorno).execute()
+                except Exception:
+                    pass
+
+            # Montagem das variáveis de sessão baseadas no banco
+            req_user = supabase.table("usuarios").select("*").eq("id", uid_retorno).execute()
+            if req_user.data:
+                u_dados = req_user.data[0]
+                
+                st.session_state.logado = True
+                st.session_state.CHAVE_MESTRA_UUID = str(uid_retorno)
+                st.session_state.usuario = u_dados.get('email', 'Usuário Confirmado')
+                st.session_state.usuario_email = u_dados.get('email', '')
+                st.session_state.vencimento = venc_retorno_str
+                st.session_state.projeto_ativo = v_projeto_id
+                st.session_state.zap_ativo = dados_temp.get("zap_ativo", False)
+                st.session_state.email_ativo = dados_temp.get("email_ativo", 1)
+                st.session_state.escolha = "⚙️ Gestão"
+                
+                # 🔥 DELEÇÃO LIMPA: Remove o registro temporário consumido para liberar espaço
+                try:
+                    supabase.table("pagamentos_temp").delete().eq("usuario_id", uid_retorno).execute()
+                except Exception:
+                    pass
+                
+                components.html("""
+                    <script>
+                        localStorage.setItem('orcas_payment_success', 'true');
+                        if (window.opener) {
+                            window.close();
+                        }
+                    </script>
+                """, height=0)
+                
+                st.query_params.clear()
+                st.rerun()
+        else:
+            st.warning("⚠️ Nota: O registro temporário de pagamento já foi processado ou expirou.")
+            st.query_params.clear()
+            
+    except Exception as erro_bypass:
+        st.error(f"Erro interno ao processar validação automática: {erro_bypass}")
+
+# --- ESTRATÉGIA 2: MODELO DE RETORNO CLÁSSICO COM PARAMETROS MP ---
 elif query_params and len(query_params) > 0:
     status_retorno = query_params.get("status") or query_params.get("collection_status")
     pref_id = query_params.get("preference_id") or query_params.get("collection_id")
 
 if status_retorno and pref_id and not st.session_state.logado:
     if status_retorno in ["approved", "authorized", "pending"]:
-        with st.spinner("🚀 Processando seu pagamento..."):
+        with st.spinner("🚀 Processando seu pagamento e aplicando as alterações do seu plano..."):
             usuario_auto = retornodomp.tratar_retorno(supabase, pref_id, status_retorno)
             if usuario_auto and isinstance(usuario_auto, dict):
                 st.session_state.logado = True
+                st.session_state.CHERA_MESTRA_UUID = str(usuario_auto.get('id', ''))
                 st.session_state.CHAVE_MESTRA_UUID = str(usuario_auto.get('id', ''))
                 st.session_state.usuario = usuario_auto.get('email', '')
                 st.session_state.usuario_email = usuario_auto.get('email', '')
                 st.session_state.vencimento = str(usuario_auto.get('vencimento', ''))
                 st.session_state.projeto_ativo = usuario_auto.get("projeto_ativo")
                 st.session_state.zap_ativo = usuario_auto.get('zap_ativo', False)
-                st.session_state.email_ativo = usuario_auto.get('email_ativo', True)
-                st.session_state.escolha = "⚙️ Gestão"
+                st.session_state.email_ativo = usuario_auto.get('email_ativo', 1)
+                st.session_state.pagamento_realizado_sucesso = True
                 st.query_params.clear()
+                st.session_state.escolha = "⚙️ Gestão"
                 st.rerun()
 
 if not st.session_state.get('CHAVE_MESTRA_UUID'):
