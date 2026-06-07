@@ -286,13 +286,13 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         houve_mudanca_parametros = False
         if res_cfg_plano.data:
             if (meses_total_edit != meses_originais_db or 
-                (1 if ativar_zap_atual else 0) != zap_plano_db or 
+                (1 if activar_zap_atual else 0) != zap_plano_db or 
                 (1 if ativar_email_atual else 0) != email_plano_db):
                 houve_mudanca_parametros = True
         elif nome_plano_input.strip() != "":
             houve_mudanca_parametros = True
 
-        if houve_mudanca_parametros:
+        if houve_mudanca_parametros and valor_final_faturar > 0:
             st.markdown(
                 f"""
                 <div style="color: #1E3A8A; background-color: #EBF5FF; border-color: #BFDBFE; padding: 12px; border: 1px solid transparent; border-radius: 4px; margin-top: 5px; margin-bottom: 15px; font-family: sans-serif;">
@@ -310,7 +310,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             "saldo_inicial": parse_moeda(saldo_input),
             "data_ini": d_ini_g.strftime('%Y-%m-%d'), 
             "data_fim": st.session_state.tmp_fim_plano.strftime('%Y-%m-%d'),
-            "zap_ativo": 1 if ativar_zap_atual else 0,
+            "zap_ativo": 1 if activar_zap_atual else 0,
             "email_ativo": 1 if ativar_email_atual else 0
         }
 
@@ -327,7 +327,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                     supabase.table("config_projetos").upsert(dados_p_salvamento).execute()
                     supabase.table("lancamentos").delete().eq("projeto_id", nome_plano_input).eq("usuario_id", uid_gestao).gt("data", st.session_state.tmp_fim_plano.strftime('%Y-%m-%d')).execute()
                     
-                    # 🔥 SALVAMENTO IMEDIATO DO PLANO GRATUITO: Seta o tipo_renovacao direto na usuarios sem Mercado Pago
+                    # 🔥 SALVAMENTO IMEDIATO SEM MERCADO PAGO SE O VALOR FOR ZERO
                     if tipo_pagamento != "Selecione uma opção...":
                         supabase.table("usuarios").update({"tipo_renovacao": tipo_pagamento}).eq("id", uid_gestao).execute()
 
@@ -358,13 +358,13 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 st.rerun()
 
         st.write("")
-        st.subheader("💳 Finalizar Assinatura")
 
         if tipo_pagamento != "Selecione uma opção...":
             dados_p_salvamento["tipo_renovacao"] = tipo_pagamento
 
-            # 🔥 CONDICIONAL DE CONTROLE (O seu "GOTO"): Todo o bloco destacado em amarelo só existirá e será exibido se o valor for maior que zero
+            # 🔥 TRAVA E CONTROLE DE EXIBIÇÃO: O bloco inteiro destacado em amarelo some se valor for R$ 0,00
             if valor_final_faturar > 0:
+                st.subheader("💳 Finalizar Assinatura")
                 st.write("")
                 cupom_in = st.text_input("Possui um Cupom de Desconto?", key="cp_gest_final_v7").upper()
                 desc_extra = 0.0
@@ -421,6 +421,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                                     id_filtro = str(ID_USUARIO_LOGADO).strip()
                                     supabase.table("pagamentos_temp").delete().eq("usuario_id", id_filtro).execute()
                                     
+                                    # 🔥 TRATAMENTO DO SMALLINT: Alterado de bool() para int (1 ou 0) para o Supabase aceitar
                                     supabase.table("pagamentos_temp").insert({
                                         "usuario_id": id_filtro,
                                         "pref_id": str(st.session_state.pref_id_ativa),
@@ -429,8 +430,8 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                                         "projeto_id": plano_para_vincular,
                                         "data_ini": dados_p_salvamento.get("data_ini"),
                                         "data_fim": dados_p_salvamento.get("data_fim"),
-                                        "zap_ativo": bool(ativar_zap_atual),
-                                        "email_ativo": int(1 if ativar_email_atual else 0),
+                                        "zap_ativo": 1 if activar_zap_atual else 0,
+                                        "email_ativo": 1 if ativar_email_atual else 0,
                                         "tipo_renovacao": str(tipo_pagamento)
                                     }).execute()
                                 
@@ -442,7 +443,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                     st.link_button("🔵 PAGAMENTO - IR P/ MERCADO PAGO", st.session_state.url_ativa, use_container_width=True)
             
             else:
-                # Se cair no else, significa que valor_final_faturar <= 0. O bloco amarelo some e exibe apenas a info de créditos.
+                # Caso o valor seja zero ou menor, exibe apenas a informação dos créditos sem bloco amarelo
                 col_res1, col_res2 = st.columns([2, 1])
                 with col_res1:
                     st.write(f"**Total a pagar:** :green[R$ 0,00] (Crédito residual cobre as alterações)")
