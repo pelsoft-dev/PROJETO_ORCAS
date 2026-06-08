@@ -148,7 +148,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         relatorios_consolidar = dict(rels_banco)
         
         planos_consolidar[nome_plano_input] = meses_total_edit
-        relatorios_consolidar[nome_plano_input] = 1 if (ativar_zap_atual or activar_email_atual) else 0
+        relatorios_consolidar[nome_plano_input] = 1 if (ativar_zap_atual or ativar_email_atual) else 0
 
         qtd_total_planos = len(planos_consolidar)
         qtd_relatorios_totais = sum(relatorios_consolidar.values())
@@ -207,7 +207,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             horizontal=True, key="radio_pag_final_v10"
         )
 
-        # --- 3. CRÉDITOS E PROTEÇÃO DE CONVERSÃO DE DATAS ---
+        # --- 3. CRÉDITOS E CÁLCULO DE VALORES ---
         valor_final_faturar = 0.00
         recalculo_expiracao = hoje.strftime('%Y-%m-%d')
         qtd_meses = 1
@@ -320,6 +320,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                     if res_p and hasattr(res_p, 'data') and res_p.data: 
                         dados_p_salvamento["id"] = res_p.data[0]["id"]
                     
+                    # 🔥 EFETIVAÇÃO REAL NAS TABELAS: Grava direto por ser custo zero ou menor
                     supabase.table("config_projetos").upsert(dados_p_salvamento).execute()
                     supabase.table("lancamentos").delete().eq("projeto_id", nome_plano_input).eq("usuario_id", uid_gestao).gt("data", st.session_state.tmp_fim_plano.strftime('%Y-%m-%d')).execute()
                     
@@ -328,7 +329,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
 
                     if 'tmp_fim_plano' in st.session_state: del st.session_state.tmp_fim_plano
                     st.session_state.projeto_ativo = nome_plano_input
-                    st.session_state.msg_sucesso = "🎉 Alterações aplicadas com sucesso! Seus créditos cobriram a mudança (Custo: R$ 0,00)."
+                    st.session_state.msg_sucesso = "🎉 Alterações aplicadas e salvas diretamente no banco com sucesso! Seus créditos cobriram a mudança (Custo: R$ 0,00)."
                     st.rerun()
                 except Exception as e:
                     st.error(f"Erro ao salvar plano: {e}")
@@ -357,7 +358,8 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         if tipo_pagamento != "Selecione uma opção...":
             dados_p_salvamento["tipo_renovacao"] = tipo_pagamento
 
-            # 🔥 O bloco inteiro destacado só aparece se houver valor > 0
+            # 🔥 RECONSTRUTURAÇÃO DA TRAVA DO BLOCO AMARELO:
+            # Tudo o que está aqui dentro fica 100% oculto na inicialização e só renderiza se o saldo devedor for maior que zero.
             if valor_final_faturar > 0:
                 st.subheader("💳 Finalizar Assinatura")
                 st.write("")
@@ -437,6 +439,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                     st.link_button("🔵 PAGAMENTO - IR P/ MERCADO PAGO", st.session_state.url_ativa, use_container_width=True)
             
             else:
+                # Exibição de feedback limpo e direto para quando a conta fecha em zero ou menos (reduções de plano/meses)
                 col_res1, col_res2 = st.columns([2, 1])
                 with col_res1:
                     st.write(f"**Total a pagar:** :green[R$ 0,00] (Crédito residual cobre as alterações)")
@@ -445,7 +448,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                         st.write(f"*(Sua validade atual de {venc_f} foi mantida intacta)*")
                     except: pass
                 with col_res2:
-                    st.info("💡 Salve no botão superior para confirmar.")
+                    st.info("💡 Clique em 'Salvar alterações...' acima para aplicar diretamente.")
         else:
             st.info("ℹ️ Escolha um período de renovação acima para prosseguir com a finalização da assinatura.")
     else:
