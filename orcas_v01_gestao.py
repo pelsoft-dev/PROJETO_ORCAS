@@ -7,7 +7,7 @@ from dateutil.relativedelta import relativedelta
 def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, format_moeda, parse_moeda, security):
     """
     Sub-rotina da Tela Gestão - Controle de Planos, Saldos e Assinatura.
-    Lógica de proteção baseada na comparação do custo mensal atual vs custo mensal anterior.
+    Lógica de proteção baseada na comparação do custo mensal atual vs custo mensal anterior E no tempo do período.
     """
     
     # --- 1. TRATAMENTO DO PERFIL DO UTILIZADOR E VALOR PAGO REAL ---
@@ -156,7 +156,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         relatorios_consolidar = dict(rels_banco)
         
         planos_consolidar[nome_plano_input] = meses_total_edit
-        relatorios_consolidar[nome_plano_input] = 1 if (ativar_zap_atual or ativar_email_atual) else 0
+        relatorios_consolidar[nome_plano_input] = 1 if (ativar_zap_atual or activar_email_atual) else 0
 
         qtd_total_planos = len(planos_consolidar)
         qtd_relatorios_totais = sum(relatorios_consolidar.values())
@@ -215,6 +215,19 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             index=idx_padrao,
             horizontal=True, key="radio_pag_final_v10"
         )
+
+        # 🆕 --- ADAPTAÇÃO: CÁLCULO DO PESO DO PERÍODO PARA DETECTAR UPGRADE DE TEMPO ---
+        meses_originais = 1
+        if "6 Meses" in tipo_renov_original:
+            meses_originais = 6
+        elif "12 Meses" in tipo_renov_original:
+            meses_originais = 12
+
+        meses_novos = 1
+        if "6 Meses" in tipo_pagamento:
+            meses_novos = 6
+        elif "12 Meses" in tipo_pagamento:
+            meses_novos = 12
 
         # --- 3. CRÉDITOS E CONVERSÕES FINANCEIRAS ---
         valor_final_faturar = 0.00
@@ -308,6 +321,10 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             "zap_ativo": bool(ativar_zap_atual),
             "email_ativo": 1 if ativar_email_atual else 0
         }
+        
+        # 🆕 Variável de apoio para verificar se houve de fato um upgrade real (Valor OU Tempo)
+        houve_upgrade_real = (v_mensal_total > ult_valor_mensal_lido) or (meses_novos > meses_originais)
+
         # --- COMPORTAMENTO DOS BOTÕES ---
         if btn_col1.button("Salvar alterações ou Criar o novo Plano", use_container_width=True):
             dados_p_salvamento["ult_valor_mensal"] = float(v_mensal_total)
@@ -315,7 +332,8 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             if tipo_pagamento == "Selecione uma opção...":
                 st.error("⚠️ Por favor, selecione um período de renovação abaixo para calcular se há valores a pagar antes de salvar.")
             
-            elif v_mensal_total <= ult_valor_mensal_lido:
+            # 🆕 ADAPTAÇÃO: Além de checar o valor mensal, valida se o período novo NÃO aumentou
+            elif v_mensal_total <= ult_valor_mensal_lido and meses_novos <= meses_originais:
                 try:
                     res_p = supabase.table("config_projetos").select("id").eq("projeto_id", nome_plano_input).eq("usuario_id", uid_gestao).execute()
                     if res_p and hasattr(res_p, 'data') and res_p.data: 
@@ -332,7 +350,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 except Exception as e:
                     st.error(f"Erro ao salvar plano: {e}")
             else:
-                # 🌟 Mudança solicitada: Ativa o gatilho para exibir o bloco amarelo pós-clique
+                # Se o valor mensal subiu OU se o tempo de contrato aumentou, exige o fluxo de pagamento
                 st.session_state.clicou_salvar_upgrade = True
 
         if st.session_state.get('projeto_ativo'):
@@ -352,10 +370,9 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 st.session_state.confirmar_exclusao_plano = False
                 st.rerun()
 
-        # --- CORREÇÃO DE EXIBIÇÃO: O bloco de assinatura amarelo SÓ aparece se houver upgrade real E após o clique ---
-        if st.session_state.get("clicou_salvar_upgrade", False) and v_mensal_total > ult_valor_mensal_lido:
+        # 🆕 --- CORREÇÃO DE EXIBIÇÃO: O bloco de assinatura amarelo SÓ aparece se houver upgrade real (Valor ou Tempo) E após o clique ---
+        if st.session_state.get("clicou_salvar_upgrade", False) and houve_upgrade_real:
             
-            # Bloco Amarelo reposicionado para aparecer estritamente após a tentativa de salvamento
             st.markdown(
                 f"""
                 <div style="color: #856404; background-color: #fff3cd; border-color: #ffeeba; padding: 15px; border: 1px solid transparent; border-radius: 4px; margin-top: 15px; margin-bottom: 15px; font-family: sans-serif;">
@@ -397,7 +414,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
 
             valor_final_faturar = max(valor_final_faturar - desc_extra, 0.00)
             
-            # Caso a subtração zere o valor final, assumimos a condição de 100% off
             if valor_final_faturar == 0.00:
                 is_cupom_100 = True
 
@@ -421,29 +437,22 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             
             with col_res2:
                 if is_cupom_100:
-                    # 🚀 ROTA DO CUPOM 100% (Desaparece botão tradicional e entra o botão de liberação direta no Banco)
                     if st.button("✅ CONCLUIR ASSINATURA GRÁTIS", use_container_width=True, type="primary"):
                         try:
-                            # 1. Realiza o Upsert das configurações do projeto modificado
                             res_p = supabase.table("config_projetos").select("id").eq("projeto_id", nome_plano_input).eq("usuario_id", uid_gestao).execute()
                             if res_p and hasattr(res_p, 'data') and res_p.data: 
                                 dados_p_salvamento["id"] = res_p.data[0]["id"]
                             
                             dados_p_salvamento["ult_valor_mensal"] = float(v_mensal_total)
                             
-                            # =======================================================================
-                            # 🔥 CORREÇÃO AQUI: Removemos o 'tipo_renovacao' para não quebrar o config_projetos
-                            # =======================================================================
                             if "tipo_renovacao" in dados_p_salvamento:
                                 del dados_p_salvamento["tipo_renovacao"]
                             
                             supabase.table("config_projetos").upsert(dados_p_salvamento).execute()
                             
-                            # 2. Atualiza os dados do usuário direto para o novo período
-                            # (Aqui sim enviamos o tipo_renovacao, pois a tabela 'usuarios' possui essa coluna!)
                             supabase.table("usuarios").update({
                                 "vencimento": recalculo_expiracao,
-                                "tipo_renovacao": str(tipo_pagamento), # <-- Mantido aqui na tabela correta
+                                "tipo_renovacao": str(tipo_pagamento), 
                                 "valor_pago": 0.00,
                                 "data_ult_assinat": hoje.strftime('%Y-%m-%d')
                             }).eq("id", uid_gestao).execute()
@@ -451,12 +460,11 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                             if 'tmp_fim_plano' in st.session_state: del st.session_state.tmp_fim_plano
                             if 'clicou_salvar_upgrade' in st.session_state: del st.session_state.clicou_salvar_upgrade
                             st.session_state.projeto_ativo = nome_plano_input
-                            st.session_state.msg_sucesso = "🎉 Plano e assinatura atualizados com sucesso através da bonificação do Cupom!"
+                            st.session_state.msg_sucesso = "🎉 Plano e assinatura updated com sucesso através da bonificação do Cupom!"
                             st.rerun()
                         except Exception as e:
                             st.error(f"Erro ao processar validação do cupom gratuito: {e}")
                 else:
-                    # ROTA PADRÃO (Com valor a pagar)
                     if st.button("🚀 GERAR LINK DE PAGAMENTO", use_container_width=True):
                         with st.spinner("Preparando fatura segura..."):
                             plano_para_vincular = nome_plano_input.strip() if nome_plano_input else "Plano"
@@ -496,7 +504,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                                         "data_ini": dados_p_salvamento.get("data_ini"),
                                         "data_fim": dados_p_salvamento.get("data_fim"),
                                         "zap_ativo": bool(ativar_zap_atual),
-                                        "email_ativo": int(1 if ativar_email_atual else 0),
+                                        "email_ativo": int(1 if activar_email_atual else 0),
                                         "tipo_renovacao": str(tipo_pagamento),
                                         "ult_valor_mensal": float(v_mensal_total)
                                     }).execute()
@@ -508,7 +516,8 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             if "url_ativa" in st.session_state and not is_cupom_100:
                 st.link_button("🔵 PAGAMENTO - IR P/ MERCADO PAGO", st.session_state.url_ativa, use_container_width=True)
         
-        elif tipo_pagamento != "Selecione uma opção..." and v_mensal_total <= ult_valor_mensal_lido:
+        # 🆕 ADAPTAÇÃO: Banner informativo agora só aparece se não houver upgrade real algum (nem valor, nem tempo)
+        elif tipo_pagamento != "Selecione uma opção..." and not houve_upgrade_real:
             st.info("ℹ️ Este plano está coberto pela sua assinatura atual. Não há valores adicionais a pagar.")
             
     else:
