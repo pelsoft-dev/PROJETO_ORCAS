@@ -305,10 +305,9 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             "saldo_inicial": parse_moeda(saldo_input),
             "data_ini": d_ini_g.strftime('%Y-%m-%d'), 
             "data_fim": st.session_state.tmp_fim_plano.strftime('%Y-%m-%d'),
-            "zap_ativo": 1 if ativar_zap_atual else 0,
+            "zap_ativo": bool(ativar_zap_atual),
             "email_ativo": 1 if ativar_email_atual else 0
         }
-
         # --- COMPORTAMENTO DOS BOTÕES ---
         if btn_col1.button("Salvar alterações ou Criar o novo Plano", use_container_width=True):
             dados_p_salvamento["ult_valor_mensal"] = float(v_mensal_total)
