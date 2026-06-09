@@ -305,8 +305,8 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             "saldo_inicial": parse_moeda(saldo_input),
             "data_ini": d_ini_g.strftime('%Y-%m-%d'), 
             "data_fim": st.session_state.tmp_fim_plano.strftime('%Y-%m-%d'),
-            "zap_ativo": 1 if activar_zap_atual else 0,
-            "email_ativo": 1 if activar_email_atual else 0
+            "zap_ativo": 1 if ativar_zap_atual else 0,
+            "email_ativo": 1 if ativar_email_atual else 0
         }
 
         # --- COMPORTAMENTO DOS BOTÕES ---
@@ -487,8 +487,8 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                                         "projeto_id": plano_para_vincular,
                                         "data_ini": dados_p_salvamento.get("data_ini"),
                                         "data_fim": dados_p_salvamento.get("data_fim"),
-                                        "zap_ativo": 1 if activar_zap_atual else 0,
-                                        "email_ativo": 1 if activar_email_atual else 0,
+                                        "zap_ativo": bool(ativar_zap_atual),
+                                        "email_ativo": int(1 if ativar_email_atual else 0),
                                         "tipo_renovacao": str(tipo_pagamento),
                                         "ult_valor_mensal": float(v_mensal_total)
                                     }).execute()
