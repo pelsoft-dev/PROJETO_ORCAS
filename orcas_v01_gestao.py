@@ -428,13 +428,22 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                             res_p = supabase.table("config_projetos").select("id").eq("projeto_id", nome_plano_input).eq("usuario_id", uid_gestao).execute()
                             if res_p and hasattr(res_p, 'data') and res_p.data: 
                                 dados_p_salvamento["id"] = res_p.data[0]["id"]
+                            
                             dados_p_salvamento["ult_valor_mensal"] = float(v_mensal_total)
+                            
+                            # =======================================================================
+                            # 🔥 CORREÇÃO AQUI: Removemos o 'tipo_renovacao' para não quebrar o config_projetos
+                            # =======================================================================
+                            if "tipo_renovacao" in dados_p_salvamento:
+                                del dados_p_salvamento["tipo_renovacao"]
+                            
                             supabase.table("config_projetos").upsert(dados_p_salvamento).execute()
                             
-                            # 2. Atualiza os dados do usuário direto para o novo período, zerando valores de cobrança externa
+                            # 2. Atualiza os dados do usuário direto para o novo período
+                            # (Aqui sim enviamos o tipo_renovacao, pois a tabela 'usuarios' possui essa coluna!)
                             supabase.table("usuarios").update({
                                 "vencimento": recalculo_expiracao,
-                                "tipo_renovacao": str(tipo_pagamento),
+                                "tipo_renovacao": str(tipo_pagamento), # <-- Mantido aqui na tabela correta
                                 "valor_pago": 0.00,
                                 "data_ult_assinat": hoje.strftime('%Y-%m-%d')
                             }).eq("id", uid_gestao).execute()
