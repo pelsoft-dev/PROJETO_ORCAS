@@ -7,11 +7,10 @@ from dateutil.relativedelta import relativedelta
 def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, format_moeda, parse_moeda, security):
     """
     Sub-rotina da Tela Gestão - Controle de Planos, Saldos e Assinatura.
-    Lógica de proteção baseada na comparação do custo mensal atual vs custo mensal anterior E no tempo do período.
     """
     
     # --- 1. TRATAMENTO DO PERFIL DO UTILIZADOR E VALOR PAGO REAL ---
-    tipo_renov_original = "6 Meses"
+    tipo_renov_original = "Mensal"
     vencimento_atual_str = None
     valor_pago_real = 0.00
     data_ult_assinat_real = None
@@ -31,10 +30,10 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             if val_db is not None:
                 tipo_renov_original = str(val_db).strip()
     except Exception:
-        tipo_renov_original = "6 Meses"
+        tipo_renov_original = "Mensal"
 
     if not tipo_renov_original:
-        tipo_renov_original = "6 Meses"
+        tipo_renov_original = "Mensal"
 
     st.markdown('<div class="titulo-tela">Gestão de Planos e Assinaturas</div>', unsafe_allow_html=True)
     
@@ -55,6 +54,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         st.session_state.escolha = "⚙️ Gestão" 
         if 'tmp_fim_plano' in st.session_state: del st.session_state.tmp_fim_plano
         if 'clicou_salvar_upgrade' in st.session_state: del st.session_state.clicou_salvar_upgrade
+        if 'tipo_pagamento_selecionado' in st.session_state: del st.session_state.tipo_pagamento_selecionado
         st.rerun()
 
     nome_plano_input = col_l1_2.text_input(
@@ -83,9 +83,8 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         if meses_atuais not in [24, 36, 48, 60]:
             meses_atuais = 24
 
-        # 🎯 INTERCEPTAÇÃO: Se o pagamento acabou de ser feito, força o slider a marcar o valor correto
         if st.session_state.get("pagamento_realizado_sucesso") and st.session_state.get("meses_comprados"):
-            if st.session_state.meses_comprados == 36 or meses_total_edit == 36:
+            if st.session_state.meses_comprados == 36:
                 meses_atuais = 36
 
         with col_btn_per:
@@ -111,7 +110,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         
         res_cfg_plano = supabase.table("config_projetos").select("*").eq("projeto_id", nome_plano_input).eq("usuario_id", uid_gestao).execute()
         
-        # --- (1) Leitura do ult_valor_mensal direto do plano carregado ---
         ult_valor_mensal_lido = 0.00
         if res_cfg_plano.data and len(res_cfg_plano.data) > 0:
             ult_valor_mensal_lido = float(res_cfg_plano.data[0].get('ult_valor_mensal') or 0.00)
@@ -124,7 +122,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             d2_orig = datetime.strptime(res_cfg_plano.data[0]['data_fim'], '%Y-%m-%d').date()
             meses_originais_db = (d2_orig.year - d1_orig.year) * 12 + (d2_orig.month - d1_orig.month) + 1
         
-        # 🎯 INTERCEPTAÇÃO DOS CHECKBOXES
         if st.session_state.get("pagamento_realizado_sucesso"):
             ativar_zap_val = False
             ativar_email_val = True
@@ -140,7 +137,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             ativar_zap_atual = st.checkbox("Adicionar o Resumo Diário ORCAS via Whatsapp", value=ativar_zap_val)
             ativar_email_atual = st.checkbox("Adicionar o Resumo Diário ORCAS via E-mail", value=ativar_email_val)
         
-        # --- 2. POSICIONAMENTO E MAPEAMENTO DE CUSTOS ---
         res_all = supabase.table("config_projetos").select("*").eq("usuario_id", uid_gestao).execute()
         dados_db = res_all.data if res_all.data else []
         
@@ -156,7 +152,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         relatorios_consolidar = dict(rels_banco)
         
         planos_consolidar[nome_plano_input] = meses_total_edit
-        relatorios_consolidar[nome_plano_input] = 1 if (ativar_zap_atual or activar_email_atual) else 0
+        relatorios_consolidar[nome_plano_input] = 1 if (ativar_zap_atual or ativar_email_atual) else 0
 
         qtd_total_planos = len(planos_consolidar)
         qtd_relatorios_totais = sum(relatorios_consolidar.values())
@@ -178,7 +174,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         v_6meses = (v_mensal_total * 6) * 0.95
         v_12meses = (v_mensal_total * 12) * 0.89 
 
-        # --- QUADRO RESUMO AZUL ---
         resumo_html = f"""
         <div style="background-color: #87CEFA; padding: 15px; border-radius: 5px; color: black; font-family: sans-serif; border: 1px solid #1E90FF;">
             <div style="font-weight: bold; font-size: 16px; margin-bottom: 10px;">Valor da Assinatura Mensal: R$ {format_moeda(v_mensal_total)}</div>
@@ -202,29 +197,32 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
 
         st.write("")
 
-        # ⚙️ ALTERAÇÃO ESTRATÉGICA: Começa sempre em "Selecione uma opção..." (index=0)
-        # Isso força o usuário a escolher e garante que a mudança seja computada em tempo de execução.
+        # 🔄 CONTROLE DE ESTADO DO RÁDIO: Lembra o que o usuário escolheu após o clique do botão
         opcoes_radio = ["Selecione uma opção...", "Mensal (Sem desconto)", "6 Meses (5% de desconto)", "12 Meses (11% de desconto)"]
+        
+        if "tipo_pagamento_selecionado" not in st.session_state:
+            st.session_state.tipo_pagamento_selecionado = "Selecione uma opção..."
+
+        idx_radio = 0
+        if st.session_state.tipo_pagamento_selecionado in opcoes_radio:
+            idx_radio = opcoes_radio.index(st.session_state.tipo_pagamento_selecionado)
 
         tipo_pagamento = st.radio(
             "Escolha o período de renovação:",
             opcoes_radio,
-            index=0,
+            index=idx_radio,
             horizontal=True, key="radio_pag_final_v10"
         )
+        st.session_state.tipo_pagamento_selecionado = tipo_pagamento
 
         # --- CÁLCULO DOS PESOS DE PERÍODO ---
         meses_originais = 1
-        if "6 Meses" in tipo_renov_original:
-            meses_originais = 6
-        elif "12 Meses" in tipo_renov_original:
-            meses_originais = 12
+        if "6 Meses" in tipo_renov_original: meses_originais = 6
+        elif "12 Meses" in tipo_renov_original: meses_originais = 12
 
         meses_novos = 1
-        if "6 Meses" in tipo_pagamento:
-            meses_novos = 6
-        elif "12 Meses" in tipo_pagamento:
-            meses_novos = 12
+        if "6 Meses" in tipo_pagamento: meses_novos = 6
+        elif "12 Meses" in tipo_pagamento: meses_novos = 12
 
         # --- 3. CRÉDITOS E CONVERSÕES FINANCEIRAS ---
         valor_final_faturar = 0.00
@@ -259,16 +257,9 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
 
             dias_restantes = (venc_date - hoje).days if venc_date > hoje else 0
             
-            dias_totais_ciclo = 180
-            if data_ult_assinat_real and venc_date > data_ult_assinat_real:
-                dias_totais_ciclo = (venc_date - data_ult_assinat_real).days
-            else:
-                if "6 Meses" in tipo_renov_original: dias_totais_ciclo = 180
-                elif "12 Meses" in tipo_renov_original: dias_totais_ciclo = 365
-                else: dias_totais_ciclo = 30
-            
-            if dias_totais_ciclo <= 0:
-                dias_totais_ciclo = 30
+            dias_totais_ciclo = 30
+            if "6 Meses" in tipo_renov_original: dias_totais_ciclo = 180
+            elif "12 Meses" in tipo_renov_original: dias_totais_ciclo = 365
 
             if valor_pago_real > 0:
                 valor_diario_real = valor_pago_real / dias_totais_ciclo
@@ -286,7 +277,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                     f"""
                     <div style="color: #856404; background-color: #fff3cd; border-color: #ffeeba; padding: 15px; border: 1px solid transparent; border-radius: 4px; margin-top: 15px; margin-bottom: 15px; font-family: sans-serif; text-align: justify;">
                         ⚠️ <b>Aviso de Aproveitamento de Saldo:</b><br>
-                        Como o systema trabalha com opções fechadas, optando por uma renovação Mensal com créditos ativos, você terá este mês sem custos, mas perderá um saldo residual de <b>R$ {format_moeda(saldo_perdido_exibir)}</b>. Fazendo uma renovação Semestral, utiliza integralmente esse saldo e pagará apenas a diferença de <b>R$ {format_moeda(diferenca_semestral_exibir)}</b>.
+                        Como o sistema trabalha com opções fechadas, optando por uma renovação Mensal com créditos ativos, você terá este mês sem custos, mas perderá um saldo residual de <b>R$ {format_moeda(saldo_perdido_exibir)}</b>. Fazendo uma renovação Semestral, utiliza integralmente esse saldo e pagará apenas a diferença de <b>R$ {format_moeda(diferenca_semestral_exibir)}</b>.
                     </div>
                     """,
                     unsafe_allow_html=True
@@ -319,7 +310,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             "email_ativo": 1 if ativar_email_atual else 0
         }
         
-        # Define se de fato há um upgrade financeiro ou temporal rodando
+        # ⚡ NOVA CORREÇÃO CRÍTICA: Houve upgrade se o custo aumentou OU se o período selecionado no rádio é maior que o original
         houve_upgrade_real = (v_mensal_total > ult_valor_mensal_lido) or (tipo_pagamento != "Selecione uma opção..." and meses_novos > meses_originais)
 
         # --- COMPORTAMENTO DOS BOTÕES ---
@@ -329,6 +320,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             if tipo_pagamento == "Selecione uma opção...":
                 st.error("⚠️ Por favor, selecione um período de renovação abaixo para calcular se há valores a pagar antes de salvar.")
             
+            # Se não aumentou o valor E não aumentou o período (meses), salva direto
             elif v_mensal_total <= ult_valor_mensal_lido and meses_novos <= meses_originais:
                 try:
                     res_p = supabase.table("config_projetos").select("id").eq("projeto_id", nome_plano_input).eq("usuario_id", uid_gestao).execute()
@@ -340,13 +332,16 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                     
                     if 'tmp_fim_plano' in st.session_state: del st.session_state.tmp_fim_plano
                     if 'clicou_salvar_upgrade' in st.session_state: del st.session_state.clicou_salvar_upgrade
+                    if 'tipo_pagamento_selecionado' in st.session_state: del st.session_state.tipo_pagamento_selecionado
                     st.session_state.projeto_ativo = nome_plano_input
-                    st.session_state.msg_sucesso = "🎉 Alterações aplicadas com sucesso! Seu plano atual está coberto (Custo mensal não aumentou)."
+                    st.session_state.msg_sucesso = "🎉 Alterações aplicadas com sucesso! Seu plano atual está coberto."
                     st.rerun()
                 except Exception as e:
                     st.error(f"Erro ao salvar plano: {e}")
             else:
+                # Dispara o gatilho para abrir a seção amarela de pagamento
                 st.session_state.clicou_salvar_upgrade = True
+                st.rerun()
 
         if st.session_state.get('projeto_ativo'):
             if btn_col2.button("Excluir Plano", type="primary", use_container_width=True):
@@ -365,13 +360,13 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 st.session_state.confirmar_exclusao_plano = False
                 st.rerun()
 
-        # --- SEÇÃO DE FECHAMENTO FINANCEIRO ---
+        # --- SEÇÃO DE FECHAMENTO FINANCEIRO (BLOCO AMARELO) ---
         if st.session_state.get("clicou_salvar_upgrade", False) and houve_upgrade_real:
             
             st.markdown(
                 f"""
                 <div style="color: #856404; background-color: #fff3cd; border-color: #ffeeba; padding: 15px; border: 1px solid transparent; border-radius: 4px; margin-top: 15px; margin-bottom: 15px; font-family: sans-serif;">
-                    ⚠️ <b>Esta alteração altera o valor da sua licença.</b> Utilize o bloco de fechamento abaixo para validar e concluir o pagamento.
+                    ⚠️ <b>Esta alteração altera o valor ou o período da sua licença.</b> Utilize o bloco de fechamento abaixo para concluir o pagamento de upgrade.
                 </div>
                 """, 
                 unsafe_allow_html=True
@@ -408,7 +403,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 except: pass
 
             valor_final_faturar = max(valor_final_faturar - desc_extra, 0.00)
-            
             if valor_final_faturar == 0.00:
                 is_cupom_100 = True
 
@@ -454,16 +448,16 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                             
                             if 'tmp_fim_plano' in st.session_state: del st.session_state.tmp_fim_plano
                             if 'clicou_salvar_upgrade' in st.session_state: del st.session_state.clicou_salvar_upgrade
+                            if 'tipo_pagamento_selecionado' in st.session_state: del st.session_state.tipo_pagamento_selecionado
                             st.session_state.projeto_ativo = nome_plano_input
-                            st.session_state.msg_sucesso = "🎉 Plano e assinatura atualizados com sucesso através da bonificação do Cupom!"
+                            st.session_state.msg_sucesso = "🎉 Assinatura atualizada com sucesso via Cupom!"
                             st.rerun()
                         except Exception as e:
-                            st.error(f"Erro ao processar validação do cupom gratuito: {e}")
+                            st.error(f"Erro ao processar validação gratuita: {e}")
                 else:
                     if st.button("🚀 GERAR LINK DE PAGAMENTO", use_container_width=True):
                         with st.spinner("Preparando fatura segura..."):
                             plano_para_vincular = nome_plano_input.strip() if nome_plano_input else "Plano"
-                            
                             import orcas_v01_pagamentos as pag
                             email_user = st.session_state.get('usuario_email', "cliente@email.com")
 
@@ -487,7 +481,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                                 
                                 try:
                                     id_filtro = str(ID_USUARIO_LOGADO).strip()
-                                
                                     supabase.table("pagamentos_temp").delete().eq("usuario_id", id_filtro).execute()
                                 
                                     supabase.table("pagamentos_temp").insert({
@@ -499,7 +492,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                                         "data_ini": dados_p_salvamento.get("data_ini"),
                                         "data_fim": dados_p_salvamento.get("data_fim"),
                                         "zap_ativo": bool(ativar_zap_atual),
-                                        "email_ativo": int(1 if activar_email_atual else 0),
+                                        "email_ativo": int(1 if ativar_email_atual else 0),
                                         "tipo_renovacao": str(tipo_pagamento),
                                         "ult_valor_mensal": float(v_mensal_total)
                                     }).execute()
@@ -519,6 +512,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
 
     st.markdown("""
     <div style="font-size: 12px; color: #333; margin-top: 20px; text-align: justify; line-height: 1.6; border-top: 1px solid #eee; padding-top: 10px;">
-    Sua Assinatura ORCAS BABY mensal custa R$ 19,90 e contempla 2 Planos de 24 meses cada um, mas se você quiser ou necessitar, é possível aumentar o período de um Plano em blocos adicionais of 12 meses tendo um acréscimo de R$ 6,40 para cada 12 meses adicionais. Para aumentar o número de Planos (Padrão - 24 meses), o valor é de R$ 12,80 por Plano adicional. Para receber um Resumo Diário das análises e pendências como, o que preciso pagar e receber hoje, o que ainda está em aberto, quanto já gastei de supermercado até hoje, quanto já gastei nessa reforma, etc de seu Plano via Whatsapp ou E-mail terá um acréscimo de R$ 9,85 por Plano.
+    Sua Assinatura ORCAS BABY mensal custa R$ 19,90 e contempla 2 Planos de 24 meses cada um, mas se você quiser ou necessitar, é possível aumentar o período de um Plano em blocos adicionais de 12 meses tendo um acréscimo de R$ 6,40 para cada 12 meses adicionais. Para aumentar o número de Planos (Padrão - 24 meses), o valor é de R$ 12,80 por Plano adicional. Para receber um Resumo Diário das análises e pendências como, o que preciso pagar e receber hoje, o que ainda está em aberto, quanto já gastei de supermercado até hoje, quanto já gastei nessa reforma, etc de seu Plano via Whatsapp ou E-mail terá um acréscimo de R$ 9,85 por Plano.
     </div>
     """, unsafe_allow_html=True)
