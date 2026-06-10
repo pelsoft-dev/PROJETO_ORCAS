@@ -32,7 +32,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
     except Exception:
         tipo_renov_original = "Mensal"
 
-    if not tipo_renov_original:
+    if not tipo_renov_original or tipo_renov_original == "Selecione uma opção...":
         tipo_renov_original = "Mensal"
 
     st.markdown('<div class="titulo-tela">Gestão de Planos e Assinaturas</div>', unsafe_allow_html=True)
@@ -197,15 +197,20 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
 
         st.write("")
 
-        # 🔄 CONTROLE DE ESTADO DO RÁDIO: Lembra o que o usuário escolheu após o clique do botão
+        # 🔄 SINCRONISMO INTELIGENTE COM PERSISTÊNCIA DE ESTADO
         opcoes_radio = ["Selecione uma opção...", "Mensal (Sem desconto)", "6 Meses (5% de desconto)", "12 Meses (11% de desconto)"]
         
         if "tipo_pagamento_selecionado" not in st.session_state:
-            st.session_state.tipo_pagamento_selecionado = "Selecione uma opção..."
+            idx_padrao = 0
+            if "Mensal" in tipo_renov_original: idx_padrao = 1
+            elif "6 Meses" in tipo_renov_original: idx_padrao = 2
+            elif "12 Meses" in tipo_renov_original: idx_padrao = 3
+            st.session_state.tipo_pagamento_selecionado = opcoes_radio[idx_padrao]
 
-        idx_radio = 0
-        if st.session_state.tipo_pagamento_selecionado in opcoes_radio:
+        try:
             idx_radio = opcoes_radio.index(st.session_state.tipo_pagamento_selecionado)
+        except ValueError:
+            idx_radio = 0
 
         tipo_pagamento = st.radio(
             "Escolha o período de renovação:",
@@ -215,7 +220,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         )
         st.session_state.tipo_pagamento_selecionado = tipo_pagamento
 
-        # --- CÁLCULO DOS PESOS DE PERÍODO ---
+        # --- CÁLCULO DOS PESOS DE PERÍODO (RENOVACAO) ---
         meses_originais = 1
         if "6 Meses" in tipo_renov_original: meses_originais = 6
         elif "12 Meses" in tipo_renov_original: meses_originais = 12
@@ -310,7 +315,8 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             "email_ativo": 1 if ativar_email_atual else 0
         }
         
-        # ⚡ NOVA CORREÇÃO CRÍTICA: Houve upgrade se o custo aumentou OU se o período selecionado no rádio é maior que o original
+        # ⚡ DETECÇÃO EXPLICITA DE UPGRADE FINANCEIRO OU DE PERÍODO DE RENOVAÇÃO
+        # Se o custo mensal atual aumentou OU se o usuário escolheu no rádio mais meses do que tinha salvo originalmente
         houve_upgrade_real = (v_mensal_total > ult_valor_mensal_lido) or (tipo_pagamento != "Selecione uma opção..." and meses_novos > meses_originais)
 
         # --- COMPORTAMENTO DOS BOTÕES ---
@@ -320,7 +326,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             if tipo_pagamento == "Selecione uma opção...":
                 st.error("⚠️ Por favor, selecione um período de renovação abaixo para calcular se há valores a pagar antes de salvar.")
             
-            # Se não aumentou o valor E não aumentou o período (meses), salva direto
+            # Se NÃO mudou pra mais meses E o custo mensal não subiu, salva direto.
             elif v_mensal_total <= ult_valor_mensal_lido and meses_novos <= meses_originais:
                 try:
                     res_p = supabase.table("config_projetos").select("id").eq("projeto_id", nome_plano_input).eq("usuario_id", uid_gestao).execute()
@@ -339,7 +345,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 except Exception as e:
                     st.error(f"Erro ao salvar plano: {e}")
             else:
-                # Dispara o gatilho para abrir a seção amarela de pagamento
+                # 🎯 Força o bloco de pagamento (Upgrade) a ser renderizado imediatamente
                 st.session_state.clicou_salvar_upgrade = True
                 st.rerun()
 
@@ -360,13 +366,13 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 st.session_state.confirmar_exclusao_plano = False
                 st.rerun()
 
-        # --- SEÇÃO DE FECHAMENTO FINANCEIRO (BLOCO AMARELO) ---
+        # --- SEÇÃO DE FECHAMENTO FINANCEIRO (BLOCO AMARELO COBRANÇA) ---
         if st.session_state.get("clicou_salvar_upgrade", False) and houve_upgrade_real:
             
             st.markdown(
                 f"""
                 <div style="color: #856404; background-color: #fff3cd; border-color: #ffeeba; padding: 15px; border: 1px solid transparent; border-radius: 4px; margin-top: 15px; margin-bottom: 15px; font-family: sans-serif;">
-                    ⚠️ <b>Esta alteração altera o valor ou o período da sua licença.</b> Utilize o bloco de fechamento abaixo para concluir o pagamento de upgrade.
+                    ⚠️ <b>Esta alteração altera o valor ou o período da sua licença ({tipo_renov_original} ➡️ {tipo_pagamento}).</b> Utilize o bloco de fechamento abaixo para concluir o pagamento de upgrade.
                 </div>
                 """, 
                 unsafe_allow_html=True
@@ -450,7 +456,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                             if 'clicou_salvar_upgrade' in st.session_state: del st.session_state.clicou_salvar_upgrade
                             if 'tipo_pagamento_selecionado' in st.session_state: del st.session_state.tipo_pagamento_selecionado
                             st.session_state.projeto_ativo = nome_plano_input
-                            st.session_state.msg_sucesso = "🎉 Assinatura atualizada com sucesso via Cupom!"
+                            st.session_state.msg_sucesso = "🎉 Assinatura e planos atualizados com sucesso via benefício do Cupom!"
                             st.rerun()
                         except Exception as e:
                             st.error(f"Erro ao processar validação gratuita: {e}")
