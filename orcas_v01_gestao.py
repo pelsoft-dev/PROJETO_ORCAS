@@ -202,21 +202,18 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
 
         st.write("")
 
-        # ⚙️ SINCRONISMO DO TIPO DE RENOVAÇÃO DA TABELA USUÁRIOS
+        # ⚙️ ALTERAÇÃO ESTRATÉGICA: Começa sempre em "Selecione uma opção..." (index=0)
+        # Isso força o usuário a escolher e garante que a mudança seja computada em tempo de execução.
         opcoes_radio = ["Selecione uma opção...", "Mensal (Sem desconto)", "6 Meses (5% de desconto)", "12 Meses (11% de desconto)"]
-        idx_padrao = 0
-        if "Mensal" in tipo_renov_original: idx_padrao = 1
-        elif "6 Meses" in tipo_renov_original: idx_padrao = 2
-        elif "12 Meses" in tipo_renov_original: idx_padrao = 3
 
         tipo_pagamento = st.radio(
             "Escolha o período de renovação:",
             opcoes_radio,
-            index=idx_padrao,
+            index=0,
             horizontal=True, key="radio_pag_final_v10"
         )
 
-        # 🆕 --- ADAPTAÇÃO: CÁLCULO DO PESO DO PERÍODO PARA DETECTAR UPGRADE DE TEMPO ---
+        # --- CÁLCULO DOS PESOS DE PERÍODO ---
         meses_originais = 1
         if "6 Meses" in tipo_renov_original:
             meses_originais = 6
@@ -322,8 +319,8 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             "email_ativo": 1 if ativar_email_atual else 0
         }
         
-        # 🆕 Variável de apoio para verificar se houve de fato um upgrade real (Valor OU Tempo)
-        houve_upgrade_real = (v_mensal_total > ult_valor_mensal_lido) or (meses_novos > meses_originais)
+        # Define se de fato há um upgrade financeiro ou temporal rodando
+        houve_upgrade_real = (v_mensal_total > ult_valor_mensal_lido) or (tipo_pagamento != "Selecione uma opção..." and meses_novos > meses_originais)
 
         # --- COMPORTAMENTO DOS BOTÕES ---
         if btn_col1.button("Salvar alterações ou Criar o novo Plano", use_container_width=True):
@@ -332,7 +329,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             if tipo_pagamento == "Selecione uma opção...":
                 st.error("⚠️ Por favor, selecione um período de renovação abaixo para calcular se há valores a pagar antes de salvar.")
             
-            # 🆕 ADAPTAÇÃO: Além de checar o valor mensal, valida se o período novo NÃO aumentou
             elif v_mensal_total <= ult_valor_mensal_lido and meses_novos <= meses_originais:
                 try:
                     res_p = supabase.table("config_projetos").select("id").eq("projeto_id", nome_plano_input).eq("usuario_id", uid_gestao).execute()
@@ -350,7 +346,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 except Exception as e:
                     st.error(f"Erro ao salvar plano: {e}")
             else:
-                # Se o valor mensal subiu OU se o tempo de contrato aumentou, exige o fluxo de pagamento
                 st.session_state.clicou_salvar_upgrade = True
 
         if st.session_state.get('projeto_ativo'):
@@ -370,7 +365,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 st.session_state.confirmar_exclusao_plano = False
                 st.rerun()
 
-        # 🆕 --- CORREÇÃO DE EXIBIÇÃO: O bloco de assinatura amarelo SÓ aparece se houver upgrade real (Valor ou Tempo) E após o clique ---
+        # --- SEÇÃO DE FECHAMENTO FINANCEIRO ---
         if st.session_state.get("clicou_salvar_upgrade", False) and houve_upgrade_real:
             
             st.markdown(
@@ -460,7 +455,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                             if 'tmp_fim_plano' in st.session_state: del st.session_state.tmp_fim_plano
                             if 'clicou_salvar_upgrade' in st.session_state: del st.session_state.clicou_salvar_upgrade
                             st.session_state.projeto_ativo = nome_plano_input
-                            st.session_state.msg_sucesso = "🎉 Plano e assinatura updated com sucesso através da bonificação do Cupom!"
+                            st.session_state.msg_sucesso = "🎉 Plano e assinatura atualizados com sucesso através da bonificação do Cupom!"
                             st.rerun()
                         except Exception as e:
                             st.error(f"Erro ao processar validação do cupom gratuito: {e}")
@@ -516,7 +511,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             if "url_ativa" in st.session_state and not is_cupom_100:
                 st.link_button("🔵 PAGAMENTO - IR P/ MERCADO PAGO", st.session_state.url_ativa, use_container_width=True)
         
-        # 🆕 ADAPTAÇÃO: Banner informativo agora só aparece se não houver upgrade real algum (nem valor, nem tempo)
         elif tipo_pagamento != "Selecione uma opção..." and not houve_upgrade_real:
             st.info("ℹ️ Este plano está coberto pela sua assinatura atual. Não há valores adicionais a pagar.")
             
@@ -525,6 +519,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
 
     st.markdown("""
     <div style="font-size: 12px; color: #333; margin-top: 20px; text-align: justify; line-height: 1.6; border-top: 1px solid #eee; padding-top: 10px;">
-    Sua Assinatura ORCAS BABY mensal custa R$ 19,90 e contempla 2 Planos de 24 meses cada um, mas se você quiser ou necessitar, é possível aumentar o período de um Plano em blocos adicionais de 12 meses tendo um acréscimo de R$ 6,40 para cada 12 meses adicionais. Para aumentar o número de Planos (Padrão - 24 meses), o valor é de R$ 12,80 por Plano adicional. Para receber um Resumo Diário das análises e pendências como, o que preciso pagar e receber hoje, o que ainda está em aberto, quanto já gastei de supermercado até hoje, quanto já gastei nessa reforma, etc de seu Plano via Whatsapp ou E-mail terá um acréscimo de R$ 9,85 por Plano.
+    Sua Assinatura ORCAS BABY mensal custa R$ 19,90 e contempla 2 Planos de 24 meses cada um, mas se você quiser ou necessitar, é possível aumentar o período de um Plano em blocos adicionais of 12 meses tendo um acréscimo de R$ 6,40 para cada 12 meses adicionais. Para aumentar o número de Planos (Padrão - 24 meses), o valor é de R$ 12,80 por Plano adicional. Para receber um Resumo Diário das análises e pendências como, o que preciso pagar e receber hoje, o que ainda está em aberto, quanto já gastei de supermercado até hoje, quanto já gastei nessa reforma, etc de seu Plano via Whatsapp ou E-mail terá um acréscimo de R$ 9,85 por Plano.
     </div>
     """, unsafe_allow_html=True)
