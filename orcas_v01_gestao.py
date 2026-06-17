@@ -300,8 +300,8 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             "saldo_inicial": parse_moeda(saldo_input),
             "data_ini": d_ini_g.strftime('%Y-%m-%d'), 
             "data_fim": st.session_state.tmp_fim_plano.strftime('%Y-%m-%d'),
-            "zap_ativo": 1 if activar_zap_atual else 0,
-            "email_ativo": 1 if activar_email_atual else 0
+            "zap_ativo": 1 if ativar_zap_atual else 0,
+            "email_ativo": 1 if ativar_email_atual else 0
         }
         
         houve_upgrade_real = (v_mensal_total > ult_valor_mensal_lido) or (tipo_pagamento != "Selecione uma opção..." and meses_novos > meses_originais)
