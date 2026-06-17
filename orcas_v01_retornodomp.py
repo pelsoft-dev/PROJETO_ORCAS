@@ -6,7 +6,7 @@ from dateutil.relativedelta import relativedelta
 def tratar_retorno(supabase, pref_id, status_retorno):
     """
     Processa o retorno utilizando a lógica de correspondência exata por plano
-    validada no script leeatu.py.
+    e centraliza o campo 'ult_valor_mensal' na tabela de usuários.
     """
     fuso_br = zoneinfo.ZoneInfo("America/Sao_Paulo")
     hoje_br = datetime.now(fuso_br).date()
@@ -19,8 +19,10 @@ def tratar_retorno(supabase, pref_id, status_retorno):
         return None
 
     try:
-        # Busca direcionada idêntica à sua lógica original
-        query_temp = supabase.table("pagamentos_temp").select("usuario_id, valor, projeto_id, tipo_renovacao, data_ini, data_fim, zap_ativo, email_ativo")
+        # 🗹 ADAPTADO: Incluído 'ult_valor_mensal' na busca da tabela temporária
+        query_temp = supabase.table("pagamentos_temp").select(
+            "usuario_id, valor, projeto_id, tipo_renovacao, data_ini, data_fim, zap_ativo, email_ativo, ult_valor_mensal"
+        )
         
         if plano_sessao:
             res_temp = query_temp.eq("projeto_id", plano_sessao).limit(1).execute()
@@ -40,8 +42,9 @@ def tratar_retorno(supabase, pref_id, status_retorno):
         v_data_fim = dados_frescos.get("data_fim")
         v_zap_ativo = dados_frescos.get("zap_ativo")
         v_email_ativo = dados_frescos.get("email_ativo")
+        v_ult_valor_mensal = dados_frescos.get("ult_valor_mensal", 0.0) # <-- Captura o valor mensal calculado
 
-        # Atualização da tabela config_projetos
+        # Atualização da tabela config_projetos (Apenas propriedades do plano)
         supabase.table("config_projetos").update({
             "data_ini": v_data_ini,
             "data_fim": v_data_fim,
@@ -60,11 +63,12 @@ def tratar_retorno(supabase, pref_id, status_retorno):
 
         nova_data_vencimento = (hoje_br + relativedelta(months=meses_comprados)).strftime("%Y-%m-%d")
 
-        # Atualiza dados cadastrais
+        # 🗹 ADAPTADO: Atualiza dados cadastrais incluindo o 'ult_valor_mensal' na tabela usuarios
         supabase.table("usuarios").update({
             "vencimento": nova_data_vencimento,
             "data_ult_assinat": hoje_string,
-            "valor_pago": float(valor_pago) if valor_pago else 0.0
+            "valor_pago": float(valor_pago) if valor_pago else 0.0,
+            "ult_valor_mensal": float(v_ult_valor_mensal) if v_ult_valor_mensal else 0.0  # <-- Gravando no local correto
         }).eq("id", uid_usuario).execute()
 
         # Atualiza tipo_renovacao
@@ -87,7 +91,7 @@ def tratar_retorno(supabase, pref_id, status_retorno):
                 "email": u["email"],
                 "vencimento": u["vencimento"],
                 "zap_ativo": v_zap_ativo,
-                "projeto_ativo": v_projeto_id
+                "projeto_active": v_projeto_id
             }
         return None
             
