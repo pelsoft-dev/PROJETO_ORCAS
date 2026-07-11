@@ -409,7 +409,7 @@ if not st.session_state.logado:
                             st.session_state.temp_user_data = {"nome": new_nome, "email": new_email, "celular": new_celular}
                             st.info(f"Código enviado para o e-mail {new_email}")
                             # --- CÓDIGO PROVISÓRIO DE TESTE (Criação de Conta - E-mail) ---
-                            # st.success(f"⚙️ [TESTE CRIAR CONTA] Código: **{codigo}**")   
+                            st.success(f"⚙️ [TESTE CRIAR CONTA - Especially for my son Diego] Código: **{codigo}**")   
                     else:
                         st.error("Preencha o campo E-mail para receber o código.")
                 
