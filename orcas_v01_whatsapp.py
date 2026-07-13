@@ -1,215 +1,209 @@
-import streamlit as st
-import pandas as pd
-from datetime import datetime, timedelta
-import zoneinfo
-import urllib.parse  # <-- Nativo: Para formatar o texto pro padrão de URL
-import webbrowser    # <-- Nativo: Para abrir o WhatsApp no seu navegador de graça
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+ORCAS SaaS - Módulo de Notificação Batch de Madrugada via WhatsApp
+Arquivo: orcas_v01_whatsapp.py
+"""
 
-# --- CONFIGURAÇÃO DA PÁGINA (FOCADO EM MOBILE) ---
-st.set_page_config(page_title="Orcas Zap", page_icon="💬", layout="centered")
+import sys
+import httpx
+import os
+import base64
+from datetime import datetime
+from supabase import create_client, Client
 
-st.markdown("""
-    <style>
-    .block-container { padding-top: 1rem; max-width: 450px; }
-    .zap-header { background-color: #075E54; color: white; padding: 15px; border-radius: 10px 10px 0 0; font-weight: bold; margin-bottom: 15px; }
-    .zap-card { background-color: #DCF8C6; padding: 12px; border-radius: 8px; margin-bottom: 10px; color: #303030; box-shadow: 1px 1px 2px rgba(0,0,0,0.1); }
-    .zap-alert { background-color: #FFE699; padding: 12px; border-radius: 8px; margin-bottom: 15px; color: #5C4300; font-size: 13px; font-weight: 500; }
-    </style>
-""", unsafe_allow_html=True)
+def executar_envio_diario():
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Iniciando processamento de notificações...")
 
+    # 1. Conexão Segura com o Supabase usando variáveis de ambiente ou arquivo local
+    try:
+        import streamlit as st
+        # Se executado em contexto que lê st.secrets
+        SUPABASE_URL = st.secrets["SUPABASE_URL"]
+        SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+        EVOLUTION_API_URL = st.secrets.get("EVOLUTION_API_URL", "http://localhost:8080")
+        EVOLUTION_API_KEY = st.secrets.get("EVOLUTION_API_KEY", "SUA_API_KEY_AQUI")
+        EVOLUTION_INSTANCE = st.secrets.get("EVOLUTION_INSTANCE", "orcas_instance")
+        APP_URL_BASE = "https://orcas-planejamento-financiero.streamlit.app"
+    except Exception:
+        # Fallback para execução CRON direta/Batch puro usando OS Environment
+        SUPABASE_URL = os.getenv("SUPABASE_URL")
+        SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+        EVOLUTION_API_URL = os.getenv("EVOLUTION_API_URL", "http://localhost:8080")
+        EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "SUA_API_KEY_AQUI")
+        EVOLUTION_INSTANCE = os.getenv("EVOLUTION_INSTANCE", "orcas_instance")
+        APP_URL_BASE = "https://orcas-planejamento-financiero.streamlit.app"
 
-def disparar_whatsapp_gratuito(numero_celular, texto):
-    """
-    Usa a API pública e gratuita do WhatsApp para abrir o navegador
-    já com a mensagem pronta para envio.
-    """
-    # Codifica o texto para o formato que a URL aceita (transforma espaços em %20, etc.)
-    texto_codificado = urllib.parse.quote(texto)
-    
-    # Monta o link oficial gratuito do WhatsApp
-    link_whatsapp = f"https://api.whatsapp.com/send?phone={numero_celular}&text={texto_codificado}"
-    
-    print(f"\n🌍 Opening WhatsApp Web/App para enviar para: {numero_celular}...")
-    # Abre o navegador padrão do seu computador de forma automática
-    webbrowser.open(link_whatsapp)
-    return True
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        print("Erro: Credenciais do Supabase não configuradas no ambiente.")
+        sys.exit(1)
 
+    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-def enviar_mensagem_whatsapp_batch(supabase, id_usuario_teste=None, celular_teste=None):
-    """
-    Processa os lançamentos e monta o alerta de conciliação.
-    """
-    fuso = zoneinfo.ZoneInfo("America/Sao_Paulo")
-    hoje = datetime.now(fuso).date()
-    limite_3_dias = hoje - timedelta(days=3)
-    
-    if id_usuario_teste and celular_teste:
-        usuarios_lista = [{"id": id_usuario_teste, "nome": "Testador Orcas", "telefone": celular_teste}]
-    else:
-        # Busca usuários que ativaram o recurso de zap
-        res_users = supabase.table("usuarios").select("id, nome, telefone").eq("zap_ativo", True).execute()
-        usuarios_lista = res_users.data if res_users.data else []
-    
-    for user in usuarios_lista:
-        uid = user["id"]
-        celular = str(user["telefone"]).strip().replace("+", "").replace("-", "").replace(" ", "")
-        
-        # Busca os lançamentos pendentes
-        lancamentos = supabase.table("lancamentos")\
-            .select("id, data, valor, descricao")\
-            .eq("usuario_id", uid)\
-            .neq("status", "conciliado")\
-            .lte("data", hoje.strftime('%Y-%m-%d'))\
-            .execute()
-            
-        if not lancamentos.data:
-            print(f"Nenhum lançamento pendente encontrado para {user['nome']}.")
-            continue
-            
-        tem_anteriores_ao_limite = False
-        for l in lancamentos.data:
-            data_l = datetime.strptime(l["data"], "%Y-%m-%d").date()
-            if data_l < limite_3_dias:
-                tem_anteriores_ao_limite = True
-                break
-                
-        # Montagem do corpo da mensagem
-        texto_msg = f"Olá, {user['nome']}! 💬\n\nVocê tem lançamentos aguardando conciliação hoje.\n"
-        
-        if tem_anteriores_ao_limite:
-            data_limite_fmt = limite_3_dias.strftime('%d/%m/%Y')
-            texto_msg += f"\n⚠️ *Aviso:* Existem lançamentos ainda não conciliados antes de {data_limite_fmt}, faça essa conciliação utilizando seu aplicativo.\n"
-            
-        # IMPORTANTE: Altere para a URL real onde seu Streamlit está rodando na nuvem ou em localhost
-        link_conciliacao = f"http://localhost:8501/orcas_v01_whatsapp?token={uid}"
-        texto_msg += f"\n👉 Clique aqui para conciliar agora pelo celular:\n{link_conciliacao}"
-        
-        # Dispara usando o navegador (Método Gratuito)
-        disparar_whatsapp_gratuito(celular, texto_msg)
+    # 2. Definição dos parâmetros temporais do Batch (Fuso Corrente)
+    hoje = datetime.now().date()
+    hoje_str = hoje.strftime('%Y-%m-%d')
+    mes_corrente = hoje.month
+    ano_corrente = hoje.year
 
-
-def exibir_interface_mobile(supabase, uid_usuario):
-    """
-    Interface Streamlit renderizada no celular do usuário ao clicar no link
-    """
-    fuso = zoneinfo.ZoneInfo("America/Sao_Paulo")
-    hoje = datetime.now(fuso).date()
-    limite_3_dias = hoje - timedelta(days=3)
-    primeiro_dia_mes = hoje.replace(day=1)
-    ultimo_dia_mes = (primeiro_dia_mes + timedelta(days=32)).replace(day=1) - timedelta(days=1)
-
-    st.markdown('<div class="zap-header">💬 Orcas Conciliação Rápida</div>', unsafe_allow_html=True)
-
-    listar_tudo_mes = st.toggle("📅 Listar todos os Lançamentos do Mês")
-    sem_planejamento = st.toggle("⚡ Lançar sem Planejamento")
-
-    if sem_planejamento:
-        st.subheader("Novo Lançamento Direto")
-        desc_rapida = st.text_input("Descrição:")
-        val_rapido = st.number_input("Valor (R$):", min_value=0.0, step=10.0)
-        if st.button("Confirmar Lançamento", use_container_width=True, type="primary"):
-            if desc_rapida:
-                supabase.table("lancamentos").insert({
-                    "usuario_id": uid_usuario,
-                    "data": hoje.strftime('%Y-%m-%d'),
-                    "descricao": desc_rapida,
-                    "valor": float(val_rapido),
-                    "status": "conciliado"
-                }).execute()
-                st.success("Lançado e conciliado!")
-                st.rerun()
-
-    if listar_tudo_mes:
-        res_lanc = supabase.table("lancamentos").select("*")\
-            .eq("usuario_id", uid_usuario)\
-            .gte("data", primeiro_dia_mes.strftime('%Y-%m-%d'))\
-            .lte("data", ultimo_dia_mes.strftime('%Y-%m-%d'))\
-            .order("data")\
-            .execute()
-    else:
-        res_lanc = supabase.table("lancamentos").select("*")\
-            .eq("usuario_id", uid_usuario)\
-            .neq("status", "conciliado")\
-            .gte("data", limite_3_dias.strftime('%Y-%m-%d'))\
-            .lte("data", hoje.strftime('%Y-%m-%d'))\
-            .order("data")\
-            .execute()
-
-    res_antigos = supabase.table("lancamentos").select("id", count="exact")\
-        .eq("usuario_id", uid_usuario)\
-        .neq("status", "conciliado")\
-        .lt("data", limite_3_dias.strftime('%Y-%m-%d'))\
-        .execute()
-
-    if res_antigos.count and res_antigos.count > 0:
-        dt_limite_fmt = limite_3_dias.strftime('%d/%m/%Y')
-        st.markdown(f'<div class="zap-alert">⚠️ Existem lançamentos ainda não conciliados antes de {dt_limite_fmt}, faça essa conciliação utilizando seu aplicativo.</div>', unsafe_allow_html=True)
-
-    if not res_lanc.data:
-        st.info("Nenhum lançamento pendente encontrado para este período.")
+    # 3. Busca de Usuários Ativos
+    try:
+        usuarios_req = supabase.table("usuarios").select("id, email, celular, vencimento").execute()
+        usuarios = usuarios_req.data if usuarios_req.data else []
+    except Exception as e:
+        print(f"Erro ao buscar usuários no Supabase: {e}")
         return
 
-    for item in res_lanc.data:
-        id_lanc = item["id"]
-        data_fmt = datetime.strptime(item["data"], "%Y-%m-%d").strftime("%d/%m")
-        valor_original = float(item["valor"] or 0.0)
-        status_atual = item.get("status")
-        
-        with st.container():
-            st.markdown(
-                f"""
-                <div class="zap-card">
-                    <b>{data_fmt} - {item['descricao']}</b><br>
-                    Valor Previsto: R$ {valor_original:,.2f} { ' (✅ Conciliado)' if status_atual == 'conciliado' else ''}
-                </div>
-                """, 
-                unsafe_allow_html=True
-            )
-            
-            if status_atual != "conciliado":
-                col_inp, col_btn = st.columns([2, 1])
-                valor_informado = col_inp.text_input("Valor Pago:", placeholder=f"{valor_original:.2f}", key=f"val_{id_lanc}")
-                
-                if col_btn.button("Ok", key=f"btn_{id_lanc}", use_container_width=True):
-                    valor_final_conciliacao = float(valor_informado) if valor_informado.strip() else valor_original
-                    
-                    supabase.table("lancamentos").update({
-                        "status": "conciliado",
-                        "valor_pago": valor_final_conciliacao,
-                        "data_conciliacao": hoje.strftime('%Y-%m-%d')
-                    }).eq("id", id_lanc).execute()
-                    
-                    st.toast("Conciliado com sucesso!")
-                    st.rerun()
-        st.write("---")
+    print(f"Total de {len(usuarios)} contas verificadas na base de dados.")
 
-# --- CONTROLE DE EXECUÇÃO ---
+    # 4. Processamento de Lançamentos por Usuário
+    for user in usuarios:
+        user_id = user.get("id")
+        celular = user.get("celular")
+        email = user.get("email")
+        vencimento_usuario = user.get("vencimento")
+
+        if not celular or str(celular).strip() == "":
+            continue
+
+        if vencimento_usuario:
+            try:
+                if datetime.strptime(vencimento_usuario, '%Y-%m-%d').date() < hoje:
+                    continue
+            except Exception:
+                pass
+
+        try:
+            lanc_req = supabase.table("lancamentos").select("*").eq("usuario_id", user_id).execute()
+            all_lancamentos = lanc_req.data if lanc_req.data else []
+        except Exception as e:
+            print(f"Erro ao coletar lançamentos do usuário {email}: {e}")
+            continue
+
+        filtrados = []
+        for l in all_lancamentos:
+            if l.get("data") == hoje_str:
+                filtrados.append(l)
+                continue
+            
+            if l.get("permite_parcial") is True and l.get("data_vencimento"):
+                try:
+                    dt_venc = datetime.strptime(l["data_vencimento"], '%Y-%m-%d').date()
+                    if dt_venc.month == mes_corrente and dt_venc.year == ano_corrente:
+                        filtrados.append(l)
+                except ValueError:
+                    pass
+
+        if len(filtrados) > 0:
+            total_entradas = sum(float(x.get('valor_plan', 0)) for x in filtrados if x.get('tipo') == 'Entrada')
+            total_saidas = sum(float(x.get('valor_plan', 0)) for x in filtrados if x.get('tipo') == 'Saída')
+            
+            num_limpo = "".join(filter(str.isdigit, str(celular)))
+            if not num_limpo.startswith("55") and len(num_limpo) >= 10:
+                num_limpo = f"55{num_limpo}"
+
+            link_direto = f"{APP_URL_BASE}/?nav=conciliacao"
+
+            mensagem = (
+                f"🐋 *ORCAS - Conciliação Diária*\n\n"
+                f"Olá! Identificamos movimentações pendentes para o dia de hoje que precisam da sua validação.\n\n"
+                f"📊 *Resumo do Dia:*\n"
+                f"📥 Entradas Previstas: R$ {total_entradas:,.2f}\n"
+                f"📤 Saídas Previstas: R$ {total_saidas:,.2f}\n"
+                f"📋 Total de Itens: {len(filtrados)}\n\n"
+                f"Para confirmar, lançar parciais ou ajustar valores agora mesmo, acesse o painel pelo link abaixo:\n"
+                f"🔗 {link_direto}\n\n"
+                f"_Tenha um excelente dia de controle financeiro!_"
+            )
+
+            endpoint = f"{EVOLUTION_API_URL}/message/sendText/{EVOLUTION_INSTANCE}"
+            headers = {
+                "Content-Type": "application/json",
+                "apikey": EVOLUTION_API_KEY
+            }
+            payload = {
+                "number": num_limpo,
+                "options": {
+                    "delay": 1200,
+                    "presence": "composing"
+                },
+                "textMessage": {
+                    "text": mensagem
+                }
+            }
+
+            try:
+                with httpx.Client(timeout=15.0) as client:
+                    response = client.post(endpoint, json=payload, headers=headers)
+                    if response.status_code in [200, 201]:
+                        print(f" -> Notificação enviada com sucesso para {email} ({num_limpo})")
+                    else:
+                        print(f" -> Falha no envio para {email}: {response.text}")
+            except Exception as e:
+                print(f" -> Erro de rede na comunicação com a Evolution API para {email}: {e}")
+
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Fim do processamento.")
+
+
+# ==============================================================================
+# NOVA FUNÇÃO: GATILHO ACIONADO PELO BATCH01 (ENVIO DO ARQUIVO PDF)
+# ==============================================================================
+def enviar_zap_orcas(numero, caminho_arquivo, mensagem):
+    """
+    Ponto de entrada chamado condicionalmente pelo script 'orcas_v01_batch01_3am.py'
+    para despachar o PDF gerado na madrugada.
+    """
+    try:
+        import streamlit as st
+        EVOLUTION_API_URL = st.secrets.get("EVOLUTION_API_URL", "http://localhost:8080")
+        EVOLUTION_API_KEY = st.secrets.get("EVOLUTION_API_KEY", "SUA_API_KEY_AQUI")
+        EVOLUTION_INSTANCE = st.secrets.get("EVOLUTION_INSTANCE", "orcas_instance")
+    except Exception:
+        EVOLUTION_API_URL = os.getenv("EVOLUTION_API_URL", "http://localhost:8080")
+        EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "SUA_API_KEY_AQUI")
+        EVOLUTION_INSTANCE = os.getenv("EVOLUTION_INSTANCE", "orcas_instance")
+
+    if not EVOLUTION_API_URL or not EVOLUTION_API_KEY:
+        print("Aviso: Variáveis de ambiente da Evolution API não configuradas para envio do PDF.")
+        return
+
+    try:
+        if not os.path.exists(caminho_arquivo):
+            print(f"Erro: O arquivo {caminho_arquivo} não foi localizado para envio.")
+            return
+
+        # Formatação do número para padrão internacional exigido pela Evolution API
+        num_limpo = "".join(filter(str.isdigit, str(numero)))
+        if not num_limpo.startswith("55") and len(num_limpo) >= 10:
+            num_limpo = f"55{num_limpo}"
+
+        with open(caminho_arquivo, "rb") as f:
+            base64_file = base64.b64encode(f.read()).decode('utf-8')
+
+        endpoint = f"{EVOLUTION_API_URL}/message/sendMedia/{EVOLUTION_INSTANCE}"
+        headers = {
+            "Content-Type": "application/json",
+            "apikey": EVOLUTION_API_KEY
+        }
+        payload = {
+            "number": num_limpo,
+            "mediatype": "document",
+            "mimetype": "application/pdf",
+            "caption": mensagem,
+            "media": base64_file,
+            "fileName": os.path.basename(caminho_arquivo)
+        }
+
+        with httpx.Client(timeout=30.0) as client:
+            response = client.post(endpoint, json=payload, headers=headers)
+            if response.status_code in [200, 201]:
+                print(f" -> PDF do resumo diário enviado via WhatsApp para o número {num_limpo}")
+            else:
+                print(f" -> Falha ao enviar PDF via Evolution API: {response.text}")
+
+    except Exception as e:
+        print(f" -> Erro interno ao processar envio do PDF de WhatsApp: {e}")
+
+
 if __name__ == "__main__":
-    import sys
-    # Importa a função correta do seu arquivo de segurança real
-    from orcas_v01_security import init_connection
-    
-    # Inicializa o contexto do Supabase chamando a função
-    supabase_ctx = init_connection()
-    
-    if len(sys.argv) > 1:
-        comando = sys.argv[1]
-        
-        if comando == "batch":
-            enviar_mensagem_whatsapp_batch(supabase_ctx)
-            
-        elif comando == "teste":
-            # 🧪 CONFIGURAÇÃO DO SEU TESTE MANUAL GRATUITO:
-            MEU_ID_USUARIO = 1 
-            MEU_CELULAR = "5511972810372"  
-            
-            print("⚙️ Iniciando teste gratuito de notificação...")
-            enviar_mensagem_whatsapp_batch(supabase_ctx, id_usuario_teste=MEU_ID_USUARIO, celular_teste=MEU_CELULAR)
-    else:
-        query_params = st.query_params
-        token_usuario = query_params.get("token")
-        
-        if token_usuario:
-            exibir_interface_mobile(supabase_ctx, token_usuario)
-        else:
-            st.warning("Acesso restrito. Utilize o link enviado para o seu WhatsApp.")
+    executar_envio_diario()

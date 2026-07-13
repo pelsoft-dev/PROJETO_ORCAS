@@ -10,12 +10,16 @@ from datetime import datetime, timedelta, timezone
 from fpdf import FPDF
 
 # ==============================================================================
+# CONFIGURAÇÃO DE GATILHO - EVOLUTION API (WHATSAPP)
+# ==============================================================================
+# Mude para True apenas quando contratar a Hostinger e configurar o outro arquivo.
+WHATSAPP_HABILITADO = False  
+
+# ==============================================================================
 # CONFIGURAÇÕES DE AMBIENTE (SECRETOS DO GITHUB)
 # ==============================================================================
 URL = os.environ.get("SUPABASE_URL")
 KEY = os.environ.get("SUPABASE_KEY")
-EVOLUTION_API_URL = os.environ.get("EVOLUTION_API_URL")
-EVOLUTION_API_KEY = os.environ.get("EVOLUTION_API_KEY")
 
 # Configurações de E-mail (Devem estar no GitHub Secrets)
 SMTP_SERVER = os.environ.get("SMTP_SERVER")
@@ -38,26 +42,17 @@ def fmt_br(valor):
 # ==============================================================================
 # GERAÇÃO DO RELATÓRIO PDF (RESUMO DIÁRIO ORCAS)
 # ==============================================================================
-# ==============================================================================
-# GERAÇÃO DO RELATÓRIO PDF (RESUMO DIÁRIO ORCAS)
-# ==============================================================================
-#def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo_ontem, analise_macro, gastos_excedidos):
 def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo_ontem, analise_macro, gastos_excedidos, todos_lancamentos):    
     pdf = FPDF()
     pdf.add_page()
     
-    # ---------------------------------------------------------
-    # MODIFICAÇÃO 01: INCLUIR A BALEIA COM CAMINHO ABSOLUTO
-    # ---------------------------------------------------------
     try:
-        # Resolve o erro [Errno 2] do GitHub Actions usando caminho absoluto
         base_path = os.path.dirname(os.path.abspath(__file__))
         image_path = os.path.join(base_path, "orca_mascote.png")
         if os.path.exists(image_path):
-            # pdf.image(image_path, x=10, y=8, w=25)
             pdf.image(image_path, x=4, y=4, w=50)
         else:
-            print(f"Aviso: Arquivo {image_path} not encontrado no servidor.")
+            print(f"Aviso: Arquivo {image_path} não encontrado no servidor.")
     except Exception as e:
         print(f"Aviso: Erro ao processar imagem: {e}")
 
@@ -99,9 +94,6 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
     for label, key in periodos:
         d = analise_macro.get(key, {"e_p":0, "e_r":0, "s_p":0, "s_r":0, "start": "-", "end": "-"})
         
-        # ----------------------------------------------------------------------
-        # TRAVA DE SEGURANÇA (ANEXO 01): Garante a data correta do seu Supabase
-        # ----------------------------------------------------------------------
         data_ini_exibir = d['start']
         if "Início do Plano" in label and data_ini_exibir == "10/03/2026":
             data_ini_exibir = "01/01/2026"
@@ -121,9 +113,7 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
     pdf.cell(190, 8, f"Índice de Aderência ao Orçamento (Saídas Acumuladas): {aderencia:.1f}%", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(2)
 
-    # --------------------------------------------------------------------------
-    # MODIFICAÇÃO 02: 2. ATENÇÃO: GASTOS ACIMA DO PLANEJADO (COMPARATIVO)
-    # --------------------------------------------------------------------------
+    # 2. ATENÇÃO: GASTOS ACIMA DO PLANEJADO (COMPARATIVO)
     pdf.set_font("Helvetica", "B", 11)
     pdf.cell(190, 8, " 2. ATENÇÃO: GASTOS ACIMA DO PLANEJADO (COMPARATIVO)", 0, new_x="LMARGIN", new_y="NEXT", fill=True)
     
@@ -194,14 +184,12 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
 
     pdf.ln(4)
 
-    # 3. AGENDA DE HOJE
-# 3. AGENDA FINANCEIRA DE HOJE (CONCILIAÇÃO E PENDÊNCIAS)
+    # 3. AGENDA FINANCEIRA DE HOJE (CONCILIAÇÃO E PENDÊNCIAS)
     pdf.ln(2)
     pdf.set_fill_color(230, 240, 255)
     pdf.set_font("Helvetica", "B", 11)
     pdf.cell(190, 8, f" 3. AGENDA FINANCEIRA DE HOJE ({data_hoje.strftime('%d/%m/%Y')})", 0, new_x="LMARGIN", new_y="NEXT", fill=True)
     
-    # Cabeçalho do Quadro 3 (Ajustado para 7 colunas)
     pdf.set_font("Helvetica", "B", 7)
     pdf.cell(50, 7, "Descrição", 1, align="C")
     pdf.cell(22, 7, "Data Venc.", 1, align="C")
@@ -219,7 +207,6 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
         pdf.cell(190, 7, "Nenhuma pendência ou lançamento para hoje.", 1, new_x="LMARGIN", new_y="NEXT", align="C")
     else:
         for i, item in enumerate(agenda_hoje):
-            # Desenha linha divisória grossa se o item for de hoje e o anterior for passado
             data_item = item.get('data')
             if i > 0 and data_item == data_hoje.strftime('%Y-%m-%d') and agenda_hoje[i-1]['data'] < data_hoje.strftime('%Y-%m-%d'):
                 pdf.set_line_width(0.8)
@@ -248,9 +235,9 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
     pdf.cell(190, 5, f"TOTAL DE ENTRADAS PENDENTES: R$ {fmt_br(total_e_pend)}", 0, new_x="LMARGIN", new_y="NEXT", align="R")
     pdf.cell(190, 5, f"TOTAL DE SAÍDAS PENDENTES: R$ {fmt_br(total_s_pend)}", 0, new_x="LMARGIN", new_y="NEXT", align="R")
     
-# ==============================================================================
-    # BLOCO IA ATUALIZADO: DETECÇÃO DE MOVIMENTOS E VOLATILIDADE
-    # ==============================================================================
+    # --------------------------------------------------------------------------
+    # BLOCO IA: DETECÇÃO DE MOVIMENTOS E VOLATILIDADE
+    # --------------------------------------------------------------------------
     try:
         pdf.ln(8)
         ia_plan_total = 0
@@ -260,7 +247,6 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
         maior_queda = 0
         ultimo_saldo = 0
 
-        # Ordenar lançamentos por data para simular a linha do tempo do gráfico
         lancamentos_ordenados = sorted(todos_lancamentos, key=lambda x: x['data'])
 
         for l in lancamentos_ordenados:
@@ -269,7 +255,6 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
             v_parcial = float(l.get('parcial_real') or 0)
             tipo = l.get('tipo')
             
-            # Prioridade para parcial_real conforme sua regra
             valor_final_real = v_parcial if v_parcial > 0 else v_r
 
             if tipo == 'Entrada':
@@ -280,7 +265,6 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
                 ia_real_total += valor_final_real
                 saldo_acumulado -= valor_final_real
 
-            # Monitor de pontos críticos (o "vale" do gráfico)
             if saldo_acumulado < menor_saldo:
                 menor_saldo = saldo_acumulado
             
@@ -292,11 +276,10 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
 
         saldo_residual = ia_plan_total - ia_real_total
         
-        # Lógica de Comentário Inteligente baseada no movimento provocado
         alerta_ia = ""
         if menor_saldo < 0:
             alerta_ia = f" CRÍTICO: Detectamos uma queda acentuada onde o saldo atingiu R$ {fmt_br(menor_saldo)}. "
-        elif maior_queda > (ia_plan_total * 0.15): # Queda maior que 15% do plano
+        elif maior_queda > (ia_plan_total * 0.15):
             alerta_ia = " ALERTA: Identificamos uma volatilidade atípica com variações bruscas no fluxo. "
 
         texto_ia = (
@@ -307,7 +290,6 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
             f"precisa de um colchão de segurança maior para suportar essas oscilações sem comprometer a saúde financeira."
         )
 
-        # Renderização do Quadro no PDF
         pdf.set_fill_color(245, 245, 245)
         pdf.set_font("Helvetica", "B", 11)
         pdf.cell(190, 8, " SEU PLANO COMENTADO POR UMA INTELIGÊNCIA ARTIFICIAL", 0, 1, 'L', fill=True)
@@ -319,7 +301,6 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
         pdf.ln(4)
     except Exception as e:
         print(f"Erro ao gerar análise IA: {e}")
-    # ==============================================================================
     
     filename = f"RESUMO_DIARIO_ORCAS_{usuario_nome}_{data_hoje.strftime('%Y%m%d')}.pdf"
     pdf.output(filename)
@@ -327,7 +308,7 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
 
 
 # ==============================================================================
-# FUNÇÕES DE ENVIO (E-MAIL E WHATSAPP COMENTADO)
+# FUNÇÕES DE ENVIO (E-MAIL)
 # ==============================================================================
 def enviar_email_orcas(email_destino, caminho_arquivo, usuario_nome):
     if not SMTP_SERVER or not SMTP_USER or not SMTP_PASS:
@@ -358,23 +339,6 @@ def enviar_email_orcas(email_destino, caminho_arquivo, usuario_nome):
         print(f"E-mail enviado com sucesso para {email_destino}")
     except Exception as e:
         print(f"Erro ao enviar e-mail: {e}")
-
-
-# def enviar_zap_orcas(numero, caminho_arquivo, mensagem):
-#     """
-#     Função para envio via Evolution API (Mantida comentada conforme solicitado)
-#     """
-#     if not EVOLUTION_API_URL or not EVOLUTION_API_KEY:
-#         return
-#     # payload = {
-#     #     "number": numero,
-#     #     "mediatype": "document",
-#     #     "mimetype": "application/pdf",
-#     #     "caption": mensagem,
-#     #     "media": base64_file
-#     # }
-#     # requests.post(f"{EVOLUTION_API_URL}/message/sendMedia/instancia", json=payload...)
-#     pass
 
 
 # ==============================================================================
@@ -416,7 +380,6 @@ def job_madrugada():
                         supabase.table("lancamentos").update({"valor_plan": round(float(media), 2)})\
                             .eq("id", item['id']).execute()
 
-
         # 2. PROCESSAMENTO DE RESÍDUOS (Sobra de orçamento de ontem)
         lancamentos_ontem = supabase.table("lancamentos")\
             .select("*")\
@@ -455,9 +418,8 @@ def job_madrugada():
                         novo_item['valor_real'] = 0.0
                         supabase.table("lancamentos").insert(novo_item).execute()
 
-
         # 3. GERAÇÃO DE RELATÓRIOS E ENVIOS POR USUÁRIO/PROJETO
-        configuracoes = supabase.table("config_projetos").select("usuario_id, projeto_id, email_ativo").execute()
+        configuracoes = supabase.table("config_projetos").select("usuario_id, projeto_id, email_ativo, zap_ativo, telefone").execute()
         
         for cfg in configuracoes.data:
             user_res = supabase.table("usuarios").select("nome, email").eq("id", cfg['usuario_id']).execute()
@@ -471,7 +433,6 @@ def job_madrugada():
                 .execute()
             
             if lancamentos_all.data:
-                # Lógica de Datas do Plano
                 datas_p = [x['data'] for x in lancamentos_all.data]
                 ini_p = datetime.strptime(min(datas_p), '%Y-%m-%d').date()
                 fim_p = datetime.strptime(max(datas_p), '%Y-%m-%d').date()
@@ -498,7 +459,6 @@ def job_madrugada():
                     "ano_total": calcular_periodo(p_ano, p_ano.replace(month=12, day=31))
                 }
 
-                # Lógica de Alertas Comparativos (Mês Anterior vs Atual)
                 alertas = []
                 m_atual = [x for x in lancamentos_all.data if p_mes.strftime('%Y-%m-%d') <= x['data'] <= hoje.strftime('%Y-%m-%d')]
                 m_anterior = [x for x in lancamentos_all.data if p_mes_ant.strftime('%Y-%m-%d') <= x['data'] <= u_mes_ant.strftime('%Y-%m-%d')]
@@ -513,7 +473,6 @@ def job_madrugada():
                     v_p_ant = sum([x['valor_plan'] or 0 for x in f_ant])
                     v_r_ant = sum([x['valor_real'] or 0 for x in f_ant])
                     
-                    # --- CONSOLIDAÇÃO DE PARCIAIS ANTES DO FILTRO ---
                     try:
                         res_parc = supabase.table("lancamentos").select("parcial_real, parcial_data")\
                             .eq("projeto_id", cfg['projeto_id']).eq("descricao", d)\
@@ -529,8 +488,6 @@ def job_madrugada():
                     except:
                         dt_atu_final = f_atu[0]['data'] if f_atu else '-'
 
-                    # 20260422 --- if (v_r_atu > v_p_atu > 0) or (v_r_ant > v_p_ant > 0):
-                    # A alteração retira a trava '> 0' do planejamento e inclui a regra de gasto extra (plan==0)
                     if (v_r_atu > v_p_atu) or (v_p_atu == 0 and v_r_atu > 0) or (v_r_ant > v_p_ant):
                         alertas.append({
                             'descricao': d, 
@@ -540,15 +497,7 @@ def job_madrugada():
                             'v_p_atu': v_p_atu, 'v_r_atu': v_r_atu
                         })
 
-                dados_hoje = [x for x in lancamentos_all.data if x['data'] == hoje.strftime('%Y-%m-%d')]
-                
-                # AQUI É ONDE ESTAVA O ERRO DE NOME: Alterado de 'gastos_excedidos' para 'alertas'
-                # pdf_path = gerar_pdf_relatorio(perfil['nome'], cfg['projeto_id'], hoje, dados_hoje, {}, macro, alertas)
-                pdf_path = gerar_pdf_relatorio(perfil['nome'], cfg['projeto_id'], hoje, dados_hoje, {}, macro, alertas, lancamentos_all.data)
-
-                # ==============================================================================
-                # BLOCO DE CONSOLIDAÇÃO DE PARCIAIS (ACERTO DA QUESTÃO DISCUTIDA)
-                # ==============================================================================
+                # CONSOLIDAÇÃO DE PARCIAIS (Antes da geração final do relatório)
                 for g in alertas:
                     desc_alvo = g.get('descricao')
                     try:
@@ -571,26 +520,37 @@ def job_madrugada():
                     except Exception as e:
                         print(f"Erro ao consolidar parciais para {desc_alvo}: {e}")
 
-
-                # dados_hoje = [x for x in lancamentos_all.data if x['data'] == hoje.strftime('%Y-%m-%d')]
-                # Ajuste para o Quadro 3: Pendentes até hoje + Realizados hoje (Excluindo parciais)
+                # Ajuste para o Quadro 3
                 dados_hoje = [
                     x for x in lancamentos_all.data 
                     if ((x['data'] <= hoje.strftime('%Y-%m-%d') and x['status'] == 'Planejado') or 
                         (x['data'] == hoje.strftime('%Y-%m-%d') and x['status'] == 'Realizado'))
                     and x.get('permite_parcial') != True
                 ]
-                # Ordenação cronológica para a linha divisória do PDF funcionar
                 dados_hoje.sort(key=lambda x: x['data'])
                 
-                # pdf_path = gerar_pdf_relatorio(perfil['nome'], cfg['projeto_id'], hoje, dados_hoje, {}, macro, alertas)
+                # Chamada Corrigida para a geração do PDF
                 pdf_path = gerar_pdf_relatorio(perfil['nome'], cfg['projeto_id'], hoje, dados_hoje, {}, macro, alertas, lancamentos_all.data)
+                
+                # Despacho por E-mail
                 if cfg.get('email_ativo') == 1 and perfil.get('email'):
                     enviar_email_orcas(perfil['email'], pdf_path, perfil['nome'])
                 
+                # --- CHAMADA SEGURA E CONDICIONAL DO SEGUNDO ARQUIVO (WHATSAPP) ---
+                if WHATSAPP_HABILITADO and cfg.get('zap_ativo') == 1 and cfg.get('telefone'):
+                    try:
+                        # Importação dinâmica: só quebra se o arquivo não existir E a flag estiver True
+                        from orcas_v01_whatsapp import enviar_zap_orcas
+                        txt_whats = f"Olá {perfil['nome']}, aqui está o seu *Resumo Diário Orcas* atualizado!"
+                        enviar_zap_orcas(cfg['telefone'], pdf_path, txt_whats)
+                    except ImportError:
+                        print("Erro: O arquivo 'orcas_v01_whatsapp.py' não foi encontrado no mesmo diretório.")
+                    except Exception as e:
+                        print(f"Erro ao tentar processar o envio de WhatsApp: {e}")
+                
+                # Limpeza local do PDF gerado
                 if os.path.exists(pdf_path):
                     os.remove(pdf_path)
-
 
     except Exception as e:
         print(f"Erro crítico no processamento: {e}")
