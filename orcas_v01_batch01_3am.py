@@ -435,8 +435,8 @@ def job_madrugada():
             configuracoes = supabase.table("config_projetos").select("usuario_id, projeto_id, email_ativo").execute()
         
         for cfg in configuracoes.data:
-            # Puxa o 'telefone' diretamente da tabela 'usuarios'
-            user_res = supabase.table("usuarios").select("nome, email, telefone").eq("id", cfg['usuario_id']).execute()
+            # Puxa o 'celular' diretamente da tabela 'usuarios'
+            user_res = supabase.table("usuarios").select("nome, email, celular").eq("id", cfg['usuario_id']).execute()
             if not user_res.data: continue
             
             perfil = user_res.data[0]
@@ -551,12 +551,12 @@ def job_madrugada():
                     enviar_email_orcas(perfil['email'], pdf_path, perfil['nome'])
                 
                 # --- CHAMADA SEGURA E CONDICIONAL DO SEGUNDO ARQUIVO (WHATSAPP) ---
-                # Agora validamos se zap_ativo na tabela de configs é True (ou 1) e pegamos o telefone do usuário
-                if WHATSAPP_HABILITADO and cfg.get('zap_ativo') in [True, 1, '1'] and perfil.get('telefone'):
+                # Agora validamos se zap_ativo na tabela de configs é True (ou 1) e pegamos o celular do usuário
+                if WHATSAPP_HABILITADO and cfg.get('zap_ativo') in [True, 1, '1'] and perfil.get('celular'):
                     try:
                         from orcas_v01_whatsapp import enviar_zap_orcas
                         txt_whats = f"Olá {perfil['nome']}, aqui está o seu *Resumo Diário Orcas* atualizado!"
-                        enviar_zap_orcas(perfil['telefone'], pdf_path, txt_whats)
+                        enviar_zap_orcas(perfil['celular'], pdf_path, txt_whats)
                     except ImportError:
                         print("Erro: O arquivo 'orcas_v01_whatsapp.py' não foi encontrado no mesmo diretório.")
                     except Exception as e:
