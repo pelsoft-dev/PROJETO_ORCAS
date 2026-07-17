@@ -1,3 +1,10 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+ORCAS SaaS - Processamento Batch de Madrugada (03:00 AM)
+Arquivo: qorcas_v-1_batch01_3am.py
+"""
+
 import os
 import requests
 import smtplib
@@ -203,12 +210,12 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
     total_e_pend = 0
     total_s_pend = 0
     
-    if not agenda_hoje:
+    if not dados_hoje:
         pdf.cell(190, 7, "Nenhuma pendência ou lançamento para hoje.", 1, new_x="LMARGIN", new_y="NEXT", align="C")
     else:
-        for i, item in enumerate(agenda_hoje):
+        for i, item in enumerate(dados_hoje):
             data_item = item.get('data')
-            if i > 0 and data_item == data_hoje.strftime('%Y-%m-%d') and agenda_hoje[i-1]['data'] < data_hoje.strftime('%Y-%m-%d'):
+            if i > 0 and data_item == data_hoje.strftime('%Y-%m-%d') and dados_hoje[i-1]['data'] < data_hoje.strftime('%Y-%m-%d'):
                 pdf.set_line_width(0.8)
                 pdf.line(10, pdf.get_y(), 200, pdf.get_y())
                 pdf.set_line_width(0.2)
@@ -419,10 +426,17 @@ def job_madrugada():
                         supabase.table("lancamentos").insert(novo_item).execute()
 
         # 3. GERAÇÃO DE RELATÓRIOS E ENVIOS POR USUÁRIO/PROJETO
-        configuracoes = supabase.table("config_projetos").select("usuario_id, projeto_id, email_ativo, zap_ativo, telefone").execute()
+        # BUSCA DAS CONFIGURAÇÕES: Puxa 'zap_ativo' para saber se deve acionar o WhatsApp desse plano específico
+        try:
+            configuracoes = supabase.table("config_projetos").select("usuario_id, projeto_id, email_ativo, zap_ativo").execute()
+        except Exception as e:
+            print(f"Aviso ao buscar config_projetos: {e}. Executando fallback seguro sem Whatsapp...")
+            # Fallback robusto se a coluna zap_ativo não existir na tabela config_projetos
+            configuracoes = supabase.table("config_projetos").select("usuario_id, projeto_id, email_ativo").execute()
         
         for cfg in configuracoes.data:
-            user_res = supabase.table("usuarios").select("nome, email").eq("id", cfg['usuario_id']).execute()
+            # Puxa o 'telefone' diretamente da tabela 'usuarios'
+            user_res = supabase.table("usuarios").select("nome, email, telefone").eq("id", cfg['usuario_id']).execute()
             if not user_res.data: continue
             
             perfil = user_res.data[0]
@@ -529,7 +543,7 @@ def job_madrugada():
                 ]
                 dados_hoje.sort(key=lambda x: x['data'])
                 
-                # Chamada Corrigida para a geração do PDF
+                # Geração do PDF
                 pdf_path = gerar_pdf_relatorio(perfil['nome'], cfg['projeto_id'], hoje, dados_hoje, {}, macro, alertas, lancamentos_all.data)
                 
                 # Despacho por E-mail
@@ -537,12 +551,12 @@ def job_madrugada():
                     enviar_email_orcas(perfil['email'], pdf_path, perfil['nome'])
                 
                 # --- CHAMADA SEGURA E CONDICIONAL DO SEGUNDO ARQUIVO (WHATSAPP) ---
-                if WHATSAPP_HABILITADO and cfg.get('zap_ativo') == 1 and cfg.get('telefone'):
+                # Agora validamos se zap_ativo na tabela de configs é True (ou 1) e pegamos o telefone do usuário
+                if WHATSAPP_HABILITADO and cfg.get('zap_ativo') in [True, 1, '1'] and perfil.get('telefone'):
                     try:
-                        # Importação dinâmica: só quebra se o arquivo não existir E a flag estiver True
                         from orcas_v01_whatsapp import enviar_zap_orcas
                         txt_whats = f"Olá {perfil['nome']}, aqui está o seu *Resumo Diário Orcas* atualizado!"
-                        enviar_zap_orcas(cfg['telefone'], pdf_path, txt_whats)
+                        enviar_zap_orcas(perfil['telefone'], pdf_path, txt_whats)
                     except ImportError:
                         print("Erro: O arquivo 'orcas_v01_whatsapp.py' não foi encontrado no mesmo diretório.")
                     except Exception as e:
