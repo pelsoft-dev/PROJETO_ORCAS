@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 ORCAS SaaS - Processamento Batch de Madrugada (03:00 AM)
-Arquivo: qorcas_v-1_batch01_3am.py
+Arquivo: orcas_v01_batch01_3am.py
 """
 
 import os
@@ -14,12 +14,12 @@ from email.mime.base import MIMEBase
 from email import encoders
 from supabase import create_client
 from datetime import datetime, timedelta, timezone
+import datetime as dt_modulo  # Evitar conflitos de nomes
 from fpdf import FPDF
 
 # ==============================================================================
 # CONFIGURAÇÃO DE GATILHO - EVOLUTION API (WHATSAPP)
 # ==============================================================================
-# Mude para True apenas quando contratar a Hostinger e configurar o outro arquivo.
 WHATSAPP_HABILITADO = False  
 
 # ==============================================================================
@@ -28,7 +28,6 @@ WHATSAPP_HABILITADO = False
 URL = os.environ.get("SUPABASE_URL")
 KEY = os.environ.get("SUPABASE_KEY")
 
-# Configurações de E-mail (Devem estar no GitHub Secrets)
 SMTP_SERVER = os.environ.get("SMTP_SERVER")
 SMTP_PORT = os.environ.get("SMTP_PORT")
 SMTP_USER = os.environ.get("SMTP_USER")
@@ -49,7 +48,8 @@ def fmt_br(valor):
 # ==============================================================================
 # GERAÇÃO DO RELATÓRIO PDF (RESUMO DIÁRIO ORCAS)
 # ==============================================================================
-def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo_ontem, analise_macro, gastos_excedidos, todos_lancamentos):    
+# CORREÇÃO AQUI: Alterado o parâmetro de agenda_hoje para dados_hoje para casar com a lógica interna
+def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, dados_hoje, resumo_ontem, analise_macro, gastos_excedidos, todos_lancamentos):    
     pdf = FPDF()
     pdf.add_page()
     
@@ -124,13 +124,11 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
     pdf.set_font("Helvetica", "B", 11)
     pdf.cell(190, 8, " 2. ATENÇÃO: GASTOS ACIMA DO PLANEJADO (COMPARATIVO)", 0, new_x="LMARGIN", new_y="NEXT", fill=True)
     
-    # Cabeçalho Superior
     pdf.set_font("Helvetica", "B", 7)
     pdf.cell(50, 10, "Descrição", 1, align="C")
     pdf.cell(70, 5, "Mês Anterior", 1, align="C")
     pdf.cell(70, 5, f"Mês Atual (Até {data_hoje.strftime('%d/%m/%Y')})", 1, new_x="LMARGIN", new_y="NEXT", align="C")
     
-    # Cabeçalho Inferior
     pdf.set_x(60)
     pdf.cell(20, 5, "Data", 1, align="C")
     pdf.cell(25, 5, "Planejado", 1, align="C")
@@ -153,7 +151,6 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
                 if not dt or dt == '-': return '-'
                 if hasattr(dt, 'strftime'): return dt.strftime('%d/%m/%Y')
                 try:
-                    from datetime import datetime
                     return datetime.strptime(str(dt), '%Y-%m-%d').strftime('%d/%m/%Y')
                 except: return str(dt)
 
@@ -210,6 +207,7 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
     total_e_pend = 0
     total_s_pend = 0
     
+    # CORREÇÃO DETECTADA: Agora dados_hoje é devidamente mapeado sem lançar NameError
     if not dados_hoje:
         pdf.cell(190, 7, "Nenhuma pendência ou lançamento para hoje.", 1, new_x="LMARGIN", new_y="NEXT", align="C")
     else:
@@ -290,7 +288,7 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, agenda_hoje, resumo
             alerta_ia = " ALERTA: Identificamos uma volatilidade atípica com variações bruscas no fluxo. "
 
         texto_ia = (
-            f"Análise Orcas: O plano '{nome_plano}' acumulou R$ {fmt_br(ia_real_total)} em saídas "
+            f"Análise Orcas: O plano '{nome_plano}' acumulou R$ {fmt_br(ia_real_total)} in saídas "
             f"para um orçamento de R$ {fmt_br(ia_plan_total)}.{alerta_ia}"
             f"O comportamento recente sugere um estresse de liquidez. Embora o saldo residual estratégico "
             f"seja de R$ {fmt_br(saldo_residual)}, os picos negativos observados indicam que o plano "
@@ -426,16 +424,13 @@ def job_madrugada():
                         supabase.table("lancamentos").insert(novo_item).execute()
 
         # 3. GERAÇÃO DE RELATÓRIOS E ENVIOS POR USUÁRIO/PROJETO
-        # BUSCA DAS CONFIGURAÇÕES: Puxa 'zap_ativo' para saber se deve acionar o WhatsApp desse plano específico
         try:
             configuracoes = supabase.table("config_projetos").select("usuario_id, projeto_id, email_ativo, zap_ativo").execute()
         except Exception as e:
             print(f"Aviso ao buscar config_projetos: {e}. Executando fallback seguro sem Whatsapp...")
-            # Fallback robusto se a coluna zap_ativo não existir na tabela config_projetos
             configuracoes = supabase.table("config_projetos").select("usuario_id, projeto_id, email_ativo").execute()
         
         for cfg in configuracoes.data:
-            # Puxa o 'celular' diretamente da tabela 'usuarios'
             user_res = supabase.table("usuarios").select("nome, email, celular").eq("id", cfg['usuario_id']).execute()
             if not user_res.data: continue
             
@@ -511,7 +506,7 @@ def job_madrugada():
                             'v_p_atu': v_p_atu, 'v_r_atu': v_r_atu
                         })
 
-                # CONSOLIDAÇÃO DE PARCIAIS (Antes da geração final do relatório)
+                # CONSOLIDAÇÃO DE PARCIAIS
                 for g in alertas:
                     desc_alvo = g.get('descricao')
                     try:
@@ -543,26 +538,24 @@ def job_madrugada():
                 ]
                 dados_hoje.sort(key=lambda x: x['data'])
                 
-                # Geração do PDF
+                # Chamada corrigida
                 pdf_path = gerar_pdf_relatorio(perfil['nome'], cfg['projeto_id'], hoje, dados_hoje, {}, macro, alertas, lancamentos_all.data)
                 
                 # Despacho por E-mail
                 if cfg.get('email_ativo') == 1 and perfil.get('email'):
                     enviar_email_orcas(perfil['email'], pdf_path, perfil['nome'])
                 
-                # --- CHAMADA SEGURA E CONDICIONAL DO SEGUNDO ARQUIVO (WHATSAPP) ---
-                # Agora validamos se zap_ativo na tabela de configs é True (ou 1) e pegamos o celular do usuário
+                # WhatsApp (Se habilitado)
                 if WHATSAPP_HABILITADO and cfg.get('zap_ativo') in [True, 1, '1'] and perfil.get('celular'):
                     try:
                         from orcas_v01_whatsapp import enviar_zap_orcas
                         txt_whats = f"Olá {perfil['nome']}, aqui está o seu *Resumo Diário Orcas* atualizado!"
                         enviar_zap_orcas(perfil['celular'], pdf_path, txt_whats)
                     except ImportError:
-                        print("Erro: O arquivo 'orcas_v01_whatsapp.py' não foi encontrado no mesmo diretório.")
+                        print("Erro: O arquivo 'orcas_v01_whatsapp.py' não foi encontrado.")
                     except Exception as e:
                         print(f"Erro ao tentar processar o envio de WhatsApp: {e}")
                 
-                # Limpeza local do PDF gerado
                 if os.path.exists(pdf_path):
                     os.remove(pdf_path)
 
