@@ -4,6 +4,9 @@ import pandas as pd
 from datetime import datetime, date, timedelta
 from dateutil.relativedelta import relativedelta
 
+# Importando a ajuda do arquivo dedicado
+from orcas_v01_ajuda_gestao import renderizar_ajuda_gestao
+
 def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, format_moeda, parse_moeda, security):
     """
     Sub-rotina da Tela Gestão - Versão com 'ult_valor_mensal' centralizado no Usuário
@@ -40,38 +43,35 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         tipo_renov_original = "Mensal"
 
     # --- 2. CABEÇALHO ALINHADO COM BOTÃO DE AJUDA ---
-    # Substituição do st.markdown estático pelo layout em colunas para flutuar o botão à direita
     col_titulo, col_ajuda = st.columns([4, 1])
     
     with col_titulo:
         st.markdown('<div class="titulo-tela" style="margin-top:0px;">Gestão de Planos e Assinaturas</div>', unsafe_allow_html=True)
         
     with col_ajuda:
-        # Botão AJUDA estilizado alinhado perfeitamente à direita do título
+        # Customização do botão "AJUDA" para usar a cor menos berrante (#007ba7)
+        st.markdown("""
+            <style>
+            div.stButton > button:first-child {
+                background-color: #007ba7 !important;
+                color: white !important;
+                border: none !important;
+            }
+            div.stButton > button:first-child:hover {
+                background-color: #005f81 !important;
+                color: white !important;
+            }
+            </style>
+        """, unsafe_allow_html=True)
+        
         if st.button("AJUDA", type="primary", use_container_width=True):
             st.session_state["exibir_ajuda_gestao"] = not st.session_state.get("exibir_ajuda_gestao", False)
             st.rerun()
 
-    # --- 3. EXIBIÇÃO DO BOX DE AJUDA (ESTILO LAYOUT ORIGINAL) ---
+    # --- 3. EXIBIÇÃO DO BOX DE AJUDA VIA ARQUIVO EXTERNO ---
     if st.session_state.get("exibir_ajuda_gestao", False):
-        st.markdown(
-            """
-            <div style="background-color: #00a2e8; padding: 15px; border-radius: 5px; color: white; font-family: sans-serif; margin-bottom: 20px; position: relative;">
-                <div style="font-weight: bold; font-size: 16px; margin-bottom: 8px;">AJUDA – GESTÃO</div>
-                <div style="font-size: 14px; text-align: justify; line-height: 1.4;">
-                    Se for sua primeira vez aqui no ORCAS, digite um nome para seu Plano neste campo acima à direita. 
-                    Esse Plano será criado contendo 244444444 meses (padrão) iniciando a partir de hoje. Se você quiser 
-                    poderá aumentar o período de 24 para 36 ou 48 ou 60 meses, basta deslizar o comando 
-                    <b>“Aumentar Período”</b>, porém isso acarretará em um valor adicional. Você também pode incluir 
-                    o recebimento do Relatório Diário via email ou Whatsapp marcando as caixas de seleção abaixo.
-                </div>
-            </div>
-            """, 
-            unsafe_allow_html=True
-        )
-        if st.button("❌ Fechar Guia de Ajuda", key="btn_fechar_ajuda_gestao"):
-            st.session_state["exibir_ajuda_gestao"] = False
-            st.rerun()
+        # Apenas chama a função externa, sem nenhum texto hardcoded aqui
+        renderizar_ajuda_gestao()
 
     hoje = datetime.now().date()
     uid_gestao = ID_USUARIO_LOGADO
@@ -184,7 +184,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         relatorios_consolidar = dict(rels_banco)
         
         planos_consolidar[nome_plano_input] = meses_total_edit
-        relatorios_consolidar[nome_plano_input] = 1 if (ativar_zap_atual or ativar_email_atual) else 0
+        relatorios_consolidar[nome_plano_input] = 1 if (ativar_zap_atual or activar_email_atual) else 0
 
         qtd_total_planos = len(planos_consolidar)
         qtd_relatorios_totais = sum(relatorios_consolidar.values())
@@ -524,6 +524,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
 
     st.markdown("""
     <div style="font-size: 12px; color: #333; margin-top: 20px; text-align: justify; line-height: 1.6; border-top: 1px solid #eee; padding-top: 10px;">
-    Sua Assinatura ORCAS BABY mensal custa R$ 19,90 e contempla 2 Planos de 24 meses cada um, mas se você quiser ou necessitar, é possível aumentar o período de um Plano em blocos adicionais de 12 meses tendo um acréscimo de R$ 6,40 para cada 12 meses adicionais. Para aumentar o número de Planos (Padrão - 24 meses), o valor é de R$ 12,80 por Plano adicional. Para receber um Resumo Diário das análises e pendências como, o que preciso pagar e receber hoje, o que ainda está em aberto, quanto já gastei de supermercado até hoje, quanto já gastei nessa reforma, etc de seu Plano via Whatsapp ou E-mail terá um acréscimo de R$ 9,85 por Plano.
+    Sua Assinatura ORCAS BABY mensal custa R$ 19,90 e contempla 2 Planos de 24 meses cada um, mas se você quiser ou necessitar, é possível aumentar o período de um Plano em blocos adicionais of 12 meses tendo um acréscimo de R$ 6,40 para cada 12 meses adicionais. Para aumentar o número de Planos (Padrão - 24 meses), o valor é de R$ 12,80 por Plano adicional. Para receber um Resumo Diário das análises e pendências como, o que preciso pagar e receber hoje, o que ainda está em aberto, quanto já gastei de supermercado até hoje, quanto já gastei nessa reforma, etc de seu Plano via Whatsapp ou E-mail terá um acréscimo de R$ 9,85 por Plano.
     </div>
     """, unsafe_allow_html=True)

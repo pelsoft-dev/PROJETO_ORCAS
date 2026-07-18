@@ -1,15 +1,26 @@
-# -*- coding: utf-8 -*-
-"""
-ORCAS SaaS - Texto de Ajuda da Tela de Gestão
-Arquivo: orcas_v01_Ajuda_Gestao.py
-"""
+import streamlit as st
 
-TEXTO_AJUDA = """
-Se for sua primeira vez aqui no **ORCAS**, digite um nome para seu Plano neste campo acima à direita. 
-
-Esse Plano será criado contendo **24 meses (padrão)** iniciando a partir de hoje. 
-
-Se você quiser, poderá aumentar o período de 24 para 36, 48 ou 60 meses deslizando o comando *"Aumentar Período"*, porém isso acarretará em um valor adicional. 
-
-Você também pode incluir o recebimento do Relatório Diário via e-mail ou WhatsApp marcando as opções correspondentes.
-"""
+def renderizar_ajuda_gestao():
+    """
+    Renderiza o box de ajuda da tela de Gestão com a estilização correta.
+    O texto e o HTML ficam centralizados apenas aqui.
+    """
+    st.markdown(
+        """
+        <div style="background-color: #007ba7; padding: 15px; border-radius: 5px; color: white; font-family: sans-serif; margin-bottom: 20px; position: relative;">
+            <div style="font-weight: bold; font-size: 16px; margin-bottom: 8px;">AJUDA – GESTÃO</div>
+            <div style="font-size: 14px; text-align: justify; line-height: 1.4;">
+                Se for sua primeira vez aqui no ORCAS, digite um nome para seu Plano neste campo acima à direita. 
+                Esse Plano será criado contendo <b>24 meses</b> (padrão) iniciando a partir de hoje. Se você quiser 
+                poderá aumentar o período de 24 para 36 ou 48 ou 60 meses, basta deslizar o comando 
+                <b>“Aumentar Período”</b>, porém isso acarretará em um valor adicional. Você também pode incluir 
+                o recebimento do Relatório Diário via email ou Whatsapp marcando as caixas de seleção abaixo.
+            </div>
+        </div>
+        """, 
+        unsafe_allow_html=True
+    )
+    
+    if st.button("❌ Fechar Guia de Ajuda", key="btn_fechar_ajuda_gestao"):
+        st.session_state["exibir_ajuda_gestao"] = False
+        st.rerun()
