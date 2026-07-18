@@ -4,8 +4,8 @@ import pandas as pd
 from datetime import datetime, date, timedelta
 from dateutil.relativedelta import relativedelta
 
-# Importando a ajuda do arquivo dedicado
-from orcas_v01_ajuda_gestao import renderizar_ajuda_gestao
+# Importação do módulo externo de ajuda
+import orcas_v01_ajuda_gestao as ajuda_gestao
 
 def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, format_moeda, parse_moeda, security):
     """
@@ -17,7 +17,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
     vencimento_atual_str = None
     valor_pago_real = 0.00
     data_ult_assinat_real = None
-    ult_valor_mensal_lido = 0.00 # <-- Centralizado aqui agora
+    ult_valor_mensal_lido = 0.00 
     
     try:
         res_user_master = supabase.table("usuarios").select("*").eq("id", ID_USUARIO_LOGADO).execute()
@@ -26,7 +26,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             vencimento_atual_str = dados_usuario.get('vencimento')
             valor_pago_real = float(dados_usuario.get('valor_pago') or 0.00)
             
-            # Novo local de leitura da coluna: tabela usuarios
             ult_valor_mensal_lido = float(dados_usuario.get('ult_valor_mensal') or 0.00)
             
             data_pag_aux = dados_usuario.get('data_ult_assinat') or dados_usuario.get('criado_em')
@@ -49,7 +48,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         st.markdown('<div class="titulo-tela" style="margin-top:0px;">Gestão de Planos e Assinaturas</div>', unsafe_allow_html=True)
         
     with col_ajuda:
-        # Customização do botão "AJUDA" para usar a cor menos berrante (#007ba7)
+        # Estilização global dos botões primários desta seção (Cor Azul Cerúleo Médio #007ba7)
         st.markdown("""
             <style>
             div.stButton > button:first-child {
@@ -68,10 +67,15 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             st.session_state["exibir_ajuda_gestao"] = not st.session_state.get("exibir_ajuda_gestao", False)
             st.rerun()
 
-    # --- 3. EXIBIÇÃO DO BOX DE AJUDA VIA ARQUIVO EXTERNO ---
+    # --- 3. EXIBIÇÃO DO BOX DE AJUDA EXTERNALIZADO ---
     if st.session_state.get("exibir_ajuda_gestao", False):
-        # Apenas chama a função externa, sem nenhum texto hardcoded aqui
-        renderizar_ajuda_gestao()
+        # Chama a função do arquivo externo para renderizar o texto com o fundo correto
+        ajuda_gestao.exibir_ajuda()
+        
+        # Botão de fechar que herda a cor azul cerúleo médio configurada no estilo acima
+        if st.button("❌ Fechar Guia de Ajuda", key="btn_fechar_ajuda_gestao", type="primary", use_container_width=True):
+            st.session_state["exibir_ajuda_gestao"] = False
+            st.rerun()
 
     hoje = datetime.now().date()
     uid_gestao = ID_USUARIO_LOGADO
@@ -110,33 +114,30 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         if 'tmp_fim_plano' not in st.session_state:
             st.session_state.tmp_fim_plano = data_fim_padrao
 
-        with col_l2_1:
-            d_ini_g = st.date_input("Data de Início:", value=data_inicio_padrao, format="DD/MM/YYYY")
+        d_ini_g = col_l2_1.date_input("Data de Início:", value=data_inicio_padrao, format="DD/MM/YYYY")
         
-        with col_l2_2:
-            col_fim, col_btn_per = st.columns(2)
-            
-            diff_edit = relativedelta(st.session_state.tmp_fim_plano, data_inicio_padrao)
-            meses_atuais = (diff_edit.years * 12) + diff_edit.months + 1
-            if meses_atuais not in [24, 36, 48, 60]:
-                meses_atuais = 24
+        col_fim, col_btn_per = col_l2_2.columns(2)
+        
+        diff_edit = relativedelta(st.session_state.tmp_fim_plano, d_ini_g)
+        meses_atuais = (diff_edit.years * 12) + diff_edit.months + 1
+        if meses_atuais not in [24, 36, 48, 60]:
+            meses_atuais = 24
 
-            if st.session_state.get("pagamento_realizado_sucesso") and st.session_state.get("meses_comprados"):
-                if st.session_state.meses_comprados == 36:
-                    meses_atuais = 36
+        if st.session_state.get("pagamento_realizado_sucesso") and st.session_state.get("meses_comprados"):
+            if st.session_state.meses_comprados == 36:
+                meses_atuais = 36
 
-            with col_btn_per:
-                periodo_slider = st.select_slider(
-                    "Aumentar Período (em 12 meses)",
-                    options=[24, 36, 48, 60],
-                    value=meses_atuais
-                )
-                nova_data_fim = (d_ini_g + relativedelta(months=periodo_slider - 1))
-                nova_data_fim = (nova_data_fim.replace(day=1) + relativedelta(months=1, days=-1))
-                st.session_state.tmp_fim_plano = nova_data_fim
+        with col_btn_per:
+            periodo_slider = st.select_slider(
+                "Aumentar Período (em 12 meses)",
+                options=[24, 36, 48, 60],
+                value=meses_atuais
+            )
+            nova_data_fim = (d_ini_g + relativedelta(months=periodo_slider - 1))
+            nova_data_fim = (nova_data_fim.replace(day=1) + relativedelta(months=1, days=-1))
+            st.session_state.tmp_fim_plano = nova_data_fim
 
-            with col_fim:
-                d_fim_g = st.date_input("Data de Término:", value=st.session_state.tmp_fim_plano, format="DD/MM/YYYY", disabled=True)
+        d_fim_g = col_fim.date_input("Data de Término:", value=st.session_state.tmp_fim_plano, format="DD/MM/YYYY", disabled=True)
 
         col_l3_1, col_l3_2 = st.columns(2)
         valor_saldo_exibir = format_moeda(s_db) if s_db is not None else "0,00"
@@ -172,42 +173,42 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             ativar_zap_atual = st.checkbox("Adicionar o Resumo Diário ORCAS via Whatsapp", value=ativar_zap_val)
             ativar_email_atual = st.checkbox("Adicionar o Resumo Diário ORCAS via E-mail", value=ativar_email_val)
         
-        res_all = supabase.table("config_projetos").select("*").eq("usuario_id", uid_gestao).execute()
-        dados_db = res_all.data if res_all.data else []
-        
-        planos_banco = {}
-        rels_banco = {}
-        for p in dados_db:
-            da1 = datetime.strptime(p['data_ini'], '%Y-%m-%d').date()
-            da2 = datetime.strptime(p['data_fim'], '%Y-%m-%d').date()
-            planos_banco[p['projeto_id']] = (da2.year - da1.year) * 12 + (da2.month - da1.month) + 1
-            rels_banco[p['projeto_id']] = 1 if (p.get('zap_ativo', 0) == 1 or p.get('email_ativo', 0) == 1) else 0
+            res_all = supabase.table("config_projetos").select("*").eq("usuario_id", uid_gestao).execute()
+            dados_db = res_all.data if res_all.data else []
+            
+            planos_banco = {}
+            rels_banco = {}
+            for p in dados_db:
+                da1 = datetime.strptime(p['data_ini'], '%Y-%m-%d').date()
+                da2 = datetime.strptime(p['data_fim'], '%Y-%m-%d').date()
+                planos_banco[p['projeto_id']] = (da2.year - da1.year) * 12 + (da2.month - da1.month) + 1
+                rels_banco[p['projeto_id']] = 1 if (p.get('zap_ativo', 0) == 1 or p.get('email_ativo', 0) == 1) else 0
 
-        planos_consolidar = dict(planos_banco)
-        relatorios_consolidar = dict(rels_banco)
-        
-        planos_consolidar[nome_plano_input] = meses_total_edit
-        relatorios_consolidar[nome_plano_input] = 1 if (ativar_zap_atual or activar_email_atual) else 0
+            planos_consolidar = dict(planos_banco)
+            relatorios_consolidar = dict(rels_banco)
+            
+            planos_consolidar[nome_plano_input] = meses_total_edit
+            relatorios_consolidar[nome_plano_input] = 1 if (ativar_zap_atual or ativar_email_atual) else 0
 
-        qtd_total_planos = len(planos_consolidar)
-        qtd_relatorios_totais = sum(relatorios_consolidar.values())
-        
-        c24 = sum(1 for m in planos_consolidar.values() if m <= 24)
-        c36 = sum(1 for m in planos_consolidar.values() if m == 36)
-        c48 = sum(1 for m in planos_consolidar.values() if m == 48)
-        c60 = sum(1 for m in planos_consolidar.values() if m >= 60)
-        
-        base_baby = 19.90 
-        custo_relatorio_total = qtd_relatorios_totais * 9.85
-        add_planos_extra = (qtd_total_planos - 2) * 12.80 if qtd_total_planos > 2 else 0.00
-        
-        v_p36 = c36 * 6.40
-        v_p48 = c48 * 12.80
-        v_p60 = c60 * 19.20
-        
-        v_mensal_total = base_baby + custo_relatorio_total + add_planos_extra + v_p36 + v_p48 + v_p60
-        v_6meses = (v_mensal_total * 6) * 0.95
-        v_12meses = (v_mensal_total * 12) * 0.89 
+            qtd_total_planos = len(planos_consolidar)
+            qtd_relatorios_totais = sum(relatorios_consolidar.values())
+            
+            c24 = sum(1 for m in planos_consolidar.values() if m <= 24)
+            c36 = sum(1 for m in planos_consolidar.values() if m == 36)
+            c48 = sum(1 for m in planos_consolidar.values() if m == 48)
+            c60 = sum(1 for m in planos_consolidar.values() if m >= 60)
+            
+            base_baby = 19.90 
+            custo_relatorio_total = qtd_relatorios_totais * 9.85
+            add_planos_extra = (qtd_total_planos - 2) * 12.80 if qtd_total_planos > 2 else 0.00
+            
+            v_p36 = c36 * 6.40
+            v_p48 = c48 * 12.80
+            v_p60 = c60 * 19.20
+            
+            v_mensal_total = base_baby + custo_relatorio_total + add_planos_extra + v_p36 + v_p48 + v_p60
+            v_6meses = (v_mensal_total * 6) * 0.95
+            v_12meses = (v_mensal_total * 12) * 0.89 
 
         resumo_html = f"""
         <div style="background-color: #87CEFA; padding: 15px; border-radius: 5px; color: black; font-family: sans-serif; border: 1px solid #1E90FF;">
@@ -341,7 +342,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
 
         if btn_col1.button("Salvar alterações ou Criar o novo Plano", use_container_width=True):
             if tipo_pagamento == "Selecione uma opção...":
-                st.error("⚠️ Por favor, selecione um período de renovação abaixo para calcular se há valores a pagar antes de salvar.")
+                st.error("⚠️ Por favor, selecione um período de renovação abaixo para calcular se hay valores a pagar antes de salvar.")
             
             elif v_mensal_total <= ult_valor_mensal_lido and meses_novos <= meses_originais:
                 try:
@@ -465,7 +466,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                             if 'clicou_salvar_upgrade' in st.session_state: del st.session_state.clicou_salvar_upgrade
                             if 'tipo_pagamento_selecionado' in st.session_state: del st.session_state.tipo_pagamento_selecionado
                             st.session_state.projeto_ativo = nome_plano_input
-                            st.session_state.msg_sucesso = "🎉 Assinatura atualizada com sucesso via Cupom!"
+                            st.session_state.msg_sucesso = "🎉 Assinatura actualizada com sucesso via Cupom!"
                             st.rerun()
                         except Exception as e:
                             st.error(f"Erro ao processar validação do cupom gratuito: {e}")
@@ -513,7 +514,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                                     }).execute()
                                 
                                     st.toast("Link gerado com sucesso!")
-                                except Exception as e:
+                                catch Exception as e:
                                     st.error(f"Erro ao registrar transação temporária: {e}")
             
             if "url_ativa" in st.session_state and not is_cupom_100:
