@@ -8,7 +8,6 @@ def renderizar_ajuda_gestao():
     st.markdown(
         """
         <div style="background-color: #007ba7; padding: 15px; border-radius: 5px; color: white; font-family: sans-serif; margin-bottom: 20px; position: relative;">
-            <div style="font-weight: bold; font-size: 16px; margin-bottom: 8px;">AJUDA – GESTÃO</div>
             <div style="font-size: 14px; text-align: justify; line-height: 1.4;">
                 Se for sua primeira vez aqui no ORCAS, digite um nome para seu Plano neste campo acima à direita. 
                 Esse Plano será criado contendo <b>24 meses</b> (padrão) iniciando a partir de hoje. Se você quiser 
@@ -21,6 +20,8 @@ def renderizar_ajuda_gestao():
         unsafe_allow_html=True
     )
     
+    # <div style="font-weight: bold; font-size: 16px; margin-bottom: 8px;">AJUDA – GESTÃO</div>
+
     if st.button("❌ Fechar Guia de Ajuda", key="btn_fechar_ajuda_gestao"):
         st.session_state["exibir_ajuda_gestao"] = False
         st.rerun()
