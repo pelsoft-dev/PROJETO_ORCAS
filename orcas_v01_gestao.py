@@ -42,33 +42,20 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
     if not tipo_renov_original or tipo_renov_original == "Selecione uma option...":
         tipo_renov_original = "Mensal"
 
-    # --- 2. CABEÇALHO ALINHADO COM BOTÃO DE AJUDA (HTML FLEXBOX SEGURO) ---
-    st.markdown(
-        """
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; padding-bottom: 10px; border-bottom: 1px solid #eee;">
-            <h2 style="margin: 0; padding: 0; color: #1E3A8A; font-family: sans-serif; font-size: 28px; font-weight: bold;">Gestão de Planos e Assinaturas</h2>
-            <button onclick="parent.postMessage({type: 'streamlit:set_component_value', value: true}, '*')" 
-                    style="background-color: #007ba7; color: white; border: none; padding: 8px 20px; border-radius: 5px; font-weight: bold; font-size: 14px; cursor: pointer; font-family: sans-serif; transition: background 0.2s;">
-                AJUDA
-            </button>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-    # Injeta um botão invisível do Streamlit para capturar a ação do clique em HTML se preferir usar st.session_state nativo
-    # Para manter o comportamento exato que você já usava de alternar a ajuda:
-    col_vazia, col_btn_oculto = st.columns([4, 1])
-    with col_btn_oculto:
-        # Injeção de CSS para estilizar o botão padrão do Streamlit na mesma linha visualmente
+    # --- 2. CABEÇALHO ALINHADO COM BOTÃO DE AJUDA ---
+    col_titulo, col_ajuda = st.columns([4, 1])
+    
+    with col_titulo:
+        st.markdown('<div class="titulo-tela" style="margin-top:0px;">Gestão de Planos e Assinaturas</div>', unsafe_allow_html=True)
+        
+    with col_ajuda:
+        # Customização do botão "AJUDA" para usar a cor menos berrante (#007ba7)
         st.markdown("""
             <style>
             div.stButton > button:first-child {
                 background-color: #007ba7 !important;
                 color: white !important;
                 border: none !important;
-                margin-top: -68px !important; /* Move o botão real para cima do container HTML */
-                float: right !important;
             }
             div.stButton > button:first-child:hover {
                 background-color: #005f81 !important;
@@ -77,12 +64,13 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             </style>
         """, unsafe_allow_html=True)
         
-        if st.button("AJUDA", type="primary", use_container_width=True, key="btn_ajuda_alinhado"):
+        if st.button("AJUDA", type="primary", use_container_width=True):
             st.session_state["exibir_ajuda_gestao"] = not st.session_state.get("exibir_ajuda_gestao", False)
             st.rerun()
 
     # --- 3. EXIBIÇÃO DO BOX DE AJUDA VIA ARQUIVO EXTERNO ---
     if st.session_state.get("exibir_ajuda_gestao", False):
+        # Apenas chama a função externa, sem nenhum texto hardcoded aqui
         renderizar_ajuda_gestao()
 
     hoje = datetime.now().date()
@@ -326,7 +314,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                     f"""
                     <div style="color: #856404; background-color: #fff3cd; border-color: #ffeeba; padding: 15px; border: 1px solid transparent; border-radius: 4px; margin-top: 15px; margin-bottom: 15px; font-family: sans-serif; text-align: justify;">
                         ⚠️ <b>Aviso de Aproveitamento de Saldo:</b><br>
-                        Como o sistema trabalha com opções fechadas, optando por uma renovação Mensal com créditos ativos, você terá este mês sem custos, mas perderá um saldo residual de <b>R$ {format_moeda(saldo_perdido_exibir)}</b>. Fazendo uma renovação Semestral, utiliza integralmente esse saldo e pagará apenas a diferença de <b>R$ {format_moeda(diferenca_semestral_exibir)}</b>.
+                        Como o systema trabalha com opções fechadas, optando por uma renovação Mensal com créditos ativos, você terá este mês sem custos, mas perderá um saldo residual de <b>R$ {format_moeda(saldo_perdido_exibir)}</b>. Fazendo uma renovação Semestral, utiliza integralmente esse saldo e pagará apenas a diferença de <b>R$ {format_moeda(diferenca_semestral_exibir)}</b>.
                     </div>
                     """,
                     unsafe_allow_html=True
@@ -345,15 +333,15 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             "saldo_inicial": parse_moeda(saldo_input),
             "data_ini": d_ini_g.strftime('%Y-%m-%d'), 
             "data_fim": st.session_state.tmp_fim_plano.strftime('%Y-%m-%d'),
-            "zap_ativo": 1 if activar_zap_atual else 0,
-            "email_ativo": 1 if activar_email_atual else 0
+            "zap_ativo": 1 if ativar_zap_atual else 0,
+            "email_ativo": 1 if ativar_email_atual else 0
         }
         
         houve_upgrade_real = (v_mensal_total > ult_valor_mensal_lido) or (tipo_pagamento != "Selecione uma opção..." and meses_novos > meses_originais)
 
         if btn_col1.button("Salvar alterações ou Criar o novo Plano", use_container_width=True):
             if tipo_pagamento == "Selecione uma opção...":
-                st.error("⚠️ Por favor, selecione um período de renovação abaixo para calcular se hay valores a pagar antes de salvar.")
+                st.error("⚠️ Por favor, selecione um período de renovação abaixo para calcular se há valores a pagar antes de salvar.")
             
             elif v_mensal_total <= ult_valor_mensal_lido and meses_novos <= meses_originais:
                 try:
@@ -518,8 +506,8 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                                         "projeto_id": plano_para_vincular,
                                         "data_ini": dados_p_salvamento.get("data_ini"),
                                         "data_fim": dados_p_salvamento.get("data_fim"),
-                                        "zap_ativo": bool(activar_zap_atual),
-                                        "email_ativo": int(1 if activar_email_atual else 0),
+                                        "zap_ativo": bool(ativar_zap_atual),
+                                        "email_ativo": int(1 if ativar_email_atual else 0),
                                         "tipo_renovacao": str(tipo_pagamento),
                                         "ult_valor_mensal": float(v_mensal_total)
                                     }).execute()
