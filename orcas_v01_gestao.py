@@ -60,7 +60,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 <div style="font-weight: bold; font-size: 16px; margin-bottom: 8px;">AJUDA – GESTÃO</div>
                 <div style="font-size: 14px; text-align: justify; line-height: 1.4;">
                     Se for sua primeira vez aqui no ORCAS, digite um nome para seu Plano neste campo acima à direita. 
-                    Esse Plano será criado contendo 24 meses (padrão) iniciando a partir de hoje. Se você quiser 
+                    Esse Plano será criado contendo 244444444 meses (padrão) iniciando a partir de hoje. Se você quiser 
                     poderá aumentar o período de 24 para 36 ou 48 ou 60 meses, basta deslizar o comando 
                     <b>“Aumentar Período”</b>, porém isso acarretará em um valor adicional. Você também pode incluir 
                     o recebimento do Relatório Diário via email ou Whatsapp marcando as caixas de seleção abaixo.
