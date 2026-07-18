@@ -514,8 +514,8 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                                     }).execute()
                                 
                                     st.toast("Link gerado com sucesso!")
-                                catch Exception as e:
-                                    st.error(f"Erro ao registrar transação temporária: {e}")
+                                except Exception as e:
+                                    st.error(f"Erro ao registrar transação temporária: {e}")   
             
             if "url_ativa" in st.session_state and not is_cupom_100:
                 st.link_button("🔵 PAGAMENTO - IR P/ MERCADO PAGO", st.session_state.url_ativa, use_container_width=True)
