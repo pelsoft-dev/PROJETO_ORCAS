@@ -110,30 +110,33 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         if 'tmp_fim_plano' not in st.session_state:
             st.session_state.tmp_fim_plano = data_fim_padrao
 
-        d_ini_g = col_l2_1.date_input("Data de Início:", value=data_inicio_padrao, format="DD/MM/YYYY")
+        with col_l2_1:
+            d_ini_g = st.date_input("Data de Início:", value=data_inicio_padrao, format="DD/MM/YYYY")
         
-        col_fim, col_btn_per = col_l2_2.columns(2)
-        
-        diff_edit = relativedelta(st.session_state.tmp_fim_plano, d_ini_g)
-        meses_atuais = (diff_edit.years * 12) + diff_edit.months + 1
-        if meses_atuais not in [24, 36, 48, 60]:
-            meses_atuais = 24
+        with col_l2_2:
+            col_fim, col_btn_per = st.columns(2)
+            
+            diff_edit = relativedelta(st.session_state.tmp_fim_plano, data_inicio_padrao)
+            meses_atuais = (diff_edit.years * 12) + diff_edit.months + 1
+            if meses_atuais not in [24, 36, 48, 60]:
+                meses_atuais = 24
 
-        if st.session_state.get("pagamento_realizado_sucesso") and st.session_state.get("meses_comprados"):
-            if st.session_state.meses_comprados == 36:
-                meses_atuais = 36
+            if st.session_state.get("pagamento_realizado_sucesso") and st.session_state.get("meses_comprados"):
+                if st.session_state.meses_comprados == 36:
+                    meses_atuais = 36
 
-        with col_btn_per:
-            periodo_slider = st.select_slider(
-                "Aumentar Período (em 12 meses)",
-                options=[24, 36, 48, 60],
-                value=meses_atuais
-            )
-            nova_data_fim = (d_ini_g + relativedelta(months=periodo_slider - 1))
-            nova_data_fim = (nova_data_fim.replace(day=1) + relativedelta(months=1, days=-1))
-            st.session_state.tmp_fim_plano = nova_data_fim
+            with col_btn_per:
+                periodo_slider = st.select_slider(
+                    "Aumentar Período (em 12 meses)",
+                    options=[24, 36, 48, 60],
+                    value=meses_atuais
+                )
+                nova_data_fim = (d_ini_g + relativedelta(months=periodo_slider - 1))
+                nova_data_fim = (nova_data_fim.replace(day=1) + relativedelta(months=1, days=-1))
+                st.session_state.tmp_fim_plano = nova_data_fim
 
-        d_fim_g = col_fim.date_input("Data de Término:", value=st.session_state.tmp_fim_plano, format="DD/MM/YYYY", disabled=True)
+            with col_fim:
+                d_fim_g = st.date_input("Data de Término:", value=st.session_state.tmp_fim_plano, format="DD/MM/YYYY", disabled=True)
 
         col_l3_1, col_l3_2 = st.columns(2)
         valor_saldo_exibir = format_moeda(s_db) if s_db is not None else "0,00"
@@ -311,7 +314,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                     f"""
                     <div style="color: #856404; background-color: #fff3cd; border-color: #ffeeba; padding: 15px; border: 1px solid transparent; border-radius: 4px; margin-top: 15px; margin-bottom: 15px; font-family: sans-serif; text-align: justify;">
                         ⚠️ <b>Aviso de Aproveitamento de Saldo:</b><br>
-                        Como o sistema trabalha com opções fechadas, optando por uma renovação Mensal com créditos ativos, você terá este mês sem custos, mas perderá um saldo residual de <b>R$ {format_moeda(saldo_perdido_exibir)}</b>. Fazendo uma renovação Semestral, utiliza integralmente esse saldo e pagará apenas a diferença de <b>R$ {format_moeda(diferenca_semestral_exibir)}</b>.
+                        Como o systema trabalha com opções fechadas, optando por uma renovação Mensal com créditos ativos, você terá este mês sem custos, mas perderá um saldo residual de <b>R$ {format_moeda(saldo_perdido_exibir)}</b>. Fazendo uma renovação Semestral, utiliza integralmente esse saldo e pagará apenas a diferença de <b>R$ {format_moeda(diferenca_semestral_exibir)}</b>.
                     </div>
                     """,
                     unsafe_allow_html=True
@@ -338,7 +341,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
 
         if btn_col1.button("Salvar alterações ou Criar o novo Plano", use_container_width=True):
             if tipo_pagamento == "Selecione uma opção...":
-                st.error("⚠️ Por favor, selecione um período de renovação abaixo para calcular se hay valores a pagar antes de salvar.")
+                st.error("⚠️ Por favor, selecione um período de renovação abaixo para calcular se há valores a pagar antes de salvar.")
             
             elif v_mensal_total <= ult_valor_mensal_lido and meses_novos <= meses_originais:
                 try:
@@ -462,7 +465,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                             if 'clicou_salvar_upgrade' in st.session_state: del st.session_state.clicou_salvar_upgrade
                             if 'tipo_pagamento_selecionado' in st.session_state: del st.session_state.tipo_pagamento_selecionado
                             st.session_state.projeto_ativo = nome_plano_input
-                            st.session_state.msg_sucesso = "🎉 Assinatura actualizada com sucesso via Cupom!"
+                            st.session_state.msg_sucesso = "🎉 Assinatura atualizada com sucesso via Cupom!"
                             st.rerun()
                         except Exception as e:
                             st.error(f"Erro ao processar validação do cupom gratuito: {e}")
@@ -504,7 +507,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                                         "data_ini": dados_p_salvamento.get("data_ini"),
                                         "data_fim": dados_p_salvamento.get("data_fim"),
                                         "zap_ativo": bool(ativar_zap_atual),
-                                        "email_ativo": int(1 if activar_email_atual else 0),
+                                        "email_ativo": int(1 if ativar_email_atual else 0),
                                         "tipo_renovacao": str(tipo_pagamento),
                                         "ult_valor_mensal": float(v_mensal_total)
                                     }).execute()
@@ -524,6 +527,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
 
     st.markdown("""
     <div style="font-size: 12px; color: #333; margin-top: 20px; text-align: justify; line-height: 1.6; border-top: 1px solid #eee; padding-top: 10px;">
-    Sua Assinatura ORCAS BABY mensal custa R$ 19,90 e contempla 2 Planos de 24 meses cada um, mas se você quiser ou necessitar, é possível aumentar o período de um Plano em blocos adicionais of 12 meses tendo um acréscimo de R$ 6,40 para cada 12 meses adicionais. Para aumentar o número de Planos (Padrão - 24 meses), o valor é de R$ 12,80 por Plano adicional. Para receber um Resumo Diário das análises e pendências como, o que preciso pagar e receber hoje, o que ainda está em aberto, quanto já gastei de supermercado até hoje, quanto já gastei nessa reforma, etc de seu Plano via Whatsapp ou E-mail terá um acréscimo de R$ 9,85 por Plano.
+    Sua Assinatura ORCAS BABY mensal custa R$ 19,90 e contempla 2 Planos de 24 meses cada um, mas se você quiser ou necessitar, é possível aumentar o período de um Plano em blocos adicionais de 12 meses tendo um acréscimo de R$ 6,40 para cada 12 meses adicionais. Para aumentar o número de Planos (Padrão - 24 meses), o valor é de R$ 12,80 por Plano adicional. Para receber um Resumo Diário das análises e pendências como, o que preciso pagar e receber hoje, o que ainda está em aberto, quanto já gastei de supermercado até hoje, quanto já gastei nessa reforma, etc de seu Plano via Whatsapp ou E-mail terá um acréscimo de R$ 9,85 por Plano.
     </div>
     """, unsafe_allow_html=True)
