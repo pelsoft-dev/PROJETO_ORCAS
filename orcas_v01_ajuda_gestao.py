@@ -9,9 +9,8 @@ def renderizar_ajuda_gestao():
         """
         <div style="background-color: #007ba7; padding: 15px; border-radius: 5px; color: white; font-family: sans-serif; margin-bottom: 20px; position: relative;">
             <div style="font-size: 14px; text-align: justify; line-height: 1.4;">
-                Se for sua primeira vez aqui no ORCAS, digite um nome para seu Plano neste campo acima à direita. 
-                Esse Plano será criado contendo <b>24 meses</b> (padrão) iniciando a partir de hoje. Se você quiser 
-                poderá aumentar o período de 24 para 36 ou 48 ou 60 meses, basta deslizar o comando 
+                Se for sua primeira vez aqui no ORCAS, siga esse caminho: (1) digite um nome para seu Plano no campo 02 e dê <enter>. (2) Se você quiser partir de           Esse Plano será criado contendo <b>24 meses</b> (padrão) iniciando a partir de hoje. Se você quiser 
+                um Saldo Inicial, digite-o no campo 06. (3) Se vc quiser receber um Resumo Diário via e-mail e/ou Whatsapp, utilize os campos 08 e 09. (4) poderá aumentar o período de 24 para 36 ou 48 ou 60 meses, basta deslizar o comando 
                 <b>“Aumentar Período”</b>, porém isso acarretará em um valor adicional. Você também pode incluir 
                 o recebimento do Relatório Diário via email ou Whatsapp marcando as caixas de seleção abaixo.
                 xxxxxxxxxxxxxxxxxxxxxxx
