@@ -445,7 +445,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             
             with col_res2:
                 if is_cupom_100:
-                    if st.button("✅ CONCLUIR ASSINATURA GRÁTIS", use_container_width=True, type="primary"):
+                    if st.button("✅ 23. CONCLUIR ASSINATURA GRÁTIS", use_container_width=True, type="primary"):
                         try:
                             res_p = supabase.table("config_projetos").select("id").eq("projeto_id", nome_plano_input).eq("usuario_id", uid_gestao).execute()
                             if res_p and hasattr(res_p, 'data') and res_p.data: 
@@ -517,7 +517,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                                     st.error(f"Erro ao registrar transação temporária: {e}")
             
             if "url_ativa" in st.session_state and not is_cupom_100:
-                st.link_button("🔵 23. PAGAMENTO - IR P/ MERCADO PAGO", st.session_state.url_ativa, use_container_width=True)
+                st.link_button("🔵 30. PAGAMENTO - IR P/ MERCADO PAGO", st.session_state.url_ativa, use_container_width=True)
         
         elif tipo_pagamento != "Selecione uma opção..." and not houve_upgrade_real:
             st.info("ℹ️ Este plano está coberto pela sua assinatura atual. Não há valores adicionais a pagar.")
