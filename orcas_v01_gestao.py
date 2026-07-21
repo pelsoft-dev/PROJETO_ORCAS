@@ -11,15 +11,17 @@ def ao_mudar_nome_campo_02():
     """
     Callback executado ao alterar o Campo 02.
     Incrementa a versão do formulário e desmarca a seleção do Campo 01.
+    Nota: NÃO chamar st.rerun() aqui dentro, pois o Streamlit faz isso automaticamente.
     """
     st.session_state["form_version"] = st.session_state.get("form_version", 0) + 1
-    # Limpa a seleção do Campo 01 para refletir a criação do novo plano
+    # Limpa a seleção do Campo 01 no state para a próxima renderização
     st.session_state["sb_plano_gestao_unique"] = ""
     st.session_state["ultimo_plano_c1_processado"] = ""
 
 def resetar_estado_plano_gestao():
     """
     Descarrega o plano ativo e limpa todos os campos de controle.
+    Deve ser executado SEMPRE no topo da página, antes dos widgets serem instanciados.
     """
     st.session_state.projeto_ativo = ""
     st.session_state["nome_plano_input_key"] = ""
@@ -36,16 +38,16 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
     hoje = datetime.now().date()
     uid_gestao = ID_USUARIO_LOGADO
 
+    # --- EXECUÇÃO DE LIMPEZA NO TOPO (ANTES DE INSTANCIAR OS WIDGETS) ---
+    if st.session_state.get("limpar_plano_apos_conclusao", False):
+        resetar_estado_plano_gestao()
+        st.session_state["limpar_plano_apos_conclusao"] = False
+
     # Controle de versão das keys dos widgets
     if "form_version" not in st.session_state:
         st.session_state["form_version"] = 0
 
     ver = st.session_state["form_version"]
-
-    # Se houve ordem explícita de limpeza após conclusão
-    if st.session_state.get("limpar_plano_apos_conclusao", False):
-        resetar_estado_plano_gestao()
-        st.session_state.limpar_plano_apos_conclusao = False
 
     plano_corrente = st.session_state.get("projeto_ativo", "")
 
@@ -398,8 +400,8 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                     
                     st.session_state.msg_sucesso = "🎉 Alterações aplicadas com sucesso! Seu plano está coberto."
                     
-                    # DESCARREGA O PLANO DA TELA APÓS SALVAR
-                    resetar_estado_plano_gestao()
+                    # SOLICITA LIMPEZA DO ESTADO NA PRÓXIMA RENDERIZAÇÃO
+                    st.session_state["limpar_plano_apos_conclusao"] = True
                     st.rerun()
                 except Exception as e:
                     st.error(f"Erro ao salvar plano: {e}")
@@ -418,7 +420,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 supabase.table("lancamentos").delete().eq("projeto_id", st.session_state.projeto_ativo).eq("usuario_id", uid_gestao).execute()
                 supabase.table("config_projetos").delete().eq("projeto_id", st.session_state.projeto_ativo).eq("usuario_id", uid_gestao).execute()
                 
-                resetar_estado_plano_gestao()
+                st.session_state["limpar_plano_apos_conclusao"] = True
                 st.session_state.confirmar_exclusao_plano = False
                 st.rerun()
             if ce2.button("CANCELAR"):
@@ -506,8 +508,8 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                             
                             st.session_state.msg_sucesso = "🎉 Assinatura atualizada com sucesso via Cupom!"
                             
-                            # DESCARREGA O PLANO APÓS CONCLUIR A ASSINATURA GRÁTIS
-                            resetar_estado_plano_gestao()
+                            # FLAG PARA SOLICITAR A LIMPEZA LIMPA DO PLANO NA PRÓXIMA RENDERIZAÇÃO
+                            st.session_state["limpar_plano_apos_conclusao"] = True
                             st.rerun()
                         except Exception as e:
                             st.error(f"Erro ao processar validação do cupom gratuito: {e}")
