@@ -14,22 +14,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
     hoje = datetime.now().date()
     uid_gestao = ID_USUARIO_LOGADO
 
-    # --- CALLBACK: REFINA E RESETA OS CAMPOS QUANDO O NOME DO PLANO É ALTERADO NO CAMPO 02 ---
-    def resetar_campos_novo_plano():
-        st.session_state["data_ini_gestao_val"] = hoje.replace(day=1)
-        
-        # Recalcula a data de término padrão para 24 meses
-        d_fim_padrao = (hoje.replace(day=1) + relativedelta(months=23)).replace(day=1) + relativedelta(months=1, days=-1)
-        st.session_state.tmp_fim_plano = d_fim_padrao
-        st.session_state["slider_periodo_val"] = 24
-        
-        # Força Saldo Inicial como 0,00
-        st.session_state["saldo_inicial_gestao_val"] = "0,00"
-        
-        # Desmarca os checkboxes 08 e 09
-        st.session_state["chk_zap_val"] = False
-        st.session_state["chk_email_val"] = False
-
     # --- 1. TRATAMENTO DO PERFIL DO UTILIZADOR E VALOR PAGO REAL ---
     tipo_renov_original = "Mensal"
     vencimento_atual_str = None
@@ -103,63 +87,66 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         if 'tmp_fim_plano' in st.session_state: del st.session_state.tmp_fim_plano
         if 'clicou_salvar_upgrade' in st.session_state: del st.session_state.clicou_salvar_upgrade
         if 'tipo_pagamento_selecionado' in st.session_state: del st.session_state.tipo_pagamento_selecionado
-        # Limpa os estados customizados do form para recarregar do banco
-        for k in ["data_ini_gestao_val", "saldo_inicial_gestao_val", "chk_zap_val", "chk_email_val", "slider_periodo_val"]:
-            if k in st.session_state: del st.session_state[k]
         st.rerun()
 
-    # Inicialização do nome no input
-    if "nome_plano_input_key" not in st.session_state:
-        st.session_state.nome_plano_input_key = st.session_state.projeto_ativo if st.session_state.projeto_ativo else ""
+    # Inicialização do nome no input (sincroniza com o projeto ativo selecionado)
+    nome_padrao_input = st.session_state.projeto_ativo if st.session_state.projeto_ativo else ""
 
     nome_plano_input = col_l1_2.text_input(
         "02. Nome do Plano carregado ou Nome para criação de um novo Plano", 
-        key="nome_plano_input_key",
-        on_change=resetar_campos_novo_plano
+        value=nome_padrao_input,
+        key="nome_plano_input_key"
     )
 
     if nome_plano_input and nome_plano_input.strip() != "":
+        
+        # --- LÓGICA DE COMPARAÇÃO DIRETA (CAMPO 02 vs CAMPO 01) ---
+        # Se o texto do Campo 02 for diferente do selecionado no Campo 01, o plano mudou!
+        plano_mudou = (nome_plano_input.strip() != plano_sel.strip())
+
         col_l2_1, col_l2_2 = st.columns(2)
         
-        # --- PREPARAÇÃO E INICIALIZAÇÃO DOS VALORES DOS CAMPOS ---
-        data_inicio_padrao = d_ini_db if d_ini_db else hoje.replace(day=1)
-        if not d_fim_db:
+        # Leitura dos dados de configuração do banco (se houver)
+        res_cfg_plano = supabase.table("config_projetos").select("*").eq("projeto_id", nome_plano_input).eq("usuario_id", uid_gestao).execute()
+        zap_plano_db = res_cfg_plano.data[0].get('zap_ativo', 0) if res_cfg_plano.data else 0
+        email_plano_db = res_cfg_plano.data[0].get('email_ativo', 0) if res_cfg_plano.data else 0
+
+        # DEFINIÇÃO DOS VALORES PADRÃO COM BASE NA FLAG 'plano_mudou'
+        if plano_mudou:
+            data_inicio_padrao = hoje.replace(day=1)
             data_fim_padrao = (data_inicio_padrao + relativedelta(months=23)).replace(day=1) + relativedelta(months=1, days=-1)
+            saldo_inicial_padrao = "0,00"
+            zap_padrao = False
+            email_padrao = False
+            meses_slider_padrao = 24
         else:
-            data_fim_padrao = d_fim_db
-
-        if 'tmp_fim_plano' not in st.session_state:
-            st.session_state.tmp_fim_plano = data_fim_padrao
-
-        if "data_ini_gestao_val" not in st.session_state:
-            st.session_state.data_ini_gestao_val = data_inicio_padrao
+            data_inicio_padrao = d_ini_db if d_ini_db else hoje.replace(day=1)
+            data_fim_padrao = d_fim_db if d_fim_db else (data_inicio_padrao + relativedelta(months=23)).replace(day=1) + relativedelta(months=1, days=-1)
+            saldo_inicial_padrao = format_moeda(s_db) if s_db is not None else "0,00"
+            zap_padrao = (zap_plano_db == 1)
+            email_padrao = (email_plano_db == 1)
+            
+            diff_edit = relativedelta(data_fim_padrao, data_inicio_padrao)
+            meses_slider_padrao = (diff_edit.years * 12) + diff_edit.months + 1
+            if meses_slider_padrao not in [24, 36, 48, 60]:
+                meses_slider_padrao = 24
 
         with col_l2_1:
             d_ini_g = st.date_input(
                 "03. Data de Início:", 
+                value=data_inicio_padrao,
                 key="data_ini_gestao_val", 
                 format="DD/MM/YYYY"
             )
         
         with col_l2_2:
             col_fim, col_btn_per = st.columns(2)
-            
-            diff_edit = relativedelta(st.session_state.tmp_fim_plano, d_ini_g)
-            meses_atuais = (diff_edit.years * 12) + diff_edit.months + 1
-            if meses_atuais not in [24, 36, 48, 60]:
-                meses_atuais = 24
-
-            if st.session_state.get("pagamento_realizado_sucesso") and st.session_state.get("meses_comprados"):
-                if st.session_state.meses_comprados == 36:
-                    meses_atuais = 36
-
-            if "slider_periodo_val" not in st.session_state:
-                st.session_state.slider_periodo_val = meses_atuais
 
             with col_btn_per:
                 periodo_slider = st.select_slider(
                     "05. Aumentar Período (12 meses)",
                     options=[24, 36, 48, 60],
+                    value=meses_slider_padrao,
                     key="slider_periodo_val"
                 )
                 nova_data_fim = (d_ini_g + relativedelta(months=periodo_slider - 1))
@@ -170,38 +157,25 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 d_fim_g = st.date_input("04. Data de Término:", value=st.session_state.tmp_fim_plano, format="DD/MM/YYYY", disabled=True)
 
         col_l3_1, col_l3_2 = st.columns(2)
-        
-        if "saldo_inicial_gestao_val" not in st.session_state:
-            st.session_state.saldo_inicial_gestao_val = format_moeda(s_db) if s_db is not None else "0,00"
 
-        saldo_input = col_l3_1.text_input("06. Saldo Inicial:", key="saldo_inicial_gestao_val")
+        saldo_input = col_l3_1.text_input("06. Saldo Inicial:", value=saldo_inicial_padrao, key="saldo_inicial_gestao_val")
         
         meses_total_edit = (st.session_state.tmp_fim_plano.year - d_ini_g.year) * 12 + (st.session_state.tmp_fim_plano.month - d_ini_g.month) + 1
         col_l3_2.text_input("07. Período do Plano:", value=f"{meses_total_edit} meses", disabled=True)
 
         col_l4_1, col_l4_2 = st.columns(2)
-        
-        res_cfg_plano = supabase.table("config_projetos").select("*").eq("projeto_id", nome_plano_input).eq("usuario_id", uid_gestao).execute()
-        
-        zap_plano_db = res_cfg_plano.data[0].get('zap_ativo', 0) if res_cfg_plano.data else 0
-        email_plano_db = res_cfg_plano.data[0].get('email_ativo', 0) if res_cfg_plano.data else 0
-
-        if "chk_zap_val" not in st.session_state:
-            st.session_state.chk_zap_val = (zap_plano_db == 1)
-        if "chk_email_val" not in st.session_state:
-            st.session_state.chk_email_val = (email_plano_db == 1)
 
         if st.session_state.get("pagamento_realizado_sucesso"):
-            st.session_state.chk_zap_val = False
-            st.session_state.chk_email_val = True
+            zap_padrao = False
+            email_padrao = True
             if "pagamento_realizado_sucesso" in st.session_state: del st.session_state.pagamento_realizado_sucesso
             if "meses_comprados" in st.session_state: del st.session_state.meses_comprados
 
         with col_l4_1:
             st.write("") 
             st.write("") 
-            ativar_zap_atual = st.checkbox("08. Adicionar o Resumo Diário ORCAS via Whatsapp", key="chk_zap_val")
-            ativar_email_atual = st.checkbox("09. Adicionar o Resumo Diário ORCAS via E-mail", key="chk_email_val")
+            ativar_zap_atual = st.checkbox("08. Adicionar o Resumo Diário ORCAS via Whatsapp", value=zap_padrao, key="chk_zap_val")
+            ativar_email_atual = st.checkbox("09. Adicionar o Resumo Diário ORCAS via E-mail", value=email_padrao, key="chk_email_val")
         
         res_all = supabase.table("config_projetos").select("*").eq("usuario_id", uid_gestao).execute()
         dados_db = res_all.data if res_all.data else []
@@ -387,8 +361,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                     if 'tmp_fim_plano' in st.session_state: del st.session_state.tmp_fim_plano
                     if 'clicou_salvar_upgrade' in st.session_state: del st.session_state.clicou_salvar_upgrade
                     if 'tipo_pagamento_selecionado' in st.session_state: del st.session_state.tipo_pagamento_selecionado
-                    for k in ["data_ini_gestao_val", "saldo_inicial_gestao_val", "chk_zap_val", "chk_email_val", "slider_periodo_val"]:
-                        if k in st.session_state: del st.session_state[k]
                     
                     st.session_state.projeto_ativo = nome_plano_input
                     st.session_state.msg_sucesso = "🎉 Alterações aplicadas com sucesso! Seu plano atual está coberto."
@@ -498,8 +470,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                             if 'tmp_fim_plano' in st.session_state: del st.session_state.tmp_fim_plano
                             if 'clicou_salvar_upgrade' in st.session_state: del st.session_state.clicou_salvar_upgrade
                             if 'tipo_pagamento_selecionado' in st.session_state: del st.session_state.tipo_pagamento_selecionado
-                            for k in ["data_ini_gestao_val", "saldo_inicial_gestao_val", "chk_zap_val", "chk_email_val", "slider_periodo_val"]:
-                                if k in st.session_state: del st.session_state[k]
 
                             st.session_state.projeto_ativo = nome_plano_input
                             st.session_state.msg_sucesso = "🎉 Assinatura atualizada com sucesso via Cupom!"
