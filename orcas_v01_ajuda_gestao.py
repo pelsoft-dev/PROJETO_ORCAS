@@ -14,6 +14,14 @@ def renderizar_ajuda_gestao():
                 poderá aumentar o período de 24 para 36 ou 48 ou 60 meses, basta deslizar o comando 
                 <b>“Aumentar Período”</b>, porém isso acarretará em um valor adicional. Você também pode incluir 
                 o recebimento do Relatório Diário via email ou Whatsapp marcando as caixas de seleção abaixo.
+                xxxxxxxxxxxxxxxxxxxxxxx
+                xxxxxxxxxxxxxxxxxxxxxxx
+                xxxxxxxxxxxxxxxxxxxxxxx
+                xxxxxxxxxxxxxxxxxxxxxxx
+                xxxxxxxxxxxxxxxxxxxxxxx
+                xxxxxxxxxxxxxxxxxxxxxxx
+                xxxxxxxxxxxxxxxxxxxxxxx
+                xxxxxxxxxxxxxxxxxxxxxxx
             </div>
         </div>
         """, 
