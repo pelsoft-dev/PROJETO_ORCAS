@@ -83,7 +83,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
     col_l1_1, col_l1_2 = st.columns(2)
     lista_gestao = [""] + projs
     
-    plano_sel = col_l1_1.selectbox("Selecione um Plano já existente:", lista_gestao, key="sb_plano_gestao_unique")
+    plano_sel = col_l1_1.selectbox("01 Selecione um Plano já existente:", lista_gestao, key="sb_plano_gestao_unique")
     
     if plano_sel != "" and plano_sel != st.session_state.get('projeto_ativo'):
         st.session_state.projeto_ativo = plano_sel
@@ -94,7 +94,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         st.rerun()
 
     nome_plano_input = col_l1_2.text_input(
-        "Nome do Plano carregado ou Nome para criação de um novo Plano", 
+        "02 Nome do Plano carregado ou Nome para criação de um novo Plano", 
         value=st.session_state.projeto_ativo if st.session_state.projeto_ativo else ""
     )
 
