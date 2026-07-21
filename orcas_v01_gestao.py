@@ -9,10 +9,25 @@ from orcas_v01_ajuda_gestao import renderizar_ajuda_gestao
 
 def ao_mudar_nome_campo_02():
     """
-    Callback executado quando o usuário digita no Campo 02.
-    Incrementa a versão do formulário para resetar os demais widgets.
+    Callback executado ao alterar o Campo 02.
+    Incrementa a versão do formulário e desmarca a seleção do Campo 01.
     """
     st.session_state["form_version"] = st.session_state.get("form_version", 0) + 1
+    # Limpa a seleção do Campo 01 para refletir a criação do novo plano
+    st.session_state["sb_plano_gestao_unique"] = ""
+    st.session_state["ultimo_plano_c1_processado"] = ""
+
+def resetar_estado_plano_gestao():
+    """
+    Descarrega o plano ativo e limpa todos os campos de controle.
+    """
+    st.session_state.projeto_ativo = ""
+    st.session_state["nome_plano_input_key"] = ""
+    st.session_state["sb_plano_gestao_unique"] = ""
+    st.session_state["ultimo_plano_c1_processado"] = ""
+    if 'tmp_fim_plano' in st.session_state: del st.session_state.tmp_fim_plano
+    if 'clicou_salvar_upgrade' in st.session_state: del st.session_state.clicou_salvar_upgrade
+    if 'tipo_pagamento_selecionado' in st.session_state: del st.session_state.tipo_pagamento_selecionado
 
 def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, format_moeda, parse_moeda, security):
     """
@@ -27,18 +42,14 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
 
     ver = st.session_state["form_version"]
 
-    # --- 1. MANUTENÇÃO DO PLANO CARREGADO DURANTE NAVEGAÇÃO ---
-    # Se o usuário acabou de concluir um plano gratuito/pagamento, limpa a seleção
+    # Se houve ordem explícita de limpeza após conclusão
     if st.session_state.get("limpar_plano_apos_conclusao", False):
-        st.session_state.projeto_ativo = ""
-        st.session_state["nome_plano_input_key"] = ""
-        st.session_state["ultimo_plano_c1_processado"] = ""
+        resetar_estado_plano_gestao()
         st.session_state.limpar_plano_apos_conclusao = False
 
-    # Sincroniza o projeto ativo da sessão com a chave do input
     plano_corrente = st.session_state.get("projeto_ativo", "")
 
-    # --- 2. TRATAMENTO DO PERFIL DO UTILIZADOR E VALOR PAGO REAL ---
+    # --- 1. TRATAMENTO DO PERFIL DO UTILIZADOR E VALOR PAGO REAL ---
     tipo_renov_original = "Mensal"
     vencimento_atual_str = None
     valor_pago_real = 0.00
@@ -66,7 +77,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
     if not tipo_renov_original or tipo_renov_original == "Selecione uma option...":
         tipo_renov_original = "Mensal"
 
-    # --- 3. CABEÇALHO ALINHADO COM BOTÃO DE AJUDA ---
+    # --- 2. CABEÇALHO ALINHADO COM BOTÃO DE AJUDA ---
     col_titulo, col_ajuda = st.columns([4, 1])
     
     with col_titulo:
@@ -91,7 +102,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             st.session_state["exibir_ajuda_gestao"] = not st.session_state.get("exibir_ajuda_gestao", False)
             st.rerun()
 
-    # Exibição do box de ajuda
     if st.session_state.get("exibir_ajuda_gestao", False):
         renderizar_ajuda_gestao()
 
@@ -102,20 +112,18 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
     col_l1_1, col_l1_2 = st.columns(2)
     lista_gestao = [""] + projs
     
-    # Define o índice selecionado no Campo 01 com base no plano ativo mantido na sessão
-    idx_plano_sel = 0
-    if plano_corrente in lista_gestao:
-        idx_plano_sel = lista_gestao.index(plano_corrente)
+    # Inicializa chave no state caso não exista
+    if "sb_plano_gestao_unique" not in st.session_state:
+        st.session_state["sb_plano_gestao_unique"] = plano_corrente if plano_corrente in lista_gestao else ""
 
     # Campo 01: Seleção de plano existente
     plano_sel = col_l1_1.selectbox(
         "01. Selecione um Plano já existente:", 
         lista_gestao, 
-        index=idx_plano_sel, 
         key="sb_plano_gestao_unique"
     )
     
-    # Se o usuário mudou explicitamente no Campo 01, atualiza o plano ativo na sessão
+    # Se o usuário escolheu um plano no Campo 01
     if plano_sel != st.session_state.get('ultimo_plano_c1_processado'):
         st.session_state['ultimo_plano_c1_processado'] = plano_sel
         st.session_state.projeto_ativo = plano_sel
@@ -127,7 +135,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         if 'tipo_pagamento_selecionado' in st.session_state: del st.session_state.tipo_pagamento_selecionado
         st.rerun()
 
-    if "nome_plano_input_key" not in st.session_state or st.session_state["nome_plano_input_key"] == "":
+    if "nome_plano_input_key" not in st.session_state:
         st.session_state["nome_plano_input_key"] = st.session_state.get("projeto_ativo", "")
 
     # Campo 02: Nome do plano
@@ -139,9 +147,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
 
     if nome_plano_input and nome_plano_input.strip() != "":
         
-        # Mantém o plano digitado no Campo 02 salvo no estado global do sistema
         st.session_state.projeto_ativo = nome_plano_input.strip()
-
         plano_mudou = (nome_plano_input.strip() != plano_sel.strip())
 
         col_l2_1, col_l2_2 = st.columns(2)
@@ -390,14 +396,10 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                     supabase.table("usuarios").update({"ult_valor_mensal": float(v_mensal_total)}).eq("id", uid_gestao).execute()
                     supabase.table("lancamentos").delete().eq("projeto_id", nome_plano_input).eq("usuario_id", uid_gestao).gt("data", st.session_state.tmp_fim_plano.strftime('%Y-%m-%d')).execute()
                     
-                    if 'tmp_fim_plano' in st.session_state: del st.session_state.tmp_fim_plano
-                    if 'clicou_salvar_upgrade' in st.session_state: del st.session_state.clicou_salvar_upgrade
-                    if 'tipo_pagamento_selecionado' in st.session_state: del st.session_state.tipo_pagamento_selecionado
-
-                    st.session_state.msg_sucesso = "🎉 Alterações aplicadas com sucesso! Seu plano atual está coberto."
+                    st.session_state.msg_sucesso = "🎉 Alterações aplicadas com sucesso! Seu plano está coberto."
                     
-                    # SINALIZA PARA DESCARREGAR O PLANO APÓS A CONCLUSÃO
-                    st.session_state.limpar_plano_apos_conclusao = True
+                    # DESCARREGA O PLANO DA TELA APÓS SALVAR
+                    resetar_estado_plano_gestao()
                     st.rerun()
                 except Exception as e:
                     st.error(f"Erro ao salvar plano: {e}")
@@ -416,9 +418,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 supabase.table("lancamentos").delete().eq("projeto_id", st.session_state.projeto_ativo).eq("usuario_id", uid_gestao).execute()
                 supabase.table("config_projetos").delete().eq("projeto_id", st.session_state.projeto_ativo).eq("usuario_id", uid_gestao).execute()
                 
-                # Reset ao excluir o plano
-                st.session_state.projeto_ativo = ""
-                st.session_state["nome_plano_input_key"] = ""
+                resetar_estado_plano_gestao()
                 st.session_state.confirmar_exclusao_plano = False
                 st.rerun()
             if ce2.button("CANCELAR"):
@@ -504,14 +504,10 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                                 "ult_valor_mensal": float(v_mensal_total)
                             }).eq("id", uid_gestao).execute()
                             
-                            if 'tmp_fim_plano' in st.session_state: del st.session_state.tmp_fim_plano
-                            if 'clicou_salvar_upgrade' in st.session_state: del st.session_state.clicou_salvar_upgrade
-                            if 'tipo_pagamento_selecionado' in st.session_state: del st.session_state.tipo_pagamento_selecionado
-
                             st.session_state.msg_sucesso = "🎉 Assinatura atualizada com sucesso via Cupom!"
                             
-                            # AQUI DESCARREGA O PLANO DA TELA PARA QUE O USUÁRIO SELECIONE NOVO PLANO NO CAMPO 01
-                            st.session_state.limpar_plano_apos_conclusao = True
+                            # DESCARREGA O PLANO APÓS CONCLUIR A ASSINATURA GRÁTIS
+                            resetar_estado_plano_gestao()
                             st.rerun()
                         except Exception as e:
                             st.error(f"Erro ao processar validação do cupom gratuito: {e}")
