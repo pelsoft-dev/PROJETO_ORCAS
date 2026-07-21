@@ -9,16 +9,15 @@ from orcas_v01_ajuda_gestao import renderizar_ajuda_gestao
 
 def ao_mudar_nome_campo_02():
     """
-    Força a alteração da versão do formulário e REINICIA
-    a execução do Streamlit imediatamente.
+    Callback executado quando o usuário digita no Campo 02.
+    Incrementa a versão do formulário para resetar os demais widgets.
+    (O Streamlit já faz a reexecução automaticamente após o callback).
     """
     st.session_state["form_version"] = st.session_state.get("form_version", 0) + 1
-    # Força a interrupção do ciclo atual e reexecuta com a nova versão de keys
-    st.rerun()
 
 def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, format_moeda, parse_moeda, security):
     """
-    Sub-rotina da Tela Gestão - Versão com Reset Instantâneo via Rerun
+    Sub-rotina da Tela Gestão
     """
     hoje = datetime.now().date()
     uid_gestao = ID_USUARIO_LOGADO
@@ -96,7 +95,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
     # Campo 01: Seleção de plano
     plano_sel = col_l1_1.selectbox("01. Selecione um Plano já existente:", lista_gestao, key="sb_plano_gestao_unique")
     
-    # Se o usuário mudou a seleção no Campo 01, sincroniza IMEDIATAMENTE com o Campo 02
+    # Se o usuário mudou a seleção no Campo 01, sincroniza com o Campo 02
     if plano_sel != st.session_state.get('ultimo_plano_c1_processado'):
         st.session_state['ultimo_plano_c1_processado'] = plano_sel
         st.session_state.projeto_ativo = plano_sel
@@ -130,7 +129,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         zap_plano_db = res_cfg_plano.data[0].get('zap_ativo', 0) if res_cfg_plano.data else 0
         email_plano_db = res_cfg_plano.data[0].get('email_ativo', 0) if res_cfg_plano.data else 0
 
-        # DEFINIÇÃO RÍGIDA DOS VALORES PADRÃO
+        # DEFINIÇÃO DOS VALORES PADRÃO
         if plano_mudou and not res_cfg_plano.data:
             # NOVO PLANO (Valores Zerados/Padrão)
             data_inicio_padrao = hoje.replace(day=1)
@@ -383,7 +382,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                     if 'tipo_pagamento_selecionado' in st.session_state: del st.session_state.tipo_pagamento_selecionado
 
                     st.session_state.projeto_ativo = nome_plano_input
-                    st.session_state["nome_plano_input_key"] = nome_plano_input
                     st.session_state.msg_sucesso = "🎉 Alterações aplicadas com sucesso! Seu plano atual está coberto."
                     st.rerun()
                 except Exception as e:
@@ -494,7 +492,6 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                             if 'tipo_pagamento_selecionado' in st.session_state: del st.session_state.tipo_pagamento_selecionado
 
                             st.session_state.projeto_ativo = nome_plano_input
-                            st.session_state["nome_plano_input_key"] = nome_plano_input
                             st.session_state.msg_sucesso = "🎉 Assinatura atualizada com sucesso via Cupom!"
                             st.rerun()
                         except Exception as e:
