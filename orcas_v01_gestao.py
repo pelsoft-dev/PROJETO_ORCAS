@@ -127,7 +127,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
 
             with col_btn_per:
                 periodo_slider = st.select_slider(
-                    "05. Aumentar Período (em 12 meses)",
+                    "05. Aumentar Período (12 meses)",
                     options=[24, 36, 48, 60],
                     value=meses_atuais
                 )
