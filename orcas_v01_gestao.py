@@ -81,28 +81,40 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
     
     plano_sel = col_l1_1.selectbox("01. Selecione um Plano já existente:", lista_gestao, key="sb_plano_gestao_unique")
     
+    # Sincroniza o plano ativo e atualiza o estado do campo 02 se mudar a seleção do campo 01
     if plano_sel != "" and plano_sel != st.session_state.get('projeto_ativo'):
         st.session_state.projeto_ativo = plano_sel
+        st.session_state["nome_plano_input_key"] = plano_sel  # Garante que o Campo 02 receba o valor
         st.session_state.escolha = "⚙️ Gestão" 
         if 'tmp_fim_plano' in st.session_state: del st.session_state.tmp_fim_plano
         if 'clicou_salvar_upgrade' in st.session_state: del st.session_state.clicou_salvar_upgrade
         if 'tipo_pagamento_selecionado' in st.session_state: del st.session_state.tipo_pagamento_selecionado
+        # Limpa os estados dos widgets para que recarreguem com os dados do plano selecionado
+        for k in ["data_ini_gestao_val", "saldo_inicial_gestao_val", "chk_zap_val", "chk_email_val", "slider_periodo_val"]:
+            if k in st.session_state: del st.session_state[k]
         st.rerun()
 
-    # Inicialização do nome no input (sincroniza com o projeto ativo selecionado)
-    nome_padrao_input = st.session_state.projeto_ativo if st.session_state.projeto_ativo else ""
+    # Se a chave do Campo 02 ainda não existir, inicializa com o plano ativo atual
+    if "nome_plano_input_key" not in st.session_state:
+        st.session_state["nome_plano_input_key"] = st.session_state.projeto_ativo if st.session_state.projeto_ativo else ""
 
     nome_plano_input = col_l1_2.text_input(
         "02. Nome do Plano carregado ou Nome para criação de um novo Plano", 
-        value=nome_padrao_input,
         key="nome_plano_input_key"
     )
 
     if nome_plano_input and nome_plano_input.strip() != "":
         
         # --- LÓGICA DE COMPARAÇÃO DIRETA (CAMPO 02 vs CAMPO 01) ---
-        # Se o texto do Campo 02 for diferente do selecionado no Campo 01, o plano mudou!
         plano_mudou = (nome_plano_input.strip() != plano_sel.strip())
+
+        # Se o usuário alterou o nome no campo 02 e deu Enter, limpa as chaves antigas dos widgets
+        # Isso força o Streamlit a renderizá-los com os novos valores padrões abaixo
+        if plano_mudou and st.session_state.get("ultimo_plano_editado") != nome_plano_input:
+            st.session_state["ultimo_plano_editado"] = nome_plano_input
+            for k in ["data_ini_gestao_val", "saldo_inicial_gestao_val", "chk_zap_val", "chk_email_val", "slider_periodo_val"]:
+                if k in st.session_state: del st.session_state[k]
+            st.rerun()
 
         col_l2_1, col_l2_2 = st.columns(2)
         
@@ -361,8 +373,11 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                     if 'tmp_fim_plano' in st.session_state: del st.session_state.tmp_fim_plano
                     if 'clicou_salvar_upgrade' in st.session_state: del st.session_state.clicou_salvar_upgrade
                     if 'tipo_pagamento_selecionado' in st.session_state: del st.session_state.tipo_pagamento_selecionado
-                    
+                    for k in ["data_ini_gestao_val", "saldo_inicial_gestao_val", "chk_zap_val", "chk_email_val", "slider_periodo_val", "ultimo_plano_editado"]:
+                        if k in st.session_state: del st.session_state[k]
+
                     st.session_state.projeto_ativo = nome_plano_input
+                    st.session_state["nome_plano_input_key"] = nome_plano_input
                     st.session_state.msg_sucesso = "🎉 Alterações aplicadas com sucesso! Seu plano atual está coberto."
                     st.rerun()
                 except Exception as e:
@@ -382,6 +397,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 supabase.table("lancamentos").delete().eq("projeto_id", st.session_state.projeto_ativo).eq("usuario_id", uid_gestao).execute()
                 supabase.table("config_projetos").delete().eq("projeto_id", st.session_state.projeto_ativo).eq("usuario_id", uid_gestao).execute()
                 st.session_state.projeto_ativo = None
+                if "nome_plano_input_key" in st.session_state: del st.session_state.nome_plano_input_key
                 st.session_state.confirmar_exclusao_plano = False
                 st.rerun()
             if ce2.button("CANCELAR"):
@@ -470,8 +486,11 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                             if 'tmp_fim_plano' in st.session_state: del st.session_state.tmp_fim_plano
                             if 'clicou_salvar_upgrade' in st.session_state: del st.session_state.clicou_salvar_upgrade
                             if 'tipo_pagamento_selecionado' in st.session_state: del st.session_state.tipo_pagamento_selecionado
+                            for k in ["data_ini_gestao_val", "saldo_inicial_gestao_val", "chk_zap_val", "chk_email_val", "slider_periodo_val", "ultimo_plano_editado"]:
+                                if k in st.session_state: del st.session_state[k]
 
                             st.session_state.projeto_ativo = nome_plano_input
+                            st.session_state["nome_plano_input_key"] = nome_plano_input
                             st.session_state.msg_sucesso = "🎉 Assinatura atualizada com sucesso via Cupom!"
                             st.rerun()
                         except Exception as e:
