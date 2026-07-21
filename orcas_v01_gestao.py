@@ -83,7 +83,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
     col_l1_1, col_l1_2 = st.columns(2)
     lista_gestao = [""] + projs
     
-    plano_sel = col_l1_1.selectbox("01 Selecione um Plano já existente:", lista_gestao, key="sb_plano_gestao_unique")
+    plano_sel = col_l1_1.selectbox("01. Selecione um Plano já existente:", lista_gestao, key="sb_plano_gestao_unique")
     
     if plano_sel != "" and plano_sel != st.session_state.get('projeto_ativo'):
         st.session_state.projeto_ativo = plano_sel
@@ -94,7 +94,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         st.rerun()
 
     nome_plano_input = col_l1_2.text_input(
-        "02 Nome do Plano carregado ou Nome para criação de um novo Plano", 
+        "02. Nome do Plano carregado ou Nome para criação de um novo Plano", 
         value=st.session_state.projeto_ativo if st.session_state.projeto_ativo else ""
     )
 
@@ -111,7 +111,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             st.session_state.tmp_fim_plano = data_fim_padrao
 
         with col_l2_1:
-            d_ini_g = st.date_input("Data de Início:", value=data_inicio_padrao, format="DD/MM/YYYY")
+            d_ini_g = st.date_input("03. Data de Início:", value=data_inicio_padrao, format="DD/MM/YYYY")
         
         with col_l2_2:
             col_fim, col_btn_per = st.columns(2)
@@ -127,7 +127,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
 
             with col_btn_per:
                 periodo_slider = st.select_slider(
-                    "Aumentar Período (em 12 meses)",
+                    "05. Aumentar Período (em 12 meses)",
                     options=[24, 36, 48, 60],
                     value=meses_atuais
                 )
@@ -136,14 +136,14 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 st.session_state.tmp_fim_plano = nova_data_fim
 
             with col_fim:
-                d_fim_g = st.date_input("Data de Término:", value=st.session_state.tmp_fim_plano, format="DD/MM/YYYY", disabled=True)
+                d_fim_g = st.date_input("04. Data de Término:", value=st.session_state.tmp_fim_plano, format="DD/MM/YYYY", disabled=True)
 
         col_l3_1, col_l3_2 = st.columns(2)
         valor_saldo_exibir = format_moeda(s_db) if s_db is not None else "0,00"
-        saldo_input = col_l3_1.text_input("Saldo Inicial:", value=valor_saldo_exibir)
+        saldo_input = col_l3_1.text_input("06. Saldo Inicial:", value=valor_saldo_exibir)
         
         meses_total_edit = (st.session_state.tmp_fim_plano.year - d_ini_g.year) * 12 + (st.session_state.tmp_fim_plano.month - d_ini_g.month) + 1
-        col_l3_2.text_input("Período do Plano:", value=f"{meses_total_edit} meses", disabled=True)
+        col_l3_2.text_input("07. Período do Plano:", value=f"{meses_total_edit} meses", disabled=True)
 
         col_l4_1, col_l4_2 = st.columns(2)
         
@@ -169,8 +169,8 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         with col_l4_1:
             st.write("") 
             st.write("") 
-            ativar_zap_atual = st.checkbox("Adicionar o Resumo Diário ORCAS via Whatsapp", value=ativar_zap_val)
-            ativar_email_atual = st.checkbox("Adicionar o Resumo Diário ORCAS via E-mail", value=ativar_email_val)
+            ativar_zap_atual = st.checkbox("08. Adicionar o Resumo Diário ORCAS via Whatsapp", value=ativar_zap_val)
+            ativar_email_atual = st.checkbox("09. Adicionar o Resumo Diário ORCAS via E-mail", value=ativar_email_val)
         
         res_all = supabase.table("config_projetos").select("*").eq("usuario_id", uid_gestao).execute()
         dados_db = res_all.data if res_all.data else []
@@ -211,7 +211,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
 
         resumo_html = f"""
         <div style="background-color: #87CEFA; padding: 15px; border-radius: 5px; color: black; font-family: sans-serif; border: 1px solid #1E90FF;">
-            <div style="font-weight: bold; font-size: 16px; margin-bottom: 10px;">Valor da Assinatura Mensal: R$ {format_moeda(v_mensal_total)}</div>
+            <div style="font-weight: bold; font-size: 16px; margin-bottom: 10px;">10. Valor da Assinatura Mensal: R$ {format_moeda(v_mensal_total)}</div>
             <div style="margin-left: 20px; font-size: 14px;">
                 Assinatura do Orcas Baby: <span style="float: right;">19,90</span><br>
                 {qtd_relatorios_totais} Resumo(s) Diário(s) via Whatsapp / E-mail: <span style="float: right;">{format_moeda(custo_relatorio_total)}</span><br>
@@ -247,7 +247,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             idx_radio = 0
 
         tipo_pagamento = st.radio(
-            "Escolha o período de renovação:",
+            "11. Escolha o período de renovação:",
             opcoes_radio,
             index=idx_radio,
             horizontal=True, key="radio_pag_final_v10"
@@ -339,7 +339,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         
         houve_upgrade_real = (v_mensal_total > ult_valor_mensal_lido) or (tipo_pagamento != "Selecione uma opção..." and meses_novos > meses_originais)
 
-        if btn_col1.button("Salvar alterações ou Criar o novo Plano", use_container_width=True):
+        if btn_col1.button("12. Salvar alterações ou Criar o novo Plano", use_container_width=True):
             if tipo_pagamento == "Selecione uma opção...":
                 st.error("⚠️ Por favor, selecione um período de renovação abaixo para calcular se há valores a pagar antes de salvar.")
             
@@ -366,11 +366,11 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                 st.rerun()
 
         if st.session_state.get('projeto_ativo'):
-            if btn_col2.button("Excluir Plano", type="primary", use_container_width=True):
+            if btn_col2.button("13. Excluir Plano", type="primary", use_container_width=True):
                 st.session_state.confirmar_exclusao_plano = True
 
         if st.session_state.get('confirmar_exclusao_plano', False):
-            st.error(f"Deseja mesmo excluir o plano {st.session_state.projeto_ativo}?")
+            st.error(f"14. Deseja mesmo excluir o plano {st.session_state.projeto_ativo}?")
             ce1, ce2 = st.columns(2)
             if ce1.button("CONFIRMAR EXCLUSÃO"):
                 supabase.table("lancamentos").delete().eq("projeto_id", st.session_state.projeto_ativo).eq("usuario_id", uid_gestao).execute()
@@ -394,10 +394,10 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             )
 
             st.write("")
-            st.subheader("💳 Finalizar Assinatura")
+            st.subheader("💳 20. Finalizar Assinatura")
 
             st.write("")
-            cupom_in = st.text_input("Possui um Cupom de Desconto?", key="cp_gest_final_v10").upper()
+            cupom_in = st.text_input("21. Possui um Cupom de Desconto?", key="cp_gest_final_v10").upper()
             desc_extra = 0.0
             is_cupom_100 = False
 
@@ -470,7 +470,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                         except Exception as e:
                             st.error(f"Erro ao processar validação do cupom gratuito: {e}")
                 else:
-                    if st.button("🚀 GERAR LINK DE PAGAMENTO", use_container_width=True):
+                    if st.button("🚀 22. GERAR LINK DE PAGAMENTO", use_container_width=True):
                         with st.spinner("Preparando fatura segura..."):
                             plano_para_vincular = nome_plano_input.strip() if nome_plano_input else "Plano"
                             import orcas_v01_pagamentos as pag
@@ -517,7 +517,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
                                     st.error(f"Erro ao registrar transação temporária: {e}")
             
             if "url_ativa" in st.session_state and not is_cupom_100:
-                st.link_button("🔵 PAGAMENTO - IR P/ MERCADO PAGO", st.session_state.url_ativa, use_container_width=True)
+                st.link_button("🔵 23. PAGAMENTO - IR P/ MERCADO PAGO", st.session_state.url_ativa, use_container_width=True)
         
         elif tipo_pagamento != "Selecione uma opção..." and not houve_upgrade_real:
             st.info("ℹ️ Este plano está coberto pela sua assinatura atual. Não há valores adicionais a pagar.")
