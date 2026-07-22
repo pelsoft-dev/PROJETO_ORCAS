@@ -9,17 +9,16 @@ def renderizar_ajuda_gestao():
         """
         <div style="background-color: #007ba7; padding: 15px; border-radius: 5px; color: white; font-family: sans-serif; margin-bottom: 20px; position: relative;">
             <div style="font-size: 14px; text-align: justify; line-height: 1.4;">
-                Se for sua primeira vez aqui no ORCAS, siga esse caminho:<br>
-                <p>(1) Digite um nome para seu Plano no campo 02 e dê ENTER.</p><br>
-                <p>(2) Se você quiser colocar um Saldo Inicial, utilize o campo 06.</p><br>
-                <p>(3) Se você quiser receber um Resumo Diário via Whatsapp e/ou E-mail, utilize os campos 08 e 09.<br>
+                <b>Se for sua 1ª vez ou quiser criar um outro Plano no ORCAS, siga esse caminho:</b><br>
+                (1) Digite um nome para seu Plano no campo 02 e dê ENTER.<br>
+                (2) Se você quiser colocar um Saldo Inicial, utilize o campo 06.<br>
+                (3) Se você quiser receber um Resumo Diário via Whatsapp e/ou E-mail, utilize os campos 08 e 09.<br>
                 (4) Escolha o tipo de Assinatura (Mensal, Semestral, Anual).<br>
                 (5) Clique no campo 12. Salvar alterações ou Criar o novo Plano. <br>
-                (6) 
-                Esse Plano será criado contendo <b>24 meses</b> (padrão) iniciando a partir de hoje. Se você quiser 
-                um Saldo Inicial, digite-o no campo 06. (3) Se vc quiser receber um Resumo Diário via e-mail e/ou Whatsapp, utilize os campos 08 e 09. (4) poderá aumentar o período de 24 para 36 ou 48 ou 60 meses, basta deslizar o comando 
-                <b>“Aumentar Período”</b>, porém isso acarretará em um valor adicional. Você também pode incluir 
-                o recebimento do Relatório Diário via email ou Whatsapp marcando as caixas de seleção abaixo.
+                (6) Se tiver Cupom de Desconto, digite-o no campo 21 e dê ENTER.<br>
+                (7) Com ou sem Cupom, agora clique no botão "22. GERAR LINK DE PAGAMENTO".<br>
+                (8) Clique no botão "30. PAGAMENTO - IR P/ MERCADO PAGO".<br>
+                <b>Se quiser apenas carregar um Plano já existente, utilize o campo 01.</b><br>
             </div>
         </div>
         """, 
