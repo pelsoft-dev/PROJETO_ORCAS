@@ -11,7 +11,6 @@ def ao_mudar_nome_campo_02():
     """
     Callback executado ao alterar o Campo 02.
     Incrementa a versão do formulário e desmarca a seleção do Campo 01.
-    Nota: NÃO chamar st.rerun() aqui dentro, pois o Streamlit faz isso automaticamente.
     """
     st.session_state["form_version"] = st.session_state.get("form_version", 0) + 1
     # Limpa a seleção do Campo 01 no state para a próxima renderização
@@ -24,12 +23,15 @@ def resetar_estado_plano_gestao():
     Deve ser executado SEMPRE no topo da página, antes dos widgets serem instanciados.
     """
     st.session_state.projeto_ativo = ""
-    st.session_state["nome_plano_input_key"] = ""
     st.session_state["sb_plano_gestao_unique"] = ""
     st.session_state["ultimo_plano_c1_processado"] = ""
+    st.session_state["nome_plano_carregado_temp"] = ""
+    st.session_state["form_version"] = st.session_state.get("form_version", 0) + 1
+    
     if 'tmp_fim_plano' in st.session_state: del st.session_state.tmp_fim_plano
     if 'clicou_salvar_upgrade' in st.session_state: del st.session_state.clicou_salvar_upgrade
     if 'tipo_pagamento_selecionado' in st.session_state: del st.session_state.tipo_pagamento_selecionado
+    if 'url_ativa' in st.session_state: del st.session_state.url_ativa
 
 def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, format_moeda, parse_moeda, security):
     """
@@ -129,7 +131,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
     if plano_sel != st.session_state.get('ultimo_plano_c1_processado'):
         st.session_state['ultimo_plano_c1_processado'] = plano_sel
         st.session_state.projeto_ativo = plano_sel
-        st.session_state["nome_plano_input_key"] = plano_sel
+        st.session_state["nome_plano_carregado_temp"] = plano_sel
         st.session_state["form_version"] = ver + 1
         
         if 'tmp_fim_plano' in st.session_state: del st.session_state.tmp_fim_plano
@@ -137,13 +139,13 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         if 'tipo_pagamento_selecionado' in st.session_state: del st.session_state.tipo_pagamento_selecionado
         st.rerun()
 
-    if "nome_plano_input_key" not in st.session_state:
-        st.session_state["nome_plano_input_key"] = st.session_state.get("projeto_ativo", "")
+    val_inicial_c2 = st.session_state.get("nome_plano_carregado_temp", st.session_state.get("projeto_ativo", ""))
 
-    # Campo 02: Nome do plano
+    # Campo 02: Nome do plano com key versionada para evitar travamento de mutação
     nome_plano_input = col_l1_2.text_input(
         "02. Nome do Plano carregado ou Nome para criação de um novo Plano", 
-        key="nome_plano_input_key",
+        value=val_inicial_c2,
+        key=f"nome_plano_input_v{ver}",
         on_change=ao_mudar_nome_campo_02
     )
 
@@ -565,7 +567,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
         
         elif tipo_pagamento != "Selecione uma opção..." and not houve_upgrade_real:
             st.info("ℹ️ Este plano está coberto pela sua assinatura atual. Não há valores adicionais a pagar.")
-            
+        
     else:
         st.info("💡 Selecione um plano acima para editar ou digite um novo nome para configuração.")
 

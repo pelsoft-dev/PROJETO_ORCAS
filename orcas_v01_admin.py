@@ -4,7 +4,7 @@ import pandas as pd
 # Importando a ajuda do arquivo dedicado para Administração
 from orcas_v01_ajuda_admin import renderizar_ajuda_admin
 
-def exibir_admin(df, supabase, ir_para_o_topo):
+def exibir_admin(df, supabase, ID_USUARIO_LOGADO, ir_para_o_topo):
     """
     Sub-rotina da Tela Admin - Edição direta em massa (Layout Excel).
     """
@@ -40,7 +40,7 @@ def exibir_admin(df, supabase, ir_para_o_topo):
     # Criamos uma cópia para o editor
     df_admin = df.copy()
 
-    # --- NOVO: OPÇÃO DE ORDENAÇÃO MANUAL ---
+    # --- OPÇÃO DE ORDENAÇÃO MANUAL ---
     colunas_ordem = ["data", "descricao", "valor_plan", "status", "tipo"]
     ordem_selecionada = st.selectbox("Ordenar visualização por:", colunas_ordem, index=0)
     df_admin = df_admin.sort_values(by=ordem_selecionada, ascending=True)
