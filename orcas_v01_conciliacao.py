@@ -2,12 +2,42 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
 
+# Importando a ajuda do arquivo dedicado para Conciliação
+from orcas_v01_ajuda_conciliacao import renderizar_ajuda_conciliacao
+
 def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moeda):
     """
     Sub-rotina da Tela Conciliação - Layout Compacto e Filtro de Parciais.
     """
-    st.markdown(f'<div class="titulo-tela">Conciliação: {st.session_state.projeto_ativo}</div>', unsafe_allow_html=True)
+    # --- CABEÇALHO ALINHADO COM BOTÃO DE AJUDA ---
+    col_titulo, col_ajuda = st.columns([4, 1])
     
+    with col_titulo:
+        st.markdown(f'<div class="titulo-tela" style="margin-top:0px;">Conciliação: {st.session_state.projeto_ativo}</div>', unsafe_allow_html=True)
+        
+    with col_ajuda:
+        st.markdown("""
+            <style>
+            div.stButton > button:first-child {
+                background-color: #007ba7 !important;
+                color: white !important;
+                border: none !important;
+            }
+            div.stButton > button:first-child:hover {
+                background-color: #005f81 !important;
+                color: white !important;
+            }
+            </style>
+        """, unsafe_allow_html=True)
+        
+        if st.button("AJUDA", type="primary", use_container_width=True):
+            st.session_state["exibir_ajuda_conciliacao"] = not st.session_state.get("exibir_ajuda_conciliacao", False)
+            st.rerun()
+
+    # --- EXIBIÇÃO DA TELA DE AJUDA SE O BOTÃO FOR CLICADO ---
+    if st.session_state.get("exibir_ajuda_conciliacao", False):
+        renderizar_ajuda_conciliacao()
+
     # INJEÇÃO DE CSS LOCALIZADA - NÃO AFETA A NAVEGAÇÃO DO SISTEMA
     st.markdown("""
         <style>
