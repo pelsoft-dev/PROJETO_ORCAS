@@ -2,9 +2,39 @@ import streamlit as st
 from datetime import datetime, timedelta, timezone
 import re
 
+# Importando a ajuda do arquivo dedicado para Projetar
+from orcas_v01_ajuda_projetar import renderizar_ajuda_projetar
+
 def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
-    st.markdown(f'<div class="titulo-tela">Projetar: {st.session_state.projeto_ativo}</div>', unsafe_allow_html=True)
+    # --- CABEÇALHO ALINHADO COM BOTÃO DE AJUDA ---
+    col_titulo, col_ajuda = st.columns([4, 1])
     
+    with col_titulo:
+        st.markdown(f'<div class="titulo-tela" style="margin-top:0px;">Projetar: {st.session_state.projeto_ativo}</div>', unsafe_allow_html=True)
+        
+    with col_ajuda:
+        st.markdown("""
+            <style>
+            div.stButton > button:first-child {
+                background-color: #007ba7 !important;
+                color: white !important;
+                border: none !important;
+            }
+            div.stButton > button:first-child:hover {
+                background-color: #005f81 !important;
+                color: white !important;
+            }
+            </style>
+        """, unsafe_allow_html=True)
+        
+        if st.button("AJUDA", type="primary", use_container_width=True):
+            st.session_state["exibir_ajuda_projetar"] = not st.session_state.get("exibir_ajuda_projetar", False)
+            st.rerun()
+
+    # --- EXIBIÇÃO DA TELA DE AJUDA SE O BOTÃO FOR CLICADO ---
+    if st.session_state.get("exibir_ajuda_projetar", False):
+        renderizar_ajuda_projetar()
+
     # Ajuste de Fuso Horário para Jundiaí/Brasília (UTC-3)
     fuso_br = timezone(timedelta(hours=-3))
     hoje_br = datetime.now(fuso_br).date()
