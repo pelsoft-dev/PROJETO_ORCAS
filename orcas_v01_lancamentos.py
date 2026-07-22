@@ -2,15 +2,46 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 
+# Importando a ajuda do arquivo dedicado para Lançamentos
+from orcas_v01_ajuda_lancamentos import renderizar_ajuda_lancamentos
+
 def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db, format_moeda, ir_para_o_topo):
     """
     Sub-rotina da Tela Lançamentos - Integridade total da lógica de meses e saldos.
     """
-    # Verificação de segurança para evitar os erros de AttributeError vistos nos prints
-    if 'msg_sucesso' not in st.session_state: st.session_state.msg_sucesso = False
+    # Verificação de segurança para evitar os erros de AttributeError
+    if 'msg_sucesso' not in st.session_state: 
+        st.session_state.msg_sucesso = False
+
+    # --- CABEÇALHO ALINHADO COM BOTÃO DE AJUDA ---
+    col_titulo, col_ajuda = st.columns([4, 1])
     
-    st.markdown(f'<div class="titulo-tela">Lançamentos: {st.session_state.projeto_ativo}</div>', unsafe_allow_html=True)
-    
+    with col_titulo:
+        st.markdown(f'<div class="titulo-tela" style="margin-top:0px;">Lançamentos: {st.session_state.projeto_ativo}</div>', unsafe_allow_html=True)
+        
+    with col_ajuda:
+        st.markdown("""
+            <style>
+            div.stButton > button:first-child {
+                background-color: #007ba7 !important;
+                color: white !important;
+                border: none !important;
+            }
+            div.stButton > button:first-child:hover {
+                background-color: #005f81 !important;
+                color: white !important;
+            }
+            </style>
+        """, unsafe_allow_html=True)
+        
+        if st.button("AJUDA", type="primary", use_container_width=True):
+            st.session_state["exibir_ajuda_lancamentos"] = not st.session_state.get("exibir_ajuda_lancamentos", False)
+            st.rerun()
+
+    # --- EXIBIÇÃO DA TELA DE AJUDA SE O BOTÃO FOR CLICADO ---
+    if st.session_state.get("exibir_ajuda_lancamentos", False):
+        renderizar_ajuda_lancamentos()
+
     if d_ini_db and d_fim_db:
         meses_periodo = []
         data_atual_loop = d_ini_db.replace(day=1)
