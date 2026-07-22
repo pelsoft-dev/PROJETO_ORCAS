@@ -12,7 +12,6 @@ def renderizar_ajuda_lancamentos():
                 <b>"LANÇAMENTOS"</b> sem negrito ....... <br> Em Construção <br> Se for sua primeira vez aqui no ORCAS, <br> siga esse caminho: (1) digite um nome para seu Plano no campo 02 e dê <enter>. (2) Se você quiser partir de           Esse Plano será criado contendo <b>24 meses</b> (padrão) iniciando a partir de hoje. Se você quiser 
                 um Saldo Inicial, digite-o no campo 06. (3) Se vc quiser receber um Resumo Diário via e-mail e/ou Whatsapp, utilize os campos 08 e 09. (4) poderá aumentar o período de 24 para 36 ou 48 ou 60 meses, basta deslizar o comando 
                 <b>“Em Negrito”</b>, porém isso acarretará em um valor adicional. Você também pode incluir 
-
             </div>
         </div>
         """, 
