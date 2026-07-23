@@ -79,34 +79,31 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
     if not tipo_renov_original or tipo_renov_original == "Selecione uma option...":
         tipo_renov_original = "Mensal"
 
-
-
-
-    # =========================================================================
-    # --- INÍCIO DA ALTERAÇÃO: CABEÇALHO ALINHADO COM TOGGLE DE AJUDA ---
-    # =========================================================================
-
-    # Adicionado vertical_alignment="center" para alinhar o texto com o Toggle
+    # --- 2. CABEÇALHO ALINHADO COM BOTÃO DE AJUDA ---
+    # col_titulo, col_ajuda = st.columns([4, 1])
     col_titulo, col_ajuda = st.columns([4, 1], vertical_alignment="center")
     
     with col_titulo:
         st.markdown('<div class="titulo-tela" style="margin-top:0px;">Gestão de Planos e Assinaturas</div>', unsafe_allow_html=True)
         
     with col_ajuda:
-        # Troca do st.button por st.toggle controlando diretamente a chave de sessão
-        st.session_state["exibir_ajuda_gestao"] = st.toggle(
-            "<b>AJUDA</b>", 
-            value=st.session_state.get("exibir_ajuda_gestao", False),
-            key="toggle_ajuda_gestao"
-        )
-
-
-    # =========================================================================
-    # --- FIM DA ALTERAÇÃO ---
-    # =========================================================================
-
-
-
+        st.markdown("""
+            <style>
+            div.stButton > button:first-child {
+                background-color: #007ba7 !important;
+                color: white !important;
+                border: none !important;
+            }
+            div.stButton > button:first-child:hover {
+                background-color: #005f81 !important;
+                color: white !important;
+            }
+            </style>
+        """, unsafe_allow_html=True)
+        
+        if st.button("AJUDA", type="primary", use_container_width=True):
+            st.session_state["exibir_ajuda_gestao"] = not st.session_state.get("exibir_ajuda_gestao", False)
+            st.rerun()
 
     if st.session_state.get("exibir_ajuda_gestao", False):
         renderizar_ajuda_gestao()
@@ -121,7 +118,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
     # Inicializa chave no state caso não exista
     if "sb_plano_gestao_unique" not in st.session_state:
         st.session_state["sb_plano_gestao_unique"] = plano_corrente if plano_corrente in lista_gestao else ""
-    
+
     # Campo 01: Seleção de plano existente
     plano_sel = col_l1_1.selectbox(
         "01. Selecione um Plano já existente:", 
