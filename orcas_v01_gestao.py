@@ -79,25 +79,15 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
     if not tipo_renov_original or tipo_renov_original == "Selecione uma option...":
         tipo_renov_original = "Mensal"
 
-
-
     # --- 2. CABEÇALHO ALINHADO COM BOTÃO DE AJUDA ---
     col_titulo, col_ajuda = st.columns([4, 1])
-
+    
     with col_titulo:
-        st.markdown(
-            '<div class="titulo-tela" style="margin-top:0px;">Gestão de Planos e Assinaturas</div>',
-            unsafe_allow_html=True
-        )
-
+        st.markdown('<div class="titulo-tela" style="margin-top:0px;">Gestão de Planos e Assinaturas</div>', unsafe_allow_html=True)
+        
     with col_ajuda:
         st.markdown("""
             <style>
-            div.stButton {
-                display: flex;
-                align-items: flex-start;   /* força alinhamento no topo */
-                justify-content: flex-end; /* botão à direita */
-            }
             div.stButton > button:first-child {
                 background-color: #007ba7 !important;
                 color: white !important;
@@ -109,43 +99,10 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
             }
             </style>
         """, unsafe_allow_html=True)
-
+        
         if st.button("AJUDA", type="primary", use_container_width=True):
             st.session_state["exibir_ajuda_gestao"] = not st.session_state.get("exibir_ajuda_gestao", False)
             st.rerun()
-
-
-
-
-    # --- 2. CABEÇALHO ALINHADO COM BOTÃO DE AJUDA ---
-    # col_titulo, col_ajuda = st.columns([4, 1])
-    #col_titulo, col_ajuda = st.columns([4, 1], vertical_alignment="center")
-    #
-    #with col_titulo:
-    #    st.markdown('<div class="titulo-tela" style="margin-top:0px;">Gestão de Planos e Assinaturas</div>', unsafe_allow_html=True)
-    #    
-    #with col_ajuda:
-    #    st.markdown("""
-    #        <style>
-    #        div.stButton > button:first-child {
-    #            background-color: #007ba7 !important;
-    #            color: white !important;
-    #            border: none !important;
-    #        }
-    #        div.stButton > button:first-child:hover {
-    #            background-color: #005f81 !important;
-    #            color: white !important;
-    #        }
-    #        </style>
-    #    """, unsafe_allow_html=True)
-    #    
-    #    if st.button("AJUDA", type="primary", use_container_width=True):
-    #        st.session_state["exibir_ajuda_gestao"] = not st.session_state.get("exibir_ajuda_gestao", False)
-    #        st.rerun()
-
-
-
-
 
     if st.session_state.get("exibir_ajuda_gestao", False):
         renderizar_ajuda_gestao()
