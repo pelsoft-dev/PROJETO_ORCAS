@@ -85,10 +85,10 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
     col_titulo, col_ajuda = st.columns([4, 1])
 
     with col_titulo:
-    st.markdown(
-        '<div class="titulo-tela" style="margin-top:0px;">Gestão de Planos e Assinaturas</div>',
-        unsafe_allow_html=True
-    )
+        st.markdown(
+            '<div class="titulo-tela" style="margin-top:0px;">Gestão de Planos e Assinaturas</div>',
+            unsafe_allow_html=True
+        )
 
     with col_ajuda:
         st.markdown("""
