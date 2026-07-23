@@ -95,7 +95,7 @@ def exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, 
     with col_ajuda:
         # Troca do st.button por st.toggle controlando diretamente a chave de sessão
         st.session_state["exibir_ajuda_gestao"] = st.toggle(
-            "AJUDA", 
+            "<b>AJUDA</b>", 
             value=st.session_state.get("exibir_ajuda_gestao", False),
             key="toggle_ajuda_gestao"
         )
