@@ -7,26 +7,22 @@ import json
 if "GEMINI_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 
-# Tabela de limites configuráveis por plano
 LIMITES_USO = {
     "PADRAO": 30,          # 30 interações de voz/mês
     "INTERMEDIARIO": 100,  # 100 interações de voz/mês
-    "ILIMITADO": 999999    # Sem limite prático
+    "ILIMITADO": 999999    # Sem limite
 }
 
 
 def verificar_e_incrementar_limite(supabase, usuario_id):
     """
-    Verifica no Supabase se o usuário (tabela 'usuarios') ainda tem cota disponível.
-    Adapta-se ao campo de plano e cota (caso ainda não existam no schema, trata com fallback).
+    Verifica no Supabase se o usuário ainda tem cota de uso de voz disponível no mês.
     """
     try:
         res = supabase.table("usuarios").select("*").eq("id", usuario_id).execute()
         
         if res and hasattr(res, 'data') and len(res.data) > 0:
             dados_user = res.data[0]
-            
-            # Leitura com fallback para schemas legados
             plano_ia = str(dados_user.get("plano_ia") or "PADRAO").upper()
             uso_atual = int(dados_user.get("uso_voz_mes") or 0)
             limite_permitido = LIMITES_USO.get(plano_ia, 30)
@@ -34,12 +30,11 @@ def verificar_e_incrementar_limite(supabase, usuario_id):
             if uso_atual >= limite_permitido:
                 return False, uso_atual, limite_permitido
 
-            # Incrementa o uso no Supabase
             try:
                 novo_uso = uso_atual + 1
                 supabase.table("usuarios").update({"uso_voz_mes": novo_uso}).eq("id", usuario_id).execute()
             except Exception:
-                pass # Evita travar caso a coluna ainda não tenha sido criada no Supabase
+                pass
                 
             return True, uso_atual + 1, limite_permitido
             
@@ -51,7 +46,7 @@ def verificar_e_incrementar_limite(supabase, usuario_id):
 
 def processar_comando_voz(audio_bytes, planos_disponiveis):
     """
-    Envia o áudio ao Gemini e retorna a transcrição com os dados mapeados em JSON.
+    Processa o áudio via Gemini Flash com suporte a timeout.
     """
     model = genai.GenerativeModel('gemini-1.5-flash')
 
@@ -60,36 +55,63 @@ def processar_comando_voz(audio_bytes, planos_disponiveis):
     Data de hoje: {date.today()}
     Planos ativos cadastrados pelo usuário: {planos_disponiveis}
 
-    Analise o áudio e responda EXCLUSIVAMENTE um objeto JSON válido (sem textos explicativos ou markdown):
+    Analise o áudio e responda EXCLUSIVAMENTE um objeto JSON válido (sem markdown ou textos adicionais):
     
     {{
-      "transcricao": "Texto exato falado no áudio pelo usuário",
-      "intencao": "PROJETAR" ou "REALIZAR" ou "CONSULTAR",
-      "projeto_id": "Qual dos planos ativos o usuário citou (caso não citado e houver apenas 1, use ele. Se ambíguo, retorne null)",
-      "descricao": "Descrição limpa do lançamento (ex: Aluguel, Celular, Supermercado, Salário)",
+      "transcricao": "Texto exato falado pelo usuário",
+      "intencao": "REALIZAR" ou "PROJETAR" ou "CONSULTAR",
+      "projeto_id": "Nome/ID do plano citado pelo usuário. Se não citado e houver 1 plano ativo, use ele",
+      "descricao": "Termo de busca/descrição limpa da conta (ex: Celular Claro, Aluguel, Supermercado)",
       "valor": float_ou_null,
-      "tipo": "Entrada" ou "Saida",
-      "data_vencimento": "YYYY-MM-DD",
-      "realizado": true ou false,
-      "resposta_orcas": "Mensagem curta e amigável confirmando o entendimento"
+      "tipo": "Saida" ou "Entrada",
+      "data_vencimento": "YYYY-MM-DD"
     }}
     """
 
-    response = model.generate_content([
-        prompt,
-        {
-            "mime_type": "audio/wav",
-            "data": audio_bytes
-        }
-    ])
+    # Configuração da requisição com timeout explícito para evitar erro 504
+    response = model.generate_content(
+        [
+            prompt,
+            {"mime_type": "audio/wav", "data": audio_bytes}
+        ],
+        request_options={"timeout": 35.0}
+    )
 
     texto_limpo = response.text.replace("```json", "").replace("```", "").strip()
     return json.loads(texto_limpo)
 
 
+def buscar_planejamento_existente(supabase, usuario_id, projeto_id, descricao):
+    """
+    Busca na tabela de lançamentos se já existe uma conta planejada/pendente correspondente.
+    """
+    try:
+        query = supabase.table("lancamentos")\
+            .select("*")\
+            .eq("usuario_id", usuario_id)\
+            .ilike("descricao", f"%{descricao}%")
+        
+        if projeto_id:
+            query = query.eq("projeto_id", projeto_id)
+
+        res = query.execute()
+
+        if res and res.data:
+            # Filtra preferencialmente lançamentos pendentes/planejados
+            planejados = [l for l in res.data if not l.get("realizado") and l.get("status") != "Realizado"]
+            if planejados:
+                return planejados[0]  # Retorna o mais antigo/próximo pendente
+            return res.data[0]
+            
+    except Exception as e:
+        print(f"Erro na busca prévia: {e}")
+        
+    return None
+
+
 def executar_acao_no_supabase(supabase, usuario_id, dados):
     """
-    Persiste os dados na tabela 'lancamentos' do ORCAS.
+    Efetiva a gravação ou atualização na tabela 'lancamentos'.
     """
     intencao = dados.get("intencao")
     projeto_id = dados.get("projeto_id")
@@ -97,37 +119,11 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
     valor = float(dados.get("valor") or 0.0)
     data_venc = dados.get("data_vencimento") or str(date.today())
     tipo_fluxo = dados.get("tipo", "Saida")
+    id_lancamento_existente = dados.get("id_existente")
 
-    # 1. PROJETAR UM NOVO LANÇAMENTO (INSERT)
-    if intencao == "PROJETAR":
-        payload = {
-            "usuario_id": usuario_id,
-            "projeto_id": projeto_id,
-            "descricao": descricao,
-            "valor": valor,
-            "valor_plan": valor,
-            "tipo": tipo_fluxo,
-            "data_vencimento": data_venc,
-            "data": data_venc,
-            "realizado": False,
-            "status": "Planejado",
-            "valor_realizado": 0.0,
-            "valor_real": 0.0
-        }
-        supabase.table("lancamentos").insert(payload).execute()
-        return f"✅ Lançamento **{descricao}** (R$ {valor:,.2f}) projetado com sucesso!"
-
-    # 2. REALIZAR / CONCILIAR (UPDATE OU INSERT DIRETO)
-    elif intencao == "REALIZAR":
-        res = supabase.table("lancamentos")\
-            .select("*")\
-            .eq("usuario_id", usuario_id)\
-            .eq("projeto_id", projeto_id)\
-            .ilike("descricao", f"%{descricao}%")\
-            .execute()
-
-        if res and res.data:
-            id_lancamento = res.data[0]["id"]
+    # 1. REALIZAR / CONCILIAR
+    if intencao == "REALIZAR":
+        if id_lancamento_existente:
             payload_update = {
                 "realizado": True,
                 "status": "Realizado",
@@ -135,7 +131,7 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
                 "valor_real": valor,
                 "parcial_data": str(date.today())
             }
-            supabase.table("lancamentos").update(payload_update).eq("id", id_lancamento).execute()
+            supabase.table("lancamentos").update(payload_update).eq("id", id_lancamento_existente).execute()
             return f"✅ Lançamento **{descricao}** marcado como **REALIZADO** no valor de R$ {valor:,.2f}!"
         else:
             payload_direto = {
@@ -153,7 +149,26 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
                 "status": "Realizado"
             }
             supabase.table("lancamentos").insert(payload_direto).execute()
-            return f"✅ Lançamento de **{descricao}** (R$ {valor:,.2f}) realizado com sucesso!"
+            return f"✅ Lançamento de **{descricao}** (R$ {valor:,.2f}) realizado e baixado com sucesso!"
+
+    # 2. PROJETAR UM NOVO LANÇAMENTO
+    elif intencao == "PROJETAR":
+        payload = {
+            "usuario_id": usuario_id,
+            "projeto_id": projeto_id,
+            "descricao": descricao,
+            "valor": valor,
+            "valor_plan": valor,
+            "tipo": tipo_fluxo,
+            "data_vencimento": data_venc,
+            "data": data_venc,
+            "realizado": False,
+            "status": "Planejado",
+            "valor_realizado": 0.0,
+            "valor_real": 0.0
+        }
+        supabase.table("lancamentos").insert(payload).execute()
+        return f"✅ Lançamento **{descricao}** (R$ {valor:,.2f}) projetado com sucesso!"
 
     return "Ação concluída com sucesso!"
 
@@ -161,21 +176,19 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
 @st.dialog("🎙️ Conversar com o ORCAS")
 def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
     """
-    Modal de interface com fluxo em duas etapas: Gravação -> Checagem/Confirmação.
+    Modal de interface com verificação cruzada de dados no banco antes de confirmar.
     """
     st.write("👋 **Olá! Em que posso ajudar nos seus lançamentos hoje?**")
 
-    # Inicialização dos estados da sessão do modal
     if "etapa_voz" not in st.session_state:
         st.session_state.etapa_voz = "gravacao"
     if "dados_interpretados" not in st.session_state:
         st.session_state.dados_interpretados = None
 
     # ------------------------------------------------------------------
-    # ETAPA 1: GRAVAÇÃO E TRANSCRIÇÃO
+    # ETAPA 1: GRAVAÇÃO E INTERPRETAÇÃO COM CRUZAMENTO NO SUPABASE
     # ------------------------------------------------------------------
     if st.session_state.etapa_voz == "gravacao":
-        # Verificação de Limites Mensais
         pode_usar, uso_atual, limite_max = verificar_e_incrementar_limite(supabase, id_usuario)
 
         if not pode_usar:
@@ -191,20 +204,50 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
         audio_input = st.audio_input("Grave seu comando abaixo:")
 
         if audio_input:
-            with st.spinner("🤖 ORCAS está processando e interpretando seu áudio..."):
+            with st.spinner("🤖 ORCAS está processando o áudio e checando seus planejamentos..."):
                 try:
                     audio_bytes = audio_input.getvalue()
                     dados = processar_comando_voz(audio_bytes, planos_disponiveis)
 
-                    # Se o plano for ambíguo, interrompe e avisa o usuário
-                    if not dados.get("projeto_id") and len(planos_disponiveis) > 1 and dados.get("intencao") != "CONSULTAR":
-                        st.warning(
-                            f"🤖 **ORCAS:** {dados.get('resposta_orcas')}\n\n"
-                            f"*Por favor, especifique qual dos seus planos usar ({', '.join(planos_disponiveis)}).*"
-                        )
-                        return
+                    # Tenta atribuir o plano ativo padrão se houver apenas um
+                    if not dados.get("projeto_id") and len(planos_disponiveis) == 1:
+                        dados["projeto_id"] = planos_disponiveis[0]
 
-                    # Guarda o resultado e avança para a tela de confirmação
+                    # --- CHECAGEM CRUZADA COM A TABELA DE LANÇAMENTOS DO SUPABASE ---
+                    item_existente = buscar_planejamento_existente(
+                        supabase, 
+                        id_usuario, 
+                        dados.get("projeto_id"), 
+                        dados.get("descricao", "")
+                    )
+
+                    if item_existente:
+                        dados["id_existente"] = item_existente.get("id")
+                        # Se o áudio não disse o valor explicitamente, usa o valor que estava planejado no banco
+                        if not dados.get("valor") or dados.get("valor") == 0:
+                            dados["valor"] = item_existente.get("valor_plan") or item_existente.get("valor") or 0.0
+                        
+                        dt_venc = item_existente.get("data_vencimento") or item_existente.get("data") or "-"
+                        if dt_venc != "-":
+                            try:
+                                dt_venc = datetime.strptime(str(dt_venc)[:10], "%Y-%m-%d").strftime("%d/%m/%Y")
+                            except Exception:
+                                pass
+
+                        dados["mensagem_orcas"] = (
+                            f"Entendi que você pagou a conta **{item_existente.get('descricao')}**. "
+                            f"Chequei no sistema e verifiquei que estava planejado o valor de **R$ {float(dados['valor']):,.2f}** "
+                            f"com vencimento em **{dt_venc}**. Você confirma?"
+                        )
+                    else:
+                        dados["id_existente"] = None
+                        valor_audio = float(dados.get("valor") or 0.0)
+                        dados["mensagem_orcas"] = (
+                            f"Entendi que você quer registrar **{dados.get('descricao')}** "
+                            f"no valor de **R$ {valor_audio:,.2f}**. Não encontrei um planejamento prévio, "
+                            f"então realizarei um novo lançamento direto. Você confirma?"
+                        )
+
                     st.session_state.dados_interpretados = dados
                     st.session_state.etapa_voz = "confirmacao"
                     st.rerun()
@@ -213,18 +256,17 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
                     st.error(f"Não foi possível processar o áudio. Tente novamente. (Erro: {e})")
 
     # ------------------------------------------------------------------
-    # ETAPA 2: EXIBIÇÃO DA TRANSCRIÇÃO E CONFIRMAÇÃO
+    # ETAPA 2: CONFIRMAÇÃO COM TEXTO EXPLICATIVO
     # ------------------------------------------------------------------
     elif st.session_state.etapa_voz == "confirmacao":
         dados = st.session_state.dados_interpretados or {}
 
-        # Destaque com o que foi efetivamente ouvido
-        st.info(f'🗣️ **Você disse:** "{dados.get("transcricao", "Áudio não transcrito")}"')
+        # Exibe transcrição exata
+        st.info(f'🗣️ **Você disse:** "{dados.get("transcricao", "")}"')
 
-        # Card de resumo dos dados interpretados
+        # Caixa com o resumo inteligente do ORCAS
         with st.container(border=True):
-            st.subheader("📋 Resumo do Lançamento")
-            st.write(f"🤖 **ORCAS:** {dados.get('resposta_orcas', '')}")
+            st.markdown(f"🤖 **ORCAS:** {dados.get('mensagem_orcas')}")
             st.markdown("---")
 
             col_a, col_b = st.columns(2)
@@ -233,10 +275,9 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
                 st.write(f"• **Plano:** {dados.get('projeto_id') or 'Padrão'}")
                 st.write(f"• **Descrição:** {dados.get('descricao', '-')}")
             with col_b:
-                st.write(f"• **Tipo:** {dados.get('tipo', '-')}")
+                st.write(f"• **Tipo:** {dados.get('tipo', 'Saida')}")
                 valor_fmt = f"R$ {float(dados.get('valor') or 0.0):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
                 st.write(f"• **Valor:** {valor_fmt}")
-                st.write(f"• **Data:** {dados.get('data_vencimento', '-')}")
 
         st.markdown("---")
         btn_salvar, btn_refazer = st.columns(2)
@@ -246,14 +287,13 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
                 msg_sucesso = executar_acao_no_supabase(supabase, id_usuario, dados)
                 st.success(msg_sucesso)
                 
-                # Reseta o modal para a próxima gravação
+                # Reseta para a próxima chamada
                 st.session_state.etapa_voz = "gravacao"
                 st.session_state.dados_interpretados = None
                 st.rerun()
 
         with btn_refazer:
             if st.button("🔄 Falar Novamente", use_container_width=True):
-                # Cancela e volta para a etapa de gravação
                 st.session_state.etapa_voz = "gravacao"
                 st.session_state.dados_interpretados = None
                 st.rerun()
