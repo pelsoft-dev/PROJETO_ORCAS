@@ -42,12 +42,11 @@ def verificar_e_incrementar_limite(supabase, usuario_id):
 
 
 def processar_comando_voz(audio_bytes, planos_disponiveis):
-    """Processa o áudio via nova SDK oficial google-genai com modelo atualizado."""
+    """Processa o áudio via SDK google-genai com alias direto e limpo."""
     api_key = st.secrets.get('GEMINI_API_KEY')
     if not api_key:
         raise ValueError('Chave GEMINI_API_KEY não encontrada nos Secrets!')
 
-    # Instancia o cliente da nova SDK oficial
     client = genai.Client(api_key=api_key)
 
     prompt = f"""
@@ -68,12 +67,21 @@ def processar_comando_voz(audio_bytes, planos_disponiveis):
     }}
     """
 
+    # Envio dos bytes de áudio formatados para o Gemini
     audio_part = types.Part.from_bytes(data=audio_bytes, mime_type='audio/wav')
 
-    # Nome exato da versão estável atualizada do modelo
-    response = client.models.generate_content(
-        model='gemini-2.5-flash', contents=[prompt, audio_part]
-    )
+    # Passando apenas o identificador 'gemini-2.5-flash' (sem 'models/')
+    try:
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=[prompt, audio_part]
+        )
+    except Exception:
+        # Fallback para o modelo flash estável 1.5 caso a conta ainda não tenha acesso total ao 2.5
+        response = client.models.generate_content(
+            model='gemini-1.5-flash',
+            contents=[prompt, audio_part]
+        )
 
     texto_limpo = response.text.replace('```json', '').replace('```', '').strip()
     return json.loads(texto_limpo)
