@@ -46,9 +46,10 @@ def verificar_e_incrementar_limite(supabase, usuario_id):
 
 def processar_comando_voz(audio_bytes, planos_disponiveis):
     """
-    Processa o áudio via Gemini Flash com suporte a timeout.
+    Processa o áudio via Gemini Flash com suporte a modelo atualizado e timeout.
     """
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    # Modelo atualizado para gemini-2.5-flash
+    model = genai.GenerativeModel('gemini-2.5-flash')
 
     prompt = f"""
     Você é o assistente financeiro de voz do aplicativo ORCAS.
@@ -68,7 +69,6 @@ def processar_comando_voz(audio_bytes, planos_disponiveis):
     }}
     """
 
-    # Configuração da requisição com timeout explícito para evitar erro 504
     response = model.generate_content(
         [
             prompt,
@@ -97,10 +97,9 @@ def buscar_planejamento_existente(supabase, usuario_id, projeto_id, descricao):
         res = query.execute()
 
         if res and res.data:
-            # Filtra preferencialmente lançamentos pendentes/planejados
             planejados = [l for l in res.data if not l.get("realizado") and l.get("status") != "Realizado"]
             if planejados:
-                return planejados[0]  # Retorna o mais antigo/próximo pendente
+                return planejados[0]
             return res.data[0]
             
     except Exception as e:
@@ -185,9 +184,7 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
     if "dados_interpretados" not in st.session_state:
         st.session_state.dados_interpretados = None
 
-    # ------------------------------------------------------------------
-    # ETAPA 1: GRAVAÇÃO E INTERPRETAÇÃO COM CRUZAMENTO NO SUPABASE
-    # ------------------------------------------------------------------
+    # ETAPA 1: GRAVAÇÃO E INTERPRETAÇÃO
     if st.session_state.etapa_voz == "gravacao":
         pode_usar, uso_atual, limite_max = verificar_e_incrementar_limite(supabase, id_usuario)
 
@@ -209,11 +206,9 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
                     audio_bytes = audio_input.getvalue()
                     dados = processar_comando_voz(audio_bytes, planos_disponiveis)
 
-                    # Tenta atribuir o plano ativo padrão se houver apenas um
                     if not dados.get("projeto_id") and len(planos_disponiveis) == 1:
                         dados["projeto_id"] = planos_disponiveis[0]
 
-                    # --- CHECAGEM CRUZADA COM A TABELA DE LANÇAMENTOS DO SUPABASE ---
                     item_existente = buscar_planejamento_existente(
                         supabase, 
                         id_usuario, 
@@ -223,7 +218,6 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
 
                     if item_existente:
                         dados["id_existente"] = item_existente.get("id")
-                        # Se o áudio não disse o valor explicitamente, usa o valor que estava planejado no banco
                         if not dados.get("valor") or dados.get("valor") == 0:
                             dados["valor"] = item_existente.get("valor_plan") or item_existente.get("valor") or 0.0
                         
@@ -255,16 +249,12 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
                 except Exception as e:
                     st.error(f"Não foi possível processar o áudio. Tente novamente. (Erro: {e})")
 
-    # ------------------------------------------------------------------
-    # ETAPA 2: CONFIRMAÇÃO COM TEXTO EXPLICATIVO
-    # ------------------------------------------------------------------
+    # ETAPA 2: CONFIRMAÇÃO
     elif st.session_state.etapa_voz == "confirmacao":
         dados = st.session_state.dados_interpretados or {}
 
-        # Exibe transcrição exata
         st.info(f'🗣️ **Você disse:** "{dados.get("transcricao", "")}"')
 
-        # Caixa com o resumo inteligente do ORCAS
         with st.container(border=True):
             st.markdown(f"🤖 **ORCAS:** {dados.get('mensagem_orcas')}")
             st.markdown("---")
@@ -287,7 +277,6 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
                 msg_sucesso = executar_acao_no_supabase(supabase, id_usuario, dados)
                 st.success(msg_sucesso)
                 
-                # Reseta para a próxima chamada
                 st.session_state.etapa_voz = "gravacao"
                 st.session_state.dados_interpretados = None
                 st.rerun()
