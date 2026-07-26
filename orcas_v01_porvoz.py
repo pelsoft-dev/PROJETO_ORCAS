@@ -7,10 +7,10 @@ import json
 if "GEMINI_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 
-# Tabela de limites configuráveis
+# Tabela de limites configuráveis por plano
 LIMITES_USO = {
-    "PADRAO": 30,          # Ex: 30 interações de voz/mês
-    "INTERMEDIARIO": 100,  # Ex: 100 interações de voz/mês
+    "PADRAO": 30,          # 30 interações de voz/mês
+    "INTERMEDIARIO": 100,  # 100 interações de voz/mês
     "ILIMITADO": 999999    # Sem limite prático
 }
 
@@ -34,12 +34,12 @@ def verificar_e_incrementar_limite(supabase, usuario_id):
             if uso_atual >= limite_permitido:
                 return False, uso_atual, limite_permitido
 
-            # Incrementa o uso no Supabase (se as colunas existirem no seu banco)
+            # Incrementa o uso no Supabase
             try:
                 novo_uso = uso_atual + 1
                 supabase.table("usuarios").update({"uso_voz_mes": novo_uso}).eq("id", usuario_id).execute()
             except Exception:
-                pass # Evita travar caso a coluna uso_voz_mes ainda não tenha sido criada no Supabase
+                pass # Evita travar caso a coluna ainda não tenha sido criada no Supabase
                 
             return True, uso_atual + 1, limite_permitido
             
@@ -51,7 +51,7 @@ def verificar_e_incrementar_limite(supabase, usuario_id):
 
 def processar_comando_voz(audio_bytes, planos_disponiveis):
     """
-    Envia o áudio ao Gemini e retorna o JSON exato mapeado para a tabela 'lancamentos'.
+    Envia o áudio ao Gemini e retorna a transcrição com os dados mapeados em JSON.
     """
     model = genai.GenerativeModel('gemini-1.5-flash')
 
@@ -63,6 +63,7 @@ def processar_comando_voz(audio_bytes, planos_disponiveis):
     Analise o áudio e responda EXCLUSIVAMENTE um objeto JSON válido (sem textos explicativos ou markdown):
     
     {{
+      "transcricao": "Texto exato falado no áudio pelo usuário",
       "intencao": "PROJETAR" ou "REALIZAR" ou "CONSULTAR",
       "projeto_id": "Qual dos planos ativos o usuário citou (caso não citado e houver apenas 1, use ele. Se ambíguo, retorne null)",
       "descricao": "Descrição limpa do lançamento (ex: Aluguel, Celular, Supermercado, Salário)",
@@ -114,11 +115,10 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
             "valor_real": 0.0
         }
         supabase.table("lancamentos").insert(payload).execute()
-        return f"✅ Lançamento **{descricao}** (R$ {valor:,.2f}) projetado com sucesso no plano **{projeto_id}**!"
+        return f"✅ Lançamento **{descricao}** (R$ {valor:,.2f}) projetado com sucesso!"
 
-    # 2. REALIZAR / CONCILIAR (UPDATE)
+    # 2. REALIZAR / CONCILIAR (UPDATE OU INSERT DIRETO)
     elif intencao == "REALIZAR":
-        # Procura lançamento pendente correspondente na tabela 'lancamentos'
         res = supabase.table("lancamentos")\
             .select("*")\
             .eq("usuario_id", usuario_id)\
@@ -138,7 +138,6 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
             supabase.table("lancamentos").update(payload_update).eq("id", id_lancamento).execute()
             return f"✅ Lançamento **{descricao}** marcado como **REALIZADO** no valor de R$ {valor:,.2f}!"
         else:
-            # Se não encontrou lançamento prévio, realiza um novo direto
             payload_direto = {
                 "usuario_id": usuario_id,
                 "projeto_id": projeto_id,
@@ -154,7 +153,7 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
                 "status": "Realizado"
             }
             supabase.table("lancamentos").insert(payload_direto).execute()
-            return f"✅ Lançamento direto de **{descricao}** (R$ {valor:,.2f}) realizado no plano **{projeto_id}**!"
+            return f"✅ Lançamento de **{descricao}** (R$ {valor:,.2f}) realizado com sucesso!"
 
     return "Ação concluída com sucesso!"
 
@@ -162,65 +161,99 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
 @st.dialog("🎙️ Conversar com o ORCAS")
 def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
     """
-    Modal de interface acionado pelo botão na barra lateral.
+    Modal de interface com fluxo em duas etapas: Gravação -> Checagem/Confirmação.
     """
     st.write("👋 **Olá! Em que posso ajudar nos seus lançamentos hoje?**")
 
-    # Verificação de Limites
-    pode_usar, uso_atual, limite_max = verificar_e_incrementar_limite(supabase, id_usuario)
+    # Inicialização dos estados da sessão do modal
+    if "etapa_voz" not in st.session_state:
+        st.session_state.etapa_voz = "gravacao"
+    if "dados_interpretados" not in st.session_state:
+        st.session_state.dados_interpretados = None
 
-    if not pode_usar:
-        st.error(
-            f"⚠️ **Você atingiu o limite mensal do recurso de voz!**\n\n"
-            f"Você utilizou **{uso_atual}/{limite_max}** comandos neste mês.\n"
-            f"Faça um upgrade de plano na tela de **Gestão / Configurações** para expandir seu limite."
-        )
-        return
+    # ------------------------------------------------------------------
+    # ETAPA 1: GRAVAÇÃO E TRANSCRIÇÃO
+    # ------------------------------------------------------------------
+    if st.session_state.etapa_voz == "gravacao":
+        # Verificação de Limites Mensais
+        pode_usar, uso_atual, limite_max = verificar_e_incrementar_limite(supabase, id_usuario)
 
-    st.caption(f"📊 Uso do recurso de voz no mês: **{uso_atual}/{limite_max}** chamadas.")
+        if not pode_usar:
+            st.error(
+                f"⚠️ **Você atingiu o limite mensal do recurso de voz!**\n\n"
+                f"Você utilizou **{uso_atual}/{limite_max}** comandos neste mês.\n"
+                f"Faça um upgrade de plano na tela de **Gestão / Configurações** para expandir seu limite."
+            )
+            return
 
-    audio_input = st.audio_input("Grave seu comando abaixo:")
+        st.caption(f"📊 Uso do recurso de voz no mês: **{uso_atual}/{limite_max}** chamadas.")
 
-    if audio_input:
-        st.info("🤖 **ORCAS:** Processando áudio via Gemini...")
+        audio_input = st.audio_input("Grave seu comando abaixo:")
 
-        try:
-            audio_bytes = audio_input.getvalue()
-            dados = processar_comando_voz(audio_bytes, planos_disponiveis)
+        if audio_input:
+            with st.spinner("🤖 ORCAS está processando e interpretando seu áudio..."):
+                try:
+                    audio_bytes = audio_input.getvalue()
+                    dados = processar_comando_voz(audio_bytes, planos_disponiveis)
 
-            # Validação de Ambiguidade de Plano
-            if not dados.get("projeto_id") and len(planos_disponiveis) > 1 and dados.get("intencao") != "CONSULTAR":
-                st.warning(f"🤖 **ORCAS:** {dados.get('resposta_orcas')}\n\n*Por favor, especifique qual dos seus planos usar ({', '.join(planos_disponiveis)}).*")
-                return
+                    # Se o plano for ambíguo, interrompe e avisa o usuário
+                    if not dados.get("projeto_id") and len(planos_disponiveis) > 1 and dados.get("intencao") != "CONSULTAR":
+                        st.warning(
+                            f"🤖 **ORCAS:** {dados.get('resposta_orcas')}\n\n"
+                            f"*Por favor, especifique qual dos seus planos usar ({', '.join(planos_disponiveis)}).*"
+                        )
+                        return
 
-            # Exibição do Card de Confirmação
-            with st.container(border=True):
-                st.subheader("📋 Resumo do Comando Entendido")
-                st.write(f"🤖 **ORCAS:** {dados.get('resposta_orcas')}")
-                st.markdown("---")
+                    # Guarda o resultado e avança para a tela de confirmação
+                    st.session_state.dados_interpretados = dados
+                    st.session_state.etapa_voz = "confirmacao"
+                    st.rerun()
+
+                except Exception as e:
+                    st.error(f"Não foi possível processar o áudio. Tente novamente. (Erro: {e})")
+
+    # ------------------------------------------------------------------
+    # ETAPA 2: EXIBIÇÃO DA TRANSCRIÇÃO E CONFIRMAÇÃO
+    # ------------------------------------------------------------------
+    elif st.session_state.etapa_voz == "confirmacao":
+        dados = st.session_state.dados_interpretados or {}
+
+        # Destaque com o que foi efetivamente ouvido
+        st.info(f'🗣️ **Você disse:** "{dados.get("transcricao", "Áudio não transcrito")}"')
+
+        # Card de resumo dos dados interpretados
+        with st.container(border=True):
+            st.subheader("📋 Resumo do Lançamento")
+            st.write(f"🤖 **ORCAS:** {dados.get('resposta_orcas', '')}")
+            st.markdown("---")
+
+            col_a, col_b = st.columns(2)
+            with col_a:
+                st.write(f"• **Ação:** {dados.get('intencao', '-')}")
+                st.write(f"• **Plano:** {dados.get('projeto_id') or 'Padrão'}")
+                st.write(f"• **Descrição:** {dados.get('descricao', '-')}")
+            with col_b:
+                st.write(f"• **Tipo:** {dados.get('tipo', '-')}")
+                valor_fmt = f"R$ {float(dados.get('valor') or 0.0):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                st.write(f"• **Valor:** {valor_fmt}")
+                st.write(f"• **Data:** {dados.get('data_vencimento', '-')}")
+
+        st.markdown("---")
+        btn_salvar, btn_refazer = st.columns(2)
+
+        with btn_salvar:
+            if st.button("✅ Confirmar e Gravar", type="primary", use_container_width=True):
+                msg_sucesso = executar_acao_no_supabase(supabase, id_usuario, dados)
+                st.success(msg_sucesso)
                 
-                col_a, col_b = st.columns(2)
-                with col_a:
-                    st.write(f"• **Ação:** {dados.get('intencao')}")
-                    st.write(f"• **Plano:** {dados.get('projeto_id') or 'Não informado'}")
-                    st.write(f"• **Descrição:** {dados.get('descricao')}")
-                with col_b:
-                    st.write(f"• **Tipo:** {dados.get('tipo')}")
-                    st.write(f"• **Valor:** R$ {float(dados.get('valor') or 0.0):,.2f}")
-                    st.write(f"• **Data:** {dados.get('data_vencimento')}")
+                # Reseta o modal para a próxima gravação
+                st.session_state.etapa_voz = "gravacao"
+                st.session_state.dados_interpretados = None
+                st.rerun()
 
-                st.markdown("---")
-                btn_salvar, btn_cancelar = st.columns(2)
-
-                with btn_salvar:
-                    if st.button("✅ Confirmar e Gravar", type="primary", use_container_width=True):
-                        msg_sucesso = executar_acao_no_supabase(supabase, id_usuario, dados)
-                        st.success(msg_sucesso)
-                        st.rerun()
-
-                with btn_cancelar:
-                    if st.button("❌ Cancelar", use_container_width=True):
-                        st.rerun()
-
-        except Exception as e:
-            st.error(f"Não foi possível processar o áudio. Tente novamente. (Erro: {e})")
+        with btn_refazer:
+            if st.button("🔄 Falar Novamente", use_container_width=True):
+                # Cancela e volta para a etapa de gravação
+                st.session_state.etapa_voz = "gravacao"
+                st.session_state.dados_interpretados = None
+                st.rerun()
