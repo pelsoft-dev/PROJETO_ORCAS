@@ -5,6 +5,7 @@ import json
 
 # --- CONFIGURAÇÃO DA API DO GEMINI ---
 if "GEMINI_API_KEY" in st.secrets:
+    # Configura a chave de API
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 
 LIMITES_USO = {
@@ -46,11 +47,8 @@ def verificar_e_incrementar_limite(supabase, usuario_id):
 
 def processar_comando_voz(audio_bytes, planos_disponiveis):
     """
-    Processa o áudio via Gemini Flash com nome de modelo universal compatível.
+    Processa o áudio garantindo a versão estável da API do Gemini.
     """
-    # Utiliza a string oficial de alias garantida na API
-    model = genai.GenerativeModel('gemini-1.5-flash')
-
     prompt = f"""
     Você é o assistente financeiro de voz do aplicativo ORCAS.
     Data de hoje: {date.today()}
@@ -69,12 +67,19 @@ def processar_comando_voz(audio_bytes, planos_disponiveis):
     }}
     """
 
-    response = model.generate_content(
-        [
-            prompt,
-            {"mime_type": "audio/wav", "data": audio_bytes}
-        ]
-    )
+    audio_part = {
+        "mime_type": "audio/wav",
+        "data": audio_bytes
+    }
+
+    # Tenta utilizar o modelo flash padrão com fallback de nomenclatura
+    try:
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content([prompt, audio_part])
+    except Exception:
+        # Fallback para a rota com prefixo de modelos
+        model = genai.GenerativeModel('models/gemini-1.5-flash')
+        response = model.generate_content([prompt, audio_part])
 
     texto_limpo = response.text.replace("```json", "").replace("```", "").strip()
     return json.loads(texto_limpo)
@@ -96,7 +101,6 @@ def buscar_planejamento_existente(supabase, usuario_id, projeto_id, descricao):
         res = query.execute()
 
         if res and res.data:
-            # Filtra preferencialmente lançamentos pendentes
             planejados = [l for l in res.data if not l.get("realizado") and l.get("status") != "Realizado"]
             if planejados:
                 return planejados[0]
@@ -184,9 +188,7 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
     if "dados_interpretados" not in st.session_state:
         st.session_state.dados_interpretados = None
 
-    # ------------------------------------------------------------------
-    # ETAPA 1: GRAVAÇÃO E INTERPRETAÇÃO COM CONSULTA NO SUPABASE
-    # ------------------------------------------------------------------
+    # ETAPA 1: GRAVAÇÃO E CONSULTA
     if st.session_state.etapa_voz == "gravacao":
         pode_usar, uso_atual, limite_max = verificar_e_incrementar_limite(supabase, id_usuario)
 
@@ -211,7 +213,7 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
                     if not dados.get("projeto_id") and len(planos_disponiveis) == 1:
                         dados["projeto_id"] = planos_disponiveis[0]
 
-                    # Checagem na tabela de lançamentos do Supabase
+                    # Consulta prévia no Supabase
                     item_existente = buscar_planejamento_existente(
                         supabase, 
                         id_usuario, 
@@ -252,9 +254,7 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
                 except Exception as e:
                     st.error(f"Não foi possível processar o áudio. Tente novamente. (Detalhes: {e})")
 
-    # ------------------------------------------------------------------
-    # ETAPA 2: TELA DE CONFIRMAÇÃO E VALIDAÇÃO DOS DADOS
-    # ------------------------------------------------------------------
+    # ETAPA 2: CONFIRMAÇÃO
     elif st.session_state.etapa_voz == "confirmacao":
         dados = st.session_state.dados_interpretados or {}
 
