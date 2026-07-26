@@ -42,11 +42,12 @@ def verificar_e_incrementar_limite(supabase, usuario_id):
 
 
 def processar_comando_voz(audio_bytes, planos_disponiveis):
-    """Processa o áudio utilizando a SDK oficial com o modelo estável mais atual."""
+    """Processa o áudio via SDK oficial utilizando o modelo estável gemini-2.0-flash."""
     api_key = st.secrets.get('GEMINI_API_KEY')
     if not api_key:
         raise ValueError('Chave GEMINI_API_KEY não encontrada nos Secrets!')
 
+    # Conecta o cliente utilizando a API Key cadastrada no Google AI Studio
     client = genai.Client(api_key=api_key)
 
     prompt = f"""
@@ -67,11 +68,12 @@ def processar_comando_voz(audio_bytes, planos_disponiveis):
     }}
     """
 
+    # Envio dos bytes de áudio formatados especificando o MIME type aceito pelo navegador
     audio_part = types.Part.from_bytes(data=audio_bytes, mime_type='audio/wav')
 
-    # Passa o nome limpo do modelo ativo
+    # Usando o modelo oficial e rápido gemini-2.0-flash
     response = client.models.generate_content(
-        model='gemini-2.5-flash',
+        model='gemini-2.0-flash',
         contents=[prompt, audio_part]
     )
 
