@@ -9,28 +9,25 @@ import streamlit.components.v1 as components
 # Importação ativada para o funcionamento do retorno automático
 import orcas_v01_retornodomp as retornodomp
 
-# from supabase import Client
-
 from supabase import create_client, Client
 
 import random
-import smtplib  # Adicione este
-from email.mime.text import MIMEText # Adicione este
+import smtplib
+from email.mime.text import MIMEText
 import os
 
 # --- 1. IMPORTAÇÃO DOS MÓDULOS EXTERNOS ---
-#  import orcas_v01_gestao as gestao  - Está sendo importado depois do LOGIN
 import orcas_v01_dashboard as dash
 import orcas_v01_lancamentos as lanc
 import orcas_v01_projetar as proj
 import orcas_v01_conciliacao as conc
 import orcas_v01_admin as adm
 import orcas_v01_pagamentos as pag
+import orcas_v01_porvoz as porvoz  # Módulo Gemini Por Voz
 
-# --- FUNÇÃO DE ENVIO INTEGRADA (Versão Corrigida para Porta 587/TLS) ---
+# --- FUNÇÃO DE ENVIO INTEGRADA ---
 def disparar_email_codigo(destinatario, codigo):
     try:
-        # Puxa dos Secrets do Streamlit
         server_host = st.secrets["SMTP_SERVER"]
         server_port = int(st.secrets["SMTP_PORT"])
         user_email = st.secrets["SMTP_USER"]
@@ -41,9 +38,8 @@ def disparar_email_codigo(destinatario, codigo):
         msg['From'] = f"ORCAS App <{user_email}>"
         msg['To'] = destinatario
 
-        # MUDANÇA AQUI: smtplib.SMTP em vez de SMTP_SSL
         server = smtplib.SMTP(server_host, server_port)
-        server.starttls() # Inicia a segurança TLS necessária para a porta 587
+        server.starttls()
         server.login(user_email, pass_email)
         server.sendmail(user_email, destinatario, msg.as_string())
         server.quit()
@@ -53,7 +49,7 @@ def disparar_email_codigo(destinatario, codigo):
         st.error(f"Erro ao disparar e-mail: {e}")
         return False
 
-# --- 2. SEGURANÇA E CONEXÃO (Definição do objeto supabase) ---
+# --- 2. SEGURANÇA E CONEXÃO ---
 try:
     import orcas_v01_security as security
     supabase: Client = security.supabase
@@ -72,7 +68,6 @@ st.set_page_config(
 def ir_para_o_topo():
     components.html("""<script>window.parent.document.getElementById('topo-ancora').scrollIntoView();</script>""", height=0)
 
-# FUNÇÃO PARA RECOLHER O MENU VIA CLIQUE NO BOTÃO NATIVO
 def recolher_menu_via_clique():
     components.html(
         """
@@ -86,17 +81,15 @@ def recolher_menu_via_clique():
 
 st.markdown("""
     <style>
-    /* 1. Oculta menus nativos e footer */
     #MainMenu {visibility: hidden;} 
     footer {visibility: hidden;}
     .stAppDeployButton {display:none !important;}
     [data-testid="stStatusWidget"] {display:none !important;}
     
-    /* 2. SOLUÇÃO PARA O BOTÃO >> (MENU CELULAR) */
     [data-testid="stSidebarCollapsedControl"] {
         top: 60px !important; 
         left: 20px !important;
-        background-color: #1E3A8A !important; /* Azul ORCAS */
+        background-color: #1E3A8A !important;
         border-radius: 10px !important;
         width: 45px !important;
         height: 45px !important;
@@ -105,7 +98,6 @@ st.markdown("""
         box-shadow: 2px 2px 10px rgba(0,0,0,0.3) !important;
     }
 
-    /* Ícone branco no botão do celular */
     [data-testid="stSidebarCollapsedControl"] button svg {
         fill: white !important;
         width: 25px !important;
@@ -116,7 +108,6 @@ st.markdown("""
         background-color: rgba(0,0,0,0) !important;
     }
 
-    /* 3. Remove badges flutuantes */
     [data-testid="stDecoration"],
     .viewerBadge_container__1QSob,
     .viewerBadge_link__1S137,
@@ -125,13 +116,11 @@ st.markdown("""
         visibility: hidden !important;
     }
 
-    /* 4. Ajuste de altura para conteúdo principal */
     .block-container {
         padding-top: 3.5rem !important;
         margin-top: -1.0rem !important;
     }
 
-    /* 5. FORÇA COMPACTAÇÃO RIGOROSA DE TABELAS */
     [data-testid="stTable"] td, [data-testid="stTable"] th,
     [data-testid="stDataFrame"] td, [data-testid="stDataFrame"] th,
     table td, table th {
@@ -143,7 +132,6 @@ st.markdown("""
         overflow-x: auto !important;
     }
 
-    /* 6. ESTILOS CUSTOMIZADOS ORCAS (Restaurados) */
     .logo-sidebar { 
         font-size: 2.2rem !important; 
         font-weight: bold; 
@@ -185,22 +173,18 @@ st.markdown("""
         border-radius: 4px; 
     }
     
-    /* Garante que textos de alerta e info quebrem linha normalmente */
     .info-pagamento, .stAlert p { 
         white-space: normal !important; 
         word-wrap: break-word !important; 
         display: block !important;
     }
 
-    /* 7. RESET ESTÉTICO DO MENU LATERAL (Para voltar ao Anexo 02) */
-    /* Garante fonte padrão do Streamlit nos itens do menu */
     [data-testid="stSidebar"] [data-testid="stWidgetLabel"] p {
         font-size: 1rem !important;
         font-weight: 500 !important;
         color: #31333F !important;
     }
     
-    /* Ajuste de espaçamento entre itens do rádio */
     [data-testid="stSidebar"] .stRadio div[role="radiogroup"] {
         gap: 0.5rem !important;
     }
@@ -218,11 +202,9 @@ def parse_moeda(t):
         return 0.0
 
 # ==============================================================================
-# INÍCIO INSERÇÃO: INTERCEPTAÇÃO INTELIGENTE DE RETORNO DO MERCADO PAGO E LOGIN AUTOMÁTICO
+# RETORNO DO MERCADO PAGO E LOGIN AUTOMÁTICO
 # ==============================================================================
-import streamlit.components.v1 as components
 import zoneinfo
-from datetime import datetime, timedelta
 
 status_retorno = None
 pref_id = None
@@ -232,7 +214,6 @@ if 'logado' not in st.session_state:
 
 query_params = st.query_params
 
-# --- ESTRATÉGIA 1: INTEGRAÇÃO COM PARAMETROS DE BYPASS NA URL ---
 if "bypass_uid" in query_params and "bypass_val" in query_params:
     uid_retorno = str(query_params["bypass_uid"]).strip()
     valor_retorno = float(query_params["bypass_val"])
@@ -240,7 +221,6 @@ if "bypass_uid" in query_params and "bypass_val" in query_params:
     venc_retorno_str = query_params.get("bypass_venc", "")
 
     try:
-        # Busca o registro temporário para não perder as definições da tela
         req_temp = supabase.table("pagamentos_temp").select("*").eq("usuario_id", uid_retorno).execute()
         
         if req_temp.data:
@@ -253,18 +233,16 @@ if "bypass_uid" in query_params and "bypass_val" in query_params:
             if not venc_retorno_str:
                 venc_retorno_str = (datetime.now(fuso_br).date() + timedelta(days=30)).strftime('%Y-%m-%d')
             
-            # Atualiza o usuário contendo explicitamente o tipo_renovacao que estava faltando
             try:
                 supabase.table("usuarios").update({
                     "data_ult_assinat": hoje_br_string,
                     "valor_pago": valor_retorno,
                     "vencimento": venc_retorno_str,
-                    "tipo_renovacao": v_tipo_renovacao  # Grava o plano escolhido na tela (ex: 48 meses)
+                    "tipo_renovacao": v_tipo_renovacao
                 }).eq("id", uid_retorno).execute()
             except Exception as erro_banco:
                 st.error(f"Erro ao consolidar dados cadastrais da assinatura: {erro_banco}")
 
-            # Atualiza a tabela config_projetos com os estados de zap e email correspondentes
             v_projeto_id = plano_retorno if plano_retorno else dados_temp.get('projeto_id')
             if v_projeto_id:
                 try:
@@ -277,7 +255,6 @@ if "bypass_uid" in query_params and "bypass_val" in query_params:
                 except Exception:
                     pass
 
-            # Montagem das variáveis de sessão baseadas no banco
             req_user = supabase.table("usuarios").select("*").eq("id", uid_retorno).execute()
             if req_user.data:
                 u_dados = req_user.data[0]
@@ -292,7 +269,6 @@ if "bypass_uid" in query_params and "bypass_val" in query_params:
                 st.session_state.email_ativo = dados_temp.get("email_ativo", 1)
                 st.session_state.escolha = "⚙️ Gestão"
                 
-                # 🔥 DELEÇÃO LIMPA: Remove o registro temporário consumido para liberar espaço
                 try:
                     supabase.table("pagamentos_temp").delete().eq("usuario_id", uid_retorno).execute()
                 except Exception:
@@ -316,7 +292,6 @@ if "bypass_uid" in query_params and "bypass_val" in query_params:
     except Exception as erro_bypass:
         st.error(f"Erro interno ao processar validação automática: {erro_bypass}")
 
-# --- ESTRATÉGIA 2: MODELO DE RETORNO CLÁSSICO COM PARAMETROS MP ---
 elif query_params and len(query_params) > 0:
     status_retorno = query_params.get("status") or query_params.get("collection_status")
     pref_id = query_params.get("preference_id") or query_params.get("collection_id")
@@ -327,7 +302,6 @@ if status_retorno and pref_id and not st.session_state.logado:
             usuario_auto = retornodomp.tratar_retorno(supabase, pref_id, status_retorno)
             if usuario_auto and isinstance(usuario_auto, dict):
                 st.session_state.logado = True
-                st.session_state.CHERA_MESTRA_UUID = str(usuario_auto.get('id', ''))
                 st.session_state.CHAVE_MESTRA_UUID = str(usuario_auto.get('id', ''))
                 st.session_state.usuario = usuario_auto.get('email', '')
                 st.session_state.usuario_email = usuario_auto.get('email', '')
@@ -342,9 +316,6 @@ if status_retorno and pref_id and not st.session_state.logado:
 
 if not st.session_state.get('CHAVE_MESTRA_UUID'):
     st.session_state['CHAVE_MESTRA_UUID'] = ''
-# ==============================================================================
-# FIM INSERÇÃO
-# ==============================================================================
 
 # --- 4. LOGIN ---
 if 'logado' not in st.session_state:
@@ -408,8 +379,6 @@ if not st.session_state.logado:
                             st.session_state.codigo_timestamp = datetime.now()
                             st.session_state.temp_user_data = {"nome": new_nome, "email": new_email, "celular": new_celular}
                             st.info(f"Código enviado para o e-mail {new_email}")
-                            # --- CÓDIGO PROVISÓRIO DE TESTE (Criação de Conta - E-mail) ---
-                            st.success(f"⚙️ [TESTE CRIAR CONTA - Especially for my son Diego] Código: **{codigo}**")   
                     else:
                         st.error("Preencha o campo E-mail para receber o código.")
                 
@@ -434,8 +403,6 @@ if not st.session_state.logado:
 
         elif st.session_state.etapa_auth == "esqueci_senha":
             st.subheader("Verificação de Segurança")
-            
-            # Usando uma chave que o navegador não associa a e-mail para evitar autofill
             conta_id = st.text_input("Informe a identificação da conta", key="usr_identity_check")
             
             col_rec1, col_rec2 = st.columns(2)
@@ -447,7 +414,7 @@ if not st.session_state.logado:
                         st.session_state.codigo_verificacao = codigo
                         st.session_state.codigo_timestamp = datetime.now()
                         st.session_state.temp_email = conta_id
-                        st.info(f"Código enviado para o celular cadastrado.")
+                        st.info("Código enviado para o celular cadastrado.")
                     else:
                         st.error("Conta não localizada.")
                 else:
@@ -462,7 +429,7 @@ if not st.session_state.logado:
                             st.session_state.codigo_verificacao = codigo
                             st.session_state.codigo_timestamp = datetime.now()
                             st.session_state.temp_email = conta_id
-                            st.info(f"Código enviado para o e-mail cadastrado.")
+                            st.info("Código enviado para o e-mail cadastrado.")
                     else:
                         st.error("Conta não localizada.")
                 else:
@@ -470,7 +437,6 @@ if not st.session_state.logado:
 
             st.write("---")
             
-            # Campo de código com nome e placeholder que 'quebram' o preenchimento automático do navegador
             input_val = st.text_input(
                 "Digite a sequência numérica recebida", 
                 value="", 
@@ -484,7 +450,6 @@ if not st.session_state.logado:
                     if decorrido > 10:
                         st.error("O código expirou. Solicite um novo.")
                     elif input_val == st.session_state.get('codigo_verificacao'):
-                        # Se validou, garante que o e-mail alvo vá para a próxima etapa
                         st.session_state.temp_email = conta_id
                         st.session_state.etapa_auth = "definir_senha"
                         st.rerun()
@@ -508,8 +473,6 @@ if not st.session_state.logado:
                     
                     if "temp_user_data" in st.session_state:
                         d = st.session_state.temp_user_data
-                        
-                        # --- ADEQUAÇÃO DO ITEM (3): GERAÇÃO EXATA DOS 7 DIAS DE DEGUSTAÇÃO ---
                         venc_inicial = (datetime.now() + timedelta(days=7)).date().strftime('%Y-%m-%d')
                         
                         res = supabase.table("usuarios").insert({
@@ -545,11 +508,9 @@ if not st.session_state.get("logado"):
     st.warning("⚠️ Sessão encerrada ou inválida. Por favor, faça login para acessar o sistema.")
     st.stop()
 
-# Captura de chaves e variáveis com valores padrão seguros para evitar quebras de escopo
 ID_USUARIO_LOGADO = str(st.session_state.get('CHAVE_MESTRA_UUID', ''))
 vencimento_str = st.session_state.get('vencimento', '')
 
-# Tratamento ultra-seguro para a string de vencimento do banco de dados
 if not vencimento_str or vencimento_str.strip() == "":
     venc_dt_objeto = datetime.now().date()
 else:
@@ -558,28 +519,24 @@ else:
     except Exception:
         venc_dt_objeto = datetime.now().date()
 
-# Executa rotina de segurança se houver usuário válido na sessão
 if ID_USUARIO_LOGADO:
     try:
         security.verificar_bloqueio_v01(ID_USUARIO_LOGADO, (venc_dt_objeto - datetime.now().date()).days)
     except Exception:
         pass
 
-# Busca os projetos associados à conta do usuário logado
 try:
     projs_req = supabase.table("config_projetos").select("projeto_id").eq("usuario_id", ID_USUARIO_LOGADO).execute()
     projs = [r['projeto_id'] for r in projs_req.data] if projs_req.data else []
 except Exception:
     projs = []
 
-# Inicializa as chaves essenciais de navegação caso não existam
 if 'projeto_ativo' not in st.session_state:
     st.session_state.projeto_ativo = None
 
 if 'escolha' not in st.session_state:
     st.session_state.escolha = "🏠 Dashboard" if st.session_state.projeto_ativo else "⚙️ Gestão"
 
-# Recuperação dos parâmetros de saldo e período do plano carregado
 s_db, d_ini_db, d_fim_db = 0.0, None, None
 if st.session_state.projeto_ativo and ID_USUARIO_LOGADO:
     try:
@@ -601,21 +558,20 @@ with st.sidebar:
     usuario_exibir = st.session_state.get('usuario', 'Usuário Logado')
     st.markdown(f'<div class="user-email">👤 {usuario_exibir}</div>', unsafe_allow_html=True)
     
-    # --- LÓGICA DE AVISO DE VENCIMENTO COMERCIAL ---
     hoje_atual = datetime.now().date()
     dias_para_vencer = (venc_dt_objeto - hoje_atual).days
     
     if dias_para_vencer < 0:
         texto_venc = f"⚠️ EXPIRADO EM: {venc_dt_objeto.strftime('%d/%m/%Y')}"
-        cor_venc = "#FF0000"  # Vermelho
+        cor_venc = "#FF0000"
         bloqueado = True
     elif dias_para_vencer <= 3:
         texto_venc = f"⏳ EXPIRA EM: {venc_dt_objeto.strftime('%d/%m/%Y')} ({dias_para_vencer}d)"
-        cor_venc = "#FFA500"  # Laranja
+        cor_venc = "#FFA500"
         bloqueado = False
     else:
         texto_venc = f"📅 EXPIRA EM: {venc_dt_objeto.strftime('%d/%m/%Y')}"
-        cor_venc = "#333333"  # Cor padrão padronizada
+        cor_venc = "#333333"
         bloqueado = False
 
     st.markdown(f'<div style="color:{cor_venc}; font-weight:bold; font-size:13px; padding:5px 0;">{texto_venc}</div>', unsafe_allow_html=True)
@@ -625,7 +581,6 @@ with st.sidebar:
     
     st.divider()
     
-    # Restrição de menu baseada no status financeiro da assinatura
     if bloqueado:
         menu_opcoes = ["⚙️ Gestão"]
         st.session_state.escolha = "⚙️ Gestão"
@@ -633,16 +588,13 @@ with st.sidebar:
     else:
         menu_opcoes = ["🏠 Dashboard", "📝 Lançamentos", "🗓️ Projetar", "✅ Conciliação", "⚙️ Gestão", "📊 Admin"]
 
-    # Posicionamento do marcador de seleção da barra lateral
     if st.session_state.escolha in menu_opcoes:
         idx_selecionado = menu_opcoes.index(st.session_state.escolha)
     else:
         idx_selecionado = menu_opcoes.index("⚙️ Gestão") 
 
-    # Renderização e captura da escolha do rádio
     escolha_sidebar = st.radio("Menu de Navegação", menu_opcoes, index=idx_selecionado)
 
-    # Disparador de mudança de rota se houver clique do usuário
     if escolha_sidebar != st.session_state.escolha:
         if st.session_state.escolha == "💳 Pagamentos" and escolha_sidebar == "⚙️ Gestão":
             pass 
@@ -651,7 +603,12 @@ with st.sidebar:
             st.rerun()
 
     st.divider()
-    if st.button("Sair do Sistema"):
+
+    # --- INSERÇÃO DO BOTÃO "FALAR COM ORCAS" ---
+    if st.button("🎙️ Falar com ORCAS", use_container_width=True, type="primary"):
+        porvoz.exibir_modal_voz_orcas(supabase, ID_USUARIO_LOGADO, projs)
+
+    if st.button("Sair do Sistema", use_container_width=True):
         st.session_state.clear()
         st.rerun()
 
@@ -669,7 +626,6 @@ except Exception:
 # --- 8. ROTEAMENTO ---
 st.markdown("<div id='topo-ancora'></div>", unsafe_allow_html=True)
 
-# Centralização das chamadas das sub-telas de negócio
 if st.session_state.escolha == "🏠 Dashboard" and not bloqueado:
     dash.exibir_dashboard(df, supabase, ID_USUARIO_LOGADO, s_db)
 elif st.session_state.escolha == "📝 Lançamentos" and not bloqueado:
@@ -690,10 +646,9 @@ else:
     import orcas_v01_gestao as gestao
     gestao.exibir_gestao(supabase, ID_USUARIO_LOGADO, projs, d_ini_db, d_fim_db, s_db, format_moeda, parse_moeda, security)
 
-# --- O RODAPÉ DEVE VER ANTES DO STOP ---
+# --- RODAPÉ ---
 st.divider()
 usuario_rodape = st.session_state.get('usuario', '')
 st.caption(f"ORCAS v01 | Usuário: {usuario_rodape} | Projeto: {st.session_state.projeto_ativo}")
 
-# --- O STOP VEM POR ÚLTIMO ---
 st.stop()

@@ -1,0 +1,86 @@
+usuários
+| column_name      | data_type                | is_nullable | column_default                       |
+| ---------------- | ------------------------ | ----------- | ------------------------------------ |
+| id               | integer                  | NO          | nextval('usuarios_id_seq'::regclass) |
+| email            | text                     | NO          | null                                 |
+| senha            | text                     | NO          | null                                 |
+| vencimento       | date                     | YES         | (CURRENT_DATE + '30 days'::interval) |
+| criado_em        | timestamp with time zone | YES         | now()                                |
+| zap_ativo        | integer                  | YES         | 0                                    |
+| nome             | text                     | YES         | null                                 |
+| celular          | text                     | YES         | null                                 |
+| data_ult_assinat | date                     | YES         | null                                 |
+| contratado_por   | integer                  | YES         | null                                 |
+| valor_pago       | double precision         | YES         | null                                 |
+| cupom_utilizado  | text                     | YES         | null                                 |
+| tipo_renovacao   | text                     | YES         | null                                 |
+| ult_valor_mensal | double precision         | YES         | '0'::double precision                |
+
+lançamentos
+| column_name       | data_type        | is_nullable | column_default                          |
+| ----------------- | ---------------- | ----------- | --------------------------------------- |
+| id                | integer          | NO          | nextval('lancamentos_id_seq'::regclass) |
+| usuario_id        | integer          | YES         | null                                    |
+| descricao         | text             | NO          | null                                    |
+| valor             | numeric          | YES         | null                                    |
+| tipo              | text             | YES         | null                                    |
+| data_vencimento   | date             | NO          | null                                    |
+| realizado         | boolean          | YES         | false                                   |
+| valor_realizado   | numeric          | YES         | null                                    |
+| categoria         | text             | YES         | null                                    |
+| recorrente        | boolean          | YES         | false                                   |
+| projeto_id        | text             | YES         | null                                    |
+| valor_plan        | double precision | YES         | 0                                       |
+| valor_real        | double precision | YES         | 0                                       |
+| status            | text             | YES         | 'Planejado'::text                       |
+| data              | date             | YES         | null                                    |
+| permite_parcial   | boolean          | YES         | false                                   |
+| usar_media        | boolean          | YES         | false                                   |
+| complemento_tipo  | text             | YES         | null                                    |
+| complemento_texto | text             | YES         | null                                    |
+| correcao_freq     | text             | YES         | null                                    |
+| correcao_valor    | double precision | YES         | null                                    |
+| id_pai            | uuid             | YES         | null                                    |
+| parcial_real      | double precision | YES         | 0                                       |
+| parcial_data      | date             | YES         | null                                    |
+| regra_parcial     | text             | YES         | '''Zera o Realizado'''::text            |
+
+config_projetos
+| column_name      | data_type        | is_nullable | column_default    |
+| ---------------- | ---------------- | ----------- | ----------------- |
+| id               | uuid             | NO          | gen_random_uuid() |
+| usuario_id       | integer          | YES         | null              |
+| projeto_id       | text             | NO          | null              |
+| saldo_inicial    | double precision | YES         | 0                 |
+| data_ini         | date             | YES         | null              |
+| data_fim         | date             | YES         | null              |
+| zap_ativo        | boolean          | YES         | false             |
+| email_ativo      | smallint         | YES         | 0                 |
+| ult_valor_mensal | double precision | YES         | null              |
+
+cupons
+| column_name         | data_type                | is_nullable | column_default               |
+| ------------------- | ------------------------ | ----------- | ---------------------------- |
+| id                  | uuid                     | NO          | gen_random_uuid()            |
+| codigo              | text                     | NO          | null                         |
+| valor_desconto      | numeric                  | NO          | null                         |
+| ativo               | boolean                  | YES         | true                         |
+| criado_em           | timestamp with time zone | YES         | timezone('utc'::text, now()) |
+| percentual_desconto | double precision         | YES         | null                         |
+
+pagamentos_temp
+| column_name      | data_type                | is_nullable | column_default        |
+| ---------------- | ------------------------ | ----------- | --------------------- |
+| id               | uuid                     | NO          | gen_random_uuid()     |
+| usuario_id       | text                     | NO          | null                  |
+| pref_id          | text                     | NO          | null                  |
+| valor            | numeric                  | NO          | null                  |
+| status           | text                     | NO          | 'aguardando'::text    |
+| data_criacao     | timestamp with time zone | YES         | now()                 |
+| projeto_id       | text                     | YES         | null                  |
+| data_ini         | date                     | YES         | null                  |
+| data_fim         | date                     | YES         | null                  |
+| zap_ativo        | boolean                  | YES         | false                 |
+| email_ativo      | smallint                 | YES         | 0                     |
+| tipo_renovacao   | text                     | YES         | null                  |
+| ult_valor_mensal | double precision         | YES         | '0'::double precision |
