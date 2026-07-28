@@ -1,5 +1,6 @@
 import json
 from datetime import date, datetime
+import time
 import streamlit as st
 from google import genai
 from google.genai import types
@@ -42,12 +43,11 @@ def verificar_e_incrementar_limite(supabase, usuario_id):
 
 
 def processar_comando_voz(audio_bytes, planos_disponiveis):
-    """Processa o áudio via SDK oficial utilizando o modelo estável gemini-2.0-flash."""
+    """Processa o áudio via SDK oficial com tratamento de cota gratuita (Fallback)."""
     api_key = st.secrets.get('GEMINI_API_KEY')
     if not api_key:
         raise ValueError('Chave GEMINI_API_KEY não encontrada nos Secrets!')
 
-    # Conecta o cliente utilizando a API Key cadastrada no Google AI Studio
     client = genai.Client(api_key=api_key)
 
     prompt = f"""
@@ -68,14 +68,25 @@ def processar_comando_voz(audio_bytes, planos_disponiveis):
     }}
     """
 
-    # Envio dos bytes de áudio formatados especificando o MIME type aceito pelo navegador
     audio_part = types.Part.from_bytes(data=audio_bytes, mime_type='audio/wav')
 
-    # Usando o modelo oficial e rápido gemini-2.0-flash
-    response = client.models.generate_content(
-        model='gemini-2.0-flash',
-        contents=[prompt, audio_part]
-    )
+    # Tentativa principal usando gemini-2.0-flash
+    try:
+        response = client.models.generate_content(
+            model='gemini-2.0-flash',
+            contents=[prompt, audio_part]
+        )
+    except Exception as e:
+        str_erro = str(e)
+        # Se estourar limite de requisições do plano Free (Erro 429), tenta gemini-1.5-flash
+        if '429' in str_erro or 'RESOURCE_EXHAUSTED' in str_erro:
+            time.sleep(2)
+            response = client.models.generate_content(
+                model='gemini-1.5-flash',
+                contents=[prompt, audio_part]
+            )
+        else:
+            raise e
 
     texto_limpo = response.text.replace('```json', '').replace('```', '').strip()
     return json.loads(texto_limpo)
@@ -277,10 +288,17 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
                     st.rerun()
 
                 except Exception as e:
-                    st.error(
-                        'Não foi possível processar o áudio. Tente novamente.'
-                        f' (Detalhes: {e})'
-                    )
+                    str_e = str(e)
+                    if '429' in str_e or 'RESOURCE_EXHAUSTED' in str_e:
+                        st.warning(
+                            '⏱️ **Limite temporário de requisições atingido!**\n\n'
+                            'Como estamos utilizando a cota gratuita do Gemini, por favor aguarde **30 a 60 segundos** e grave seu comando novamente.'
+                        )
+                    else:
+                        st.error(
+                            'Não foi possível processar o áudio. Tente novamente.'
+                            f' (Detalhes: {e})'
+                        )
 
     # ETAPA 2: CONFIRMAÇÃO
     elif st.session_state.etapa_voz == 'confirmacao':
