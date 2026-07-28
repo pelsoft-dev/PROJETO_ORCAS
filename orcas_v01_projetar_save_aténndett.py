@@ -1,7 +1,6 @@
 import streamlit as st
 from datetime import datetime, timedelta, timezone
 import re
-import calendar
 
 # Importando a ajuda do arquivo dedicado para Projetar
 from orcas_v01_ajuda_projetar import renderizar_ajuda_projetar
@@ -85,19 +84,7 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
             st.rerun()
             
         n_ocorrencias = st.number_input("Nº de Ocorrências (0 = usar Data Até)", min_value=0, step=1, key=f"pj_noc_{v}")
-        
-        col_fds, col_obs = st.columns([1, 1])
-        with col_fds:
-            fds = st.radio("Se cair em Fim de Semana:", ["Manter", "Antecipa", "Posterga"], horizontal=True, key=f"pj_fds_{v}")
-        with col_obs:
-            st.markdown(
-                """
-                <div style="margin-top: 25px; font-size: 11px; color: #555555; line-height: 1.3;">
-                    <i><b>Obs:</b> Se você escolher os dias 29, 30 ou 31 e o mês não possuir essa data, o lançamento será feito no último dia desse mês.</i>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
+        fds = st.radio("Se cair em Fim de Semana:", ["Manter", "Antecipa", "Posterga"], horizontal=True, key=f"pj_fds_{v}")
         
         c_i, c_f = st.columns(2)
         i_p = c_i.date_input("Início", value=hoje_br, format="DD/MM/YYYY", key=f"pj_data_ini_{v}")
@@ -172,18 +159,11 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
 
             while curr <= limite_loop:
                 match_dm = False
-
                 if "/" in d_m_final:
                     try:
                         dia_a, mes_a = map(int, d_m_final.split("/"))
                         if curr.day == dia_a and curr.month == mes_a: match_dm = True
                     except: pass
-                elif d_m_final.isdigit():
-                    dia_req = int(d_m_final)
-                    ultimo_dia_mes = calendar.monthrange(curr.year, curr.month)[1]
-                    dia_alvo = min(dia_req, ultimo_dia_mes)
-                    if curr.day == dia_alvo:
-                        match_dm = True
                 else:
                     match_dm = (d_m_final == "" or d_m_final == "*" or str(curr.day) == d_m_final)
 
