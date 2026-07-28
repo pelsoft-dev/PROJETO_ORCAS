@@ -140,12 +140,18 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
             zeros = 0
             
             if comp_base:
-                match_de = re.search(r'(\d+)(\s+de\s+.*)', comp_base, re.IGNORECASE)
+                match_de = re.search(r'(\d+)(\s+de\s+(\d+).*)', comp_base, re.IGNORECASE)
                 if match_de:
                     num_str = match_de.group(1)
                     num_atual = int(num_str)
                     zeros = len(num_str)
                     sufixo = match_de.group(2)
+                    
+                    # Se for "nn de tt" e o número de ocorrências estiver em 0 (padrão), calcula tt - nn + 1
+                    if n_ocorrencias == 0:
+                        total_tt = int(match_de.group(3))
+                        if total_tt >= num_atual:
+                            n_ocorrencias = (total_tt - num_atual) + 1
                 elif comp_base.isdigit():
                     num_atual = int(comp_base)
                     zeros = len(comp_base)
