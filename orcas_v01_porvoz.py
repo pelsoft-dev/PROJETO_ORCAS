@@ -43,7 +43,7 @@ def verificar_e_incrementar_limite(supabase, usuario_id):
 
 
 def processar_comando_voz(audio_bytes, planos_disponiveis):
-    """Processa o áudio via SDK oficial com tratamento de cota gratuita (Fallback)."""
+    """Processa o áudio via SDK oficial com suporte a fallback de modelos estáveis."""
     api_key = st.secrets.get('GEMINI_API_KEY')
     if not api_key:
         raise ValueError('Chave GEMINI_API_KEY não encontrada nos Secrets!')
@@ -70,19 +70,19 @@ def processar_comando_voz(audio_bytes, planos_disponiveis):
 
     audio_part = types.Part.from_bytes(data=audio_bytes, mime_type='audio/wav')
 
-    # Tentativa principal usando gemini-2.0-flash
+    # Tentativa principal com gemini-2.5-flash
     try:
         response = client.models.generate_content(
-            model='gemini-2.0-flash',
+            model='gemini-2.5-flash',
             contents=[prompt, audio_part]
         )
     except Exception as e:
         str_erro = str(e)
-        # Se estourar limite de requisições do plano Free (Erro 429), tenta gemini-1.5-flash
-        if '429' in str_erro or 'RESOURCE_EXHAUSTED' in str_erro:
-            time.sleep(2)
+        # Se der erro de modelo não encontrado ou cota excedida, tenta gemini-2.0-flash
+        if '404' in str_erro or 'NOT_FOUND' in str_erro or '429' in str_erro or 'RESOURCE_EXHAUSTED' in str_erro:
+            time.sleep(1)
             response = client.models.generate_content(
-                model='gemini-1.5-flash',
+                model='gemini-2.0-flash',
                 contents=[prompt, audio_part]
             )
         else:
@@ -291,8 +291,8 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
                     str_e = str(e)
                     if '429' in str_e or 'RESOURCE_EXHAUSTED' in str_e:
                         st.warning(
-                            '⏱️ **Limite temporário de requisições atingido!**\n\n'
-                            'Como estamos utilizando a cota gratuita do Gemini, por favor aguarde **30 a 60 segundos** e grave seu comando novamente.'
+                            '⏱️ **Limite de requisições por minuto atingido (Free Tier)!**\n\n'
+                            'Aguarde cerca de **30 a 60 segundos** e clique no microfone para gravar novamente.'
                         )
                     else:
                         st.error(
