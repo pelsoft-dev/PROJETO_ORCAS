@@ -188,7 +188,7 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
 
 
 @st.dialog('🎙️ Conversar com o ORCAS')
-def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis, plano_ativo=None, *args):
+def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis, plano_ativo=None, *args, **kwargs):
     """Modal de interface por voz acionado via botão na barra lateral."""
     st.write('👋 **Olá! Em que posso ajudar nos seus lançamentos hoje?**')
 
