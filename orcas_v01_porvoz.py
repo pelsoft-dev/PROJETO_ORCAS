@@ -3,6 +3,7 @@ from datetime import date, datetime
 import streamlit as st
 from groq import Groq
 
+# Limites mensais de uso do recurso por voz
 LIMITES_USO = {
     'PADRAO': 30,          # 30 interações de voz/mês
     'INTERMEDIARIO': 100,  # 100 interações de voz/mês
@@ -116,7 +117,7 @@ def buscar_planejamento_existente(supabase, usuario_id, projeto_id, descricao):
 
 
 def executar_acao_no_supabase(supabase, usuario_id, dados):
-    """Executa a persistência dos dados no banco Supabase."""
+    """Executa a persistência dos dados no banco Supabase após confirmação."""
     intencao = dados.get('intencao')
     projeto_id = dados.get('projeto_id')
     descricao = dados.get('descricao')
@@ -195,6 +196,7 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
 
     client_groq = Groq(api_key=groq_key.strip())
 
+    # Garantia de controle dos estados de sessão
     if 'etapa_voz' not in st.session_state:
         st.session_state.etapa_voz = 'gravacao'
     if 'dados_interpretados' not in st.session_state:
@@ -204,6 +206,7 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
     if 'audio_key_id' not in st.session_state:
         st.session_state.audio_key_id = 0
 
+    # ------------------ ETAPA 1: GRAVAÇÃO E INTERPRETAÇÃO ------------------
     if st.session_state.etapa_voz == 'gravacao':
         pode_usar, uso_atual, limite_max = verificar_e_incrementar_limite(
             supabase, id_usuario
@@ -230,10 +233,10 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
             if hash_atual != st.session_state.hash_ultimo_audio:
                 with st.spinner('🤖 ORCAS está processando o áudio...'):
                     try:
-                        # 1. Transcrição via Groq Whisper
+                        # 1. Transcrição do áudio via Whisper
                         texto = transcrever_audio_groq(client_groq, audio_bytes)
 
-                        # 2. Processamento JSON via Groq Llama 3.3
+                        # 2. Extração estruturada (JSON) via Llama 3.3
                         dados = processar_texto_groq(client_groq, texto, planos_disponiveis)
 
                         st.session_state.hash_ultimo_audio = hash_atual
@@ -241,6 +244,7 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
                         if not dados.get('projeto_id') and len(planos_disponiveis) == 1:
                             dados['projeto_id'] = planos_disponiveis[0]
 
+                        # 3. Consulta ao Supabase realizada pelo código Python
                         item_existente = buscar_planejamento_existente(
                             supabase,
                             id_usuario,
@@ -293,6 +297,7 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
                     except Exception as e:
                         st.error(f'Erro no processamento: {e}')
 
+    # ------------------ ETAPA 2: CONFIRMAÇÃO DO USUÁRIO ------------------
     elif st.session_state.etapa_voz == 'confirmacao':
         dados = st.session_state.dados_interpretados or {}
 
@@ -324,6 +329,7 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
                 msg_sucesso = executar_acao_no_supabase(supabase, id_usuario, dados)
                 st.success(msg_sucesso)
 
+                # Reseta o modal para a gravação seguinte
                 st.session_state.etapa_voz = 'gravacao'
                 st.session_state.dados_interpretados = None
                 st.session_state.hash_ultimo_audio = None
