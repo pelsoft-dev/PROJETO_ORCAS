@@ -186,18 +186,28 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
 
     return 'Ação concluída com sucesso!'
 
-
 @st.dialog('🎙️ Conversar com o ORCAS')
-def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis, plano_ativo=None, *args, **kwargs):
+# @st.dialog("Conversar com o ORCAS")
+def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis, *args, **kwargs):
     """Modal de interface por voz acionado via botão na barra lateral."""
     st.write('👋 **Olá! Em que posso ajudar nos seus lançamentos hoje?**')
 
-    # Identifica o plano ativo na sessão se não tiver sido passado por parâmetro
-    if not plano_ativo:
-        plano_ativo = st.session_state.get('plano_ativo') or st.session_state.get('projeto_selecionado')
-        if not plano_ativo and planos_disponiveis:
-            plano_ativo = planos_disponiveis[0]
+    # Identifica o plano ativo na sessão
+    plano_ativo = st.session_state.get('projeto_ativo') or st.session_state.get('plano_ativo')
+    if not plano_ativo and planos_disponiveis:
+        plano_ativo = planos_disponiveis[0]
 
+# @st.dialog('🎙️ Conversar com o ORCAS')
+# def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis, plano_ativo=None, *args, **kwargs):
+#     """Modal de interface por voz acionado via botão na barra lateral."""
+#     st.write('👋 **Olá! Em que posso ajudar nos seus lançamentos hoje?**')
+# 
+#     # Identifica o plano ativo na sessão se não tiver sido passado por parâmetro
+#     if not plano_ativo:
+#         plano_ativo = st.session_state.get('plano_ativo') or st.session_state.get('projeto_selecionado')
+#         if not plano_ativo and planos_disponiveis:
+#             plano_ativo = planos_disponiveis[0]
+# 
     groq_key = st.secrets.get('GROQ_API_KEY')
     if not groq_key:
         st.error('❌ Chave GROQ_API_KEY não configurada nos Secrets do Streamlit!')

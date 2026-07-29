@@ -796,10 +796,16 @@ with st.sidebar:
 
     # --- BOTÃO "FALAR COM ORCAS" ---
     if st.button("🎙️ Falar com ORCAS", use_container_width=True, type="primary"):
-        plano_atual = st.session_state.get("projeto_ativo")
         porvoz.exibir_modal_voz_orcas(
-            supabase, ID_USUARIO_LOGADO, projs, plano_atual
+            supabase, ID_USUARIO_LOGADO, projs
         )
+
+#    # --- BOTÃO "FALAR COM ORCAS" ---
+#    if st.button("🎙️ Falar com ORCAS", use_container_width=True, type="primary"):
+#        plano_atual = st.session_state.get("projeto_ativo")
+#        porvoz.exibir_modal_voz_orcas(
+#            supabase, ID_USUARIO_LOGADO, projs, plano_atual
+#        )
 
     if st.button("Sair do Sistema", use_container_width=True):
         st.session_state.clear()
