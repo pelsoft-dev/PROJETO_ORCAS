@@ -71,7 +71,7 @@ def processar_texto_groq(client_groq, texto_transcrito, planos_disponiveis, plan
       "intencao": "REALIZAR" ou "PROJETAR" ou "CONSULTAR",
       "projeto_id": "Nome/ID do plano citado. Se o usuário NÃO citar explicitamente outro plano, use EXATAMENTE '{plano_referencia}'",
       "descricao": "Termo de busca/descrição limpa da conta (ex: Celular Claro, Aluguel, Supermercado, S63 Financ Itau)",
-      "valor": float_ou_null,
+      "valor": float_ou_null (retorne null ou 0.0 SE O USUÁRIO NÃO FALOU UM VALOR MONETÁRIO),
       "tipo": "Saida" ou "Entrada",
       "data_vencimento": "YYYY-MM-DD"
     }}
@@ -89,25 +89,37 @@ def processar_texto_groq(client_groq, texto_transcrito, planos_disponiveis, plan
 
 
 def buscar_planejamento_existente(supabase, usuario_id, projeto_id, descricao):
-    """Verifica na tabela de lançamentos se já existe conta planejada correspondente."""
-    try:
-        query = (
-            supabase.table('lancamentos')
-            .select('*')
-            .eq('usuario_id', usuario_id)
-            .ilike('descricao', f'%{descricao}%')
-        )
+    """Verifica na tabela de lançamentos se já existe conta planejada correspondente com busca flexível."""
+    if not descricao or len(descricao.strip()) < 2:
+        return None
 
+    try:
+        desc_limpa = descricao.strip().replace('.', '')
+
+        # 1. Busca por termo contendo a descrição (ignorando maiúsculas/minúsculas)
+        query = supabase.table('lancamentos').select('*').eq('usuario_id', usuario_id)
         if projeto_id:
             query = query.eq('projeto_id', projeto_id)
 
-        res = query.execute()
+        res = query.ilike('descricao', f'%{desc_limpa}%').execute()
+
+        # 2. Se não encontrou e possui múltiplas palavras, tenta buscar pela palavra-chave principal (ex: S63)
+        if (not res or not res.data) and ' ' in desc_limpa:
+            palavras = [p for p in desc_limpa.split() if len(p) >= 3]
+            for pal in palavras:
+                query_sub = supabase.table('lancamentos').select('*').eq('usuario_id', usuario_id)
+                if projeto_id:
+                    query_sub = query_sub.eq('projeto_id', projeto_id)
+                res_sub = query_sub.ilike('descricao', f'%{pal}%').execute()
+                if res_sub and res_sub.data:
+                    res = res_sub
+                    break
 
         if res and res.data:
+            # Prioriza lançamentos que ainda NÃO foram realizados/baixados
             planejados = [
-                l
-                for l in res.data
-                if not l.get('realizado') and l.get('status') != 'Realizado'
+                l for l in res.data
+                if not l.get('realizado') and str(l.get('status')).lower() != 'realizado'
             ]
             if planejados:
                 return planejados[0]
@@ -117,6 +129,15 @@ def buscar_planejamento_existente(supabase, usuario_id, projeto_id, descricao):
         print(f'Erro na consulta prévia: {e}')
 
     return None
+
+
+def formatar_moeda_br(valor):
+    """Auxiliar para formatar valores no padrão brasileiro R$ 1.234,56."""
+    try:
+        val = float(valor or 0.0)
+        return f"R$ {val:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+    except Exception:
+        return "R$ 0,00"
 
 
 def executar_acao_no_supabase(supabase, usuario_id, dados):
@@ -143,7 +164,7 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
             ).execute()
             return (
                 f'✅ Lançamento **{descricao}** baixado como **REALIZADO** no valor'
-                f' de R$ {valor:,.2f}!'
+                f' de {formatar_moeda_br(valor)}!'
             )
         else:
             payload_direto = {
@@ -162,7 +183,7 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
             }
             supabase.table('lancamentos').insert(payload_direto).execute()
             return (
-                f'✅ Lançamento **{descricao}** (R$ {valor:,.2f}) registrado e baixado'
+                f'✅ Lançamento **{descricao}** ({formatar_moeda_br(valor)}) registrado e baixado'
                 ' com sucesso!'
             )
 
@@ -182,12 +203,12 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
             'valor_real': 0.0,
         }
         supabase.table('lancamentos').insert(payload).execute()
-        return f'✅ Lançamento **{descricao}** (R$ {valor:,.2f}) projetado com sucesso!'
+        return f'✅ Lançamento **{descricao}** ({formatar_moeda_br(valor)}) projetado com sucesso!'
 
     return 'Ação concluída com sucesso!'
 
+
 @st.dialog('🎙️ Conversar com o ORCAS')
-# @st.dialog("Conversar com o ORCAS")
 def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis, *args, **kwargs):
     """Modal de interface por voz acionado via botão na barra lateral."""
     st.write('👋 **Olá! Em que posso ajudar nos seus lançamentos hoje?**')
@@ -197,17 +218,6 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis, *args, **kw
     if not plano_ativo and planos_disponiveis:
         plano_ativo = planos_disponiveis[0]
 
-# @st.dialog('🎙️ Conversar com o ORCAS')
-# def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis, plano_ativo=None, *args, **kwargs):
-#     """Modal de interface por voz acionado via botão na barra lateral."""
-#     st.write('👋 **Olá! Em que posso ajudar nos seus lançamentos hoje?**')
-# 
-#     # Identifica o plano ativo na sessão se não tiver sido passado por parâmetro
-#     if not plano_ativo:
-#         plano_ativo = st.session_state.get('plano_ativo') or st.session_state.get('projeto_selecionado')
-#         if not plano_ativo and planos_disponiveis:
-#             plano_ativo = planos_disponiveis[0]
-# 
     groq_key = st.secrets.get('GROQ_API_KEY')
     if not groq_key:
         st.error('❌ Chave GROQ_API_KEY não configurada nos Secrets do Streamlit!')
@@ -255,16 +265,16 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis, *args, **kw
                         # 1. Transcrição do áudio via Whisper
                         texto = transcrever_audio_groq(client_groq, audio_bytes)
 
-                        # 2. Extração estruturada (JSON) via Llama 3.3 priorizando o plano ativo
+                        # 2. Extração estruturada (JSON) via Llama 3.3
                         dados = processar_texto_groq(client_groq, texto, planos_disponiveis, plano_ativo)
 
                         st.session_state.hash_ultimo_audio = hash_atual
 
-                        # Garantia: Se a IA não pegou um plano válido ou citou genérico, força o plano ativo da tela
+                        # Garantia de plano ativo
                         if not dados.get('projeto_id') or dados.get('projeto_id') not in planos_disponiveis:
                             dados['projeto_id'] = plano_ativo
 
-                        # 3. Consulta ao Supabase realizada pelo código Python no plano correto
+                        # 3. Consulta ao Supabase
                         item_existente = buscar_planejamento_existente(
                             supabase,
                             id_usuario,
@@ -272,14 +282,16 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis, *args, **kw
                             dados.get('descricao', ''),
                         )
 
+                        valor_falado = float(dados.get('valor') or 0.0)
+
                         if item_existente:
                             dados['id_existente'] = item_existente.get('id')
-                            if not dados.get('valor') or dados.get('valor') == 0:
-                                dados['valor'] = (
-                                    item_existente.get('valor_plan')
-                                    or item_existente.get('valor')
-                                    or 0.0
-                                )
+                            desc_cadastrada = item_existente.get('descricao') or dados.get('descricao')
+                            valor_planejado = float(
+                                item_existente.get('valor_plan')
+                                or item_existente.get('valor')
+                                or 0.0
+                            )
 
                             dt_venc = (
                                 item_existente.get('data_vencimento')
@@ -294,21 +306,36 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis, *args, **kw
                                 except Exception:
                                     pass
 
-                            dados['mensagem_orcas'] = (
-                                f"Entendi que você pagou a conta **{item_existente.get('descricao')}**."
-                                ' Chequei no sistema e verifiquei que estava planejado o valor'
-                                f" de **R$ {float(dados['valor']):,.2f}** com vencimento em"
-                                f' **{dt_venc}**. Você confirma?'
-                            )
+                            # Regra: Se o usuário NÃO falou valor, assume o valor planejado
+                            if valor_falado == 0.0:
+                                dados['valor'] = valor_planejado
+                                dados['mensagem_orcas'] = (
+                                    f"Encontrei a conta **{desc_cadastrada}** com o valor planejado de "
+                                    f"**{formatar_moeda_br(valor_planejado)}** (Vencimento: **{dt_venc}**).\n\n"
+                                    f"Esta é a conta a que você se refere e confirma a baixa?"
+                                )
+                            else:
+                                # Usuário informou um valor no áudio
+                                dados['valor'] = valor_falado
+                                dados['mensagem_orcas'] = (
+                                    f"Encontrei a conta **{desc_cadastrada}** (Planejado: {formatar_moeda_br(valor_planejado)}).\n\n"
+                                    f"Confirmar a baixa no valor de **{formatar_moeda_br(valor_falado)}**?"
+                                )
+
                         else:
+                            # Não encontrou lançamento prévio
                             dados['id_existente'] = None
-                            valor_audio = float(dados.get('valor') or 0.0)
-                            dados['mensagem_orcas'] = (
-                                f"Entendi que você quer registrar **{dados.get('descricao')}**"
-                                f' no valor de **R$ {valor_audio:,.2f}**. Não encontrei um'
-                                ' planejamento prévio, então realizarei um novo lançamento'
-                                ' direto. Você confirma?'
-                            )
+                            dados['valor'] = valor_falado
+                            if valor_falado > 0.0:
+                                dados['mensagem_orcas'] = (
+                                    f"Não encontrei um planejamento prévio para **{dados.get('descricao')}**. "
+                                    f"Deseja realizar um novo lançamento direto no valor de **{formatar_moeda_br(valor_falado)}**?"
+                                )
+                            else:
+                                dados['mensagem_orcas'] = (
+                                    f"Não encontrei a conta **{dados.get('descricao')}** nos planejamentos e nenhum valor foi informado. "
+                                    f"Por favor, tente novamente informando o valor."
+                                )
 
                         st.session_state.dados_interpretados = dados
                         st.session_state.etapa_voz = 'confirmacao'
@@ -334,12 +361,7 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis, *args, **kw
                 st.write(f"• **Descrição:** {dados.get('descricao', '-')}")
             with col_b:
                 st.write(f"• **Tipo:** {dados.get('tipo', 'Saida')}")
-                valor_fmt = (
-                    f"R$ {float(dados.get('valor') or 0.0):,.2f}".replace(',', 'X')
-                    .replace('.', ',')
-                    .replace('X', '.')
-                )
-                st.write(f"• **Valor:** {valor_fmt}")
+                st.write(f"• **Valor:** {formatar_moeda_br(dados.get('valor'))}")
 
         st.markdown('---')
         btn_salvar, btn_refazer = st.columns(2)
