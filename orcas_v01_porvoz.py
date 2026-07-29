@@ -52,12 +52,15 @@ def transcrever_audio_groq(client_groq, audio_bytes):
     return transcription.strip()
 
 
-def processar_texto_groq(client_groq, texto_transcrito, planos_disponiveis):
-    """Processa o texto no Groq (Llama 3.3) para gerar a estrutura JSON."""
+def processar_texto_groq(client_groq, texto_transcrito, planos_disponiveis, plano_ativo=None):
+    """Processa o texto no Groq (Llama 3.3) para gerar a estrutura JSON priorizando o plano ativo."""
+    plano_referencia = plano_ativo if plano_ativo else (planos_disponiveis[0] if planos_disponiveis else "Padrão")
+    
     prompt = f"""
     Você é o assistente financeiro do aplicativo ORCAS.
     Data de hoje: {date.today()}
-    Planos ativos cadastrados pelo usuário: {planos_disponiveis}
+    Plano ATUALMENTE SELECIONADO pelo usuário: "{plano_referencia}"
+    Todos os planos disponíveis: {planos_disponiveis}
 
     O usuário falou o seguinte texto: "{texto_transcrito}"
 
@@ -66,8 +69,8 @@ def processar_texto_groq(client_groq, texto_transcrito, planos_disponiveis):
     {{
       "transcricao": "{texto_transcrito}",
       "intencao": "REALIZAR" ou "PROJETAR" ou "CONSULTAR",
-      "projeto_id": "Nome/ID do plano citado. Se não citado e houver 1 plano ativo, use ele",
-      "descricao": "Termo de busca/descrição limpa da conta (ex: Celular Claro, Aluguel, Supermercado)",
+      "projeto_id": "Nome/ID do plano citado. Se o usuário NÃO citar explicitamente outro plano, use EXATAMENTE '{plano_referencia}'",
+      "descricao": "Termo de busca/descrição limpa da conta (ex: Celular Claro, Aluguel, Supermercado, S63 Financ Itau)",
       "valor": float_ou_null,
       "tipo": "Saida" ou "Entrada",
       "data_vencimento": "YYYY-MM-DD"
@@ -185,9 +188,15 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
 
 
 @st.dialog('🎙️ Conversar com o ORCAS')
-def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
+def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis, plano_ativo=None):
     """Modal de interface por voz acionado via botão na barra lateral."""
     st.write('👋 **Olá! Em que posso ajudar nos seus lançamentos hoje?**')
+
+    # Identifica o plano ativo na sessão se não tiver sido passado por parâmetro
+    if not plano_ativo:
+        plano_ativo = st.session_state.get('plano_ativo') or st.session_state.get('projeto_selecionado')
+        if not plano_ativo and planos_disponiveis:
+            plano_ativo = planos_disponiveis[0]
 
     groq_key = st.secrets.get('GROQ_API_KEY')
     if not groq_key:
@@ -236,15 +245,16 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
                         # 1. Transcrição do áudio via Whisper
                         texto = transcrever_audio_groq(client_groq, audio_bytes)
 
-                        # 2. Extração estruturada (JSON) via Llama 3.3
-                        dados = processar_texto_groq(client_groq, texto, planos_disponiveis)
+                        # 2. Extração estruturada (JSON) via Llama 3.3 priorizando o plano ativo
+                        dados = processar_texto_groq(client_groq, texto, planos_disponiveis, plano_ativo)
 
                         st.session_state.hash_ultimo_audio = hash_atual
 
-                        if not dados.get('projeto_id') and len(planos_disponiveis) == 1:
-                            dados['projeto_id'] = planos_disponiveis[0]
+                        # Garantia: Se a IA não pegou um plano válido ou citou genérico, força o plano ativo da tela
+                        if not dados.get('projeto_id') or dados.get('projeto_id') not in planos_disponiveis:
+                            dados['projeto_id'] = plano_ativo
 
-                        # 3. Consulta ao Supabase realizada pelo código Python
+                        # 3. Consulta ao Supabase realizada pelo código Python no plano correto
                         item_existente = buscar_planejamento_existente(
                             supabase,
                             id_usuario,
@@ -329,7 +339,7 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
                 msg_sucesso = executar_acao_no_supabase(supabase, id_usuario, dados)
                 st.success(msg_sucesso)
 
-                # Reseta o modal para a gravação seguinte
+                # Reseta o modal para a próxima gravação
                 st.session_state.etapa_voz = 'gravacao'
                 st.session_state.dados_interpretados = None
                 st.session_state.hash_ultimo_audio = None

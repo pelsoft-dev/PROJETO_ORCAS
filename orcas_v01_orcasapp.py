@@ -794,9 +794,16 @@ with st.sidebar:
 
     st.divider()
 
+
     # --- BOTÃO "FALAR COM ORCAS" ---
     if st.button("🎙️ Falar com ORCAS", use_container_width=True, type="primary"):
-        porvoz.exibir_modal_voz_orcas(supabase, ID_USUARIO_LOGADO, projs)
+        # Pega o plano ativo atualmente selecionado no session_state
+        plano_atual = st.session_state.get("projeto_ativo")
+
+        # Passa o plano ativo como quarto parâmetro para o modal de voz
+        porvoz.exibir_modal_voz_orcas(
+            supabase, ID_USUARIO_LOGADO, projs, plano_atual
+        )
 
     if st.button("Sair do Sistema", use_container_width=True):
         st.session_state.clear()
