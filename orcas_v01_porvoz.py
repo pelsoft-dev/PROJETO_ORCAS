@@ -11,7 +11,6 @@ LIMITES_USO = {
     'ILIMITADO': 999999,   # Sem limite
 }
 
-
 def verificar_e_incrementar_limite(supabase, usuario_id):
     """Verifica no Supabase se o usuário ainda tem cota de uso de voz disponível no mês."""
     try:
@@ -70,7 +69,7 @@ def processar_comando_voz(audio_bytes, planos_disponiveis):
 
     audio_part = types.Part.from_bytes(data=audio_bytes, mime_type='audio/wav')
 
-    # Tenta 2.0-flash primeiro. Se estiver sem cota, usa o 2.0-flash-lite
+    # Tenta gemini-2.0-flash primeiro, se falhar cai para gemini-2.0-flash-lite
     modelos = ['gemini-2.0-flash', 'gemini-2.0-flash-lite']
     
     for modelo in modelos:
@@ -187,15 +186,18 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
 
 @st.dialog('🎙️ Conversar com o ORCAS')
 def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
-    """Modal de interface com verificação cruzada de dados no banco antes de confirmar."""
+    """Modal de interface com trava de re-processamento e reset de áudio."""
     st.write('👋 **Olá! Em que posso ajudar nos seus lançamentos hoje?**')
 
+    # Inicializa estados do modal
     if 'etapa_voz' not in st.session_state:
         st.session_state.etapa_voz = 'gravacao'
     if 'dados_interpretados' not in st.session_state:
         st.session_state.dados_interpretados = None
-    if 'ultimo_audio_processado' not in st.session_state:
-        st.session_state.ultimo_audio_processado = None
+    if 'hash_ultimo_audio' not in st.session_state:
+        st.session_state.hash_ultimo_audio = None
+    if 'audio_key_id' not in st.session_state:
+        st.session_state.audio_key_id = 0
 
     # ETAPA 1: GRAVAÇÃO E PROCESSAMENTO
     if st.session_state.etapa_voz == 'gravacao':
@@ -217,85 +219,91 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
             ' chamadas.'
         )
 
-        key_audio = f"audio_input_{st.session_state.get('audio_key_id', 0)}"
+        # Chave dinâmica para forçar recriação do componente quando necessário
+        key_audio = f'audio_input_{st.session_state.audio_key_id}'
         audio_input = st.audio_input('Grave seu comando abaixo:', key=key_audio)
 
-        if audio_input and audio_input != st.session_state.ultimo_audio_processado:
-            with st.spinner(
-                '🤖 ORCAS está processando o áudio e checando seus'
-                ' planejamentos...'
-            ):
-                try:
-                    audio_bytes = audio_input.getvalue()
-                    dados = processar_comando_voz(audio_bytes, planos_disponiveis)
+        if audio_input is not None:
+            audio_bytes = audio_input.getvalue()
+            hash_atual = hash(audio_bytes)
 
-                    st.session_state.ultimo_audio_processado = audio_input
+            # SÓ PROCESSA SE FOR UM ÁUDIO NOVO (Evita loop infinito de requisições)
+            if hash_atual != st.session_state.hash_ultimo_audio:
+                with st.spinner(
+                    '🤖 ORCAS está processando o áudio e checando seus'
+                    ' planejamentos...'
+                ):
+                    try:
+                        dados = processar_comando_voz(audio_bytes, planos_disponiveis)
 
-                    if not dados.get('projeto_id') and len(planos_disponiveis) == 1:
-                        dados['projeto_id'] = planos_disponiveis[0]
+                        # Salva o hash para não reprocessar o mesmo áudio
+                        st.session_state.hash_ultimo_audio = hash_atual
 
-                    # Checagem na tabela de lançamentos do Supabase
-                    item_existente = buscar_planejamento_existente(
-                        supabase,
-                        id_usuario,
-                        dados.get('projeto_id'),
-                        dados.get('descricao', ''),
-                    )
+                        if not dados.get('projeto_id') and len(planos_disponiveis) == 1:
+                            dados['projeto_id'] = planos_disponiveis[0]
 
-                    if item_existente:
-                        dados['id_existente'] = item_existente.get('id')
-                        if not dados.get('valor') or dados.get('valor') == 0:
-                            dados['valor'] = (
-                                item_existente.get('valor_plan')
-                                or item_existente.get('valor')
-                                or 0.0
+                        # Checagem no Supabase
+                        item_existente = buscar_planejamento_existente(
+                            supabase,
+                            id_usuario,
+                            dados.get('projeto_id'),
+                            dados.get('descricao', ''),
+                        )
+
+                        if item_existente:
+                            dados['id_existente'] = item_existente.get('id')
+                            if not dados.get('valor') or dados.get('valor') == 0:
+                                dados['valor'] = (
+                                    item_existente.get('valor_plan')
+                                    or item_existente.get('valor')
+                                    or 0.0
+                                )
+
+                            dt_venc = (
+                                item_existente.get('data_vencimento')
+                                or item_existente.get('data')
+                                or '-'
+                            )
+                            if dt_venc != '-':
+                                try:
+                                    dt_venc = datetime.strptime(
+                                        str(dt_venc)[:10], '%Y-%m-%d'
+                                    ).strftime('%d/%m/%Y')
+                                except Exception:
+                                    pass
+
+                            dados['mensagem_orcas'] = (
+                                f"Entendi que você pagou a conta **{item_existente.get('descricao')}**."
+                                ' Chequei no sistema e verifiquei que estava planejado o valor'
+                                f" de **R$ {float(dados['valor']):,.2f}** com vencimento em"
+                                f' **{dt_venc}**. Você confirma?'
+                            )
+                        else:
+                            dados['id_existente'] = None
+                            valor_audio = float(dados.get('valor') or 0.0)
+                            dados['mensagem_orcas'] = (
+                                f"Entendi que você quer registrar **{dados.get('descricao')}**"
+                                f' no valor de **R$ {valor_audio:,.2f}**. Não encontrei um'
+                                ' planejamento prévio, então realizarei um novo lançamento'
+                                ' direto. Você confirma?'
                             )
 
-                        dt_venc = (
-                            item_existente.get('data_vencimento')
-                            or item_existente.get('data')
-                            or '-'
-                        )
-                        if dt_venc != '-':
-                            try:
-                                dt_venc = datetime.strptime(
-                                    str(dt_venc)[:10], '%Y-%m-%d'
-                                ).strftime('%d/%m/%Y')
-                            except Exception:
-                                pass
+                        st.session_state.dados_interpretados = dados
+                        st.session_state.etapa_voz = 'confirmacao'
+                        st.rerun()
 
-                        dados['mensagem_orcas'] = (
-                            f"Entendi que você pagou a conta **{item_existente.get('descricao')}**."
-                            ' Chequei no sistema e verifiquei que estava planejado o valor'
-                            f" de **R$ {float(dados['valor']):,.2f}** com vencimento em"
-                            f' **{dt_venc}**. Você confirma?'
-                        )
-                    else:
-                        dados['id_existente'] = None
-                        valor_audio = float(dados.get('valor') or 0.0)
-                        dados['mensagem_orcas'] = (
-                            f"Entendi que você quer registrar **{dados.get('descricao')}**"
-                            f' no valor de **R$ {valor_audio:,.2f}**. Não encontrei um'
-                            ' planejamento prévio, então realizarei um novo lançamento'
-                            ' direto. Você confirma?'
-                        )
-
-                    st.session_state.dados_interpretados = dados
-                    st.session_state.etapa_voz = 'confirmacao'
-                    st.rerun()
-
-                except Exception as e:
-                    str_e = str(e)
-                    if any(err in str_e for err in ['429', 'RESOURCE_EXHAUSTED']):
-                        st.warning(
-                            '⏱️ **Limite de requisições por minuto atingido (Plano Gratuito).**\n\n'
-                            'Aguarde cerca de **30 a 60 segundos** para o Google liberar sua cota e tente gravar novamente.'
-                        )
-                    else:
-                        st.error(
-                            'Não foi possível processar o áudio. Tente novamente.'
-                            f' (Detalhes: {e})'
-                        )
+                    except Exception as e:
+                        str_e = str(e)
+                        if any(err in str_e for err in ['429', 'RESOURCE_EXHAUSTED']):
+                            st.warning(
+                                '⏱️ **Limite de requisições por minuto atingido (Plano Gratuito).**\n\n'
+                                'Aguarde cerca de **30 a 60 segundos** para o Google liberar sua cota e tente gravar novamente.'
+                            )
+                        else:
+                            st.error(
+                                'Não foi possível processar o áudio. Tente novamente.'
+                                f' (Detalhes: {e})'
+                            )
 
     # ETAPA 2: CONFIRMAÇÃO
     elif st.session_state.etapa_voz == 'confirmacao':
@@ -331,16 +339,18 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
                 msg_sucesso = executar_acao_no_supabase(supabase, id_usuario, dados)
                 st.success(msg_sucesso)
 
+                # Limpa estados e incrementa key para resetar o áudio input
                 st.session_state.etapa_voz = 'gravacao'
                 st.session_state.dados_interpretados = None
-                st.session_state.ultimo_audio_processado = None
-                st.session_state.audio_key_id = st.session_state.get('audio_key_id', 0) + 1
+                st.session_state.hash_ultimo_audio = None
+                st.session_state.audio_key_id += 1
                 st.rerun()
 
         with btn_refazer:
             if st.button('🔄 Falar Novamente', use_container_width=True):
+                # Limpa estados e incrementa key para resetar o áudio input
                 st.session_state.etapa_voz = 'gravacao'
                 st.session_state.dados_interpretados = None
-                st.session_state.ultimo_audio_processado = None
-                st.session_state.audio_key_id = st.session_state.get('audio_key_id', 0) + 1
+                st.session_state.hash_ultimo_audio = None
+                st.session_state.audio_key_id += 1
                 st.rerun()
