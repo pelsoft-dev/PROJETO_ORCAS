@@ -12,7 +12,7 @@ LIMITES_USO = {
 
 
 def verificar_e_incrementar_limite(supabase, usuario_id):
-    """Verifica no Supabase se o usuário ainda tem cota de uso de voz disponível no mês."""
+    """Verifica no Supabase se o usuário ainda possui cota de uso de voz no mês."""
     try:
         res = supabase.table('usuarios').select('*').eq('id', usuario_id).execute()
 
@@ -42,14 +42,13 @@ def verificar_e_incrementar_limite(supabase, usuario_id):
 
 
 def transcrever_audio_groq(audio_bytes):
-    """Transcreve o áudio gratuitamente usando o Whisper no Groq Cloud."""
+    """Transcreve o áudio gravado usando o modelo Whisper no Groq (Gratuito/Ilimitado)."""
     groq_key = st.secrets.get('GROQ_API_KEY')
     if not groq_key:
-        raise ValueError('Chave GROQ_API_KEY não encontrada nos Secrets!')
+        raise ValueError('Chave GROQ_API_KEY não configurada nos Secrets!')
 
     client_groq = Groq(api_key=groq_key)
 
-    # Transcreve o áudio usando o modelo ultra rápido whisper-large-v3-turbo
     transcription = client_groq.audio.transcriptions.create(
         file=('audio.wav', audio_bytes),
         model='whisper-large-v3-turbo',
@@ -60,10 +59,10 @@ def transcrever_audio_groq(audio_bytes):
 
 
 def processar_texto_gemini(texto_transcrito, planos_disponiveis):
-    """Processa o texto já transcrito no Gemini para extrair os dados financeiros em JSON."""
+    """Processa o texto transcrito no Gemini para gerar a estrutura de lançamento JSON."""
     gemini_key = st.secrets.get('GEMINI_API_KEY')
     if not gemini_key:
-        raise ValueError('Chave GEMINI_API_KEY não encontrada nos Secrets!')
+        raise ValueError('Chave GEMINI_API_KEY não configurada nos Secrets!')
 
     client_gemini = genai.Client(api_key=gemini_key)
 
@@ -74,12 +73,12 @@ def processar_texto_gemini(texto_transcrito, planos_disponiveis):
 
     O usuário falou o seguinte texto: "{texto_transcrito}"
 
-    Analise o texto e responda EXCLUSIVAMENTE um objeto JSON válido (sem markdown ou textos adicionais):
+    Analise o texto e responda EXCLUSIVAMENTE um objeto JSON válido (sem markdown ou formatações externas):
     
     {{
       "transcricao": "{texto_transcrito}",
       "intencao": "REALIZAR" ou "PROJETAR" ou "CONSULTAR",
-      "projeto_id": "Nome/ID do plano citado pelo usuário. Se não citado e houver 1 plano ativo, use ele",
+      "projeto_id": "Nome/ID do plano citado. Se não citado e houver 1 plano ativo, use ele",
       "descricao": "Termo de busca/descrição limpa da conta (ex: Celular Claro, Aluguel, Supermercado)",
       "valor": float_ou_null,
       "tipo": "Saida" ou "Entrada",
@@ -97,7 +96,7 @@ def processar_texto_gemini(texto_transcrito, planos_disponiveis):
 
 
 def buscar_planejamento_existente(supabase, usuario_id, projeto_id, descricao):
-    """Busca na tabela de lançamentos se já existe uma conta planejada/pendente correspondente."""
+    """Verifica na tabela de lançamentos se já existe conta planejada correspondente."""
     try:
         query = (
             supabase.table('lancamentos')
@@ -122,13 +121,13 @@ def buscar_planejamento_existente(supabase, usuario_id, projeto_id, descricao):
             return res.data[0]
 
     except Exception as e:
-        print(f'Erro na busca prévia: {e}')
+        print(f'Erro na consulta prévia: {e}')
 
     return None
 
 
 def executar_acao_no_supabase(supabase, usuario_id, dados):
-    """Efetiva a gravação ou atualização na tabela 'lancamentos'."""
+    """Executa a persistência dos dados no banco Supabase."""
     intencao = dados.get('intencao')
     projeto_id = dados.get('projeto_id')
     descricao = dados.get('descricao')
@@ -150,7 +149,7 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
                 'id', id_lancamento_existente
             ).execute()
             return (
-                f'✅ Lançamento **{descricao}** marcado como **REALIZADO** no valor'
+                f'✅ Lançamento **{descricao}** baixado como **REALIZADO** no valor'
                 f' de R$ {valor:,.2f}!'
             )
         else:
@@ -170,7 +169,7 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
             }
             supabase.table('lancamentos').insert(payload_direto).execute()
             return (
-                f'✅ Lançamento de **{descricao}** (R$ {valor:,.2f}) realizado e baixado'
+                f'✅ Lançamento **{descricao}** (R$ {valor:,.2f}) registrado e baixado'
                 ' com sucesso!'
             )
 
@@ -197,7 +196,7 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
 
 @st.dialog('🎙️ Conversar com o ORCAS')
 def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
-    """Modal de interface híbrido: Groq (Whisper) + Gemini 2.0 Flash."""
+    """Modal de interface por voz acionado via botão na barra lateral."""
     st.write('👋 **Olá! Em que posso ajudar nos seus lançamentos hoje?**')
 
     if 'etapa_voz' not in st.session_state:
@@ -209,7 +208,6 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
     if 'audio_key_id' not in st.session_state:
         st.session_state.audio_key_id = 0
 
-    # ETAPA 1: GRAVAÇÃO E PROCESSAMENTO
     if st.session_state.etapa_voz == 'gravacao':
         pode_usar, uso_atual, limite_max = verificar_e_incrementar_limite(
             supabase, id_usuario
@@ -217,16 +215,13 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
 
         if not pode_usar:
             st.error(
-                f'⚠️ **Você atingiu o limite mensal do recurso de voz!**\n\nVocê'
-                f' utilizou **{uso_atual}/{limite_max}** comandos neste mês.\nFaça um'
-                ' upgrade de plano na tela de **Gestão / Configurações** para'
-                ' expandir seu limite.'
+                f'⚠️ **Você atingiu o limite mensal do recurso de voz!**\n\n'
+                f'Você utilizou **{uso_atual}/{limite_max}** comandos neste mês.'
             )
             return
 
         st.caption(
-            f'📊 Uso do recurso de voz no mês: **{uso_atual}/{limite_max}**'
-            ' chamadas.'
+            f'📊 Uso do recurso de voz no mês: **{uso_atual}/{limite_max}** chamadas.'
         )
 
         key_audio = f'audio_input_{st.session_state.audio_key_id}'
@@ -237,15 +232,13 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
             hash_atual = hash(audio_bytes)
 
             if hash_atual != st.session_state.hash_ultimo_audio:
-                with st.spinner(
-                    '🤖 ORCAS está ouvindo e processando seu áudio...'
-                ):
+                with st.spinner('🤖 ORCAS está processando o áudio...'):
                     try:
-                        # 1. Transcreve o áudio via Groq (Instantâneo e Cota Grátis Gigante)
-                        texto_transcrito = transcrever_audio_groq(audio_bytes)
+                        # 1. Transcrição pelo Groq (Whisper)
+                        texto = transcrever_audio_groq(audio_bytes)
 
-                        # 2. Processa o texto no Gemini (Consumo de cota insignificante)
-                        dados = processar_texto_gemini(texto_transcrito, planos_disponiveis)
+                        # 2. Processamento estruturado pelo Gemini
+                        dados = processar_texto_gemini(texto, planos_disponiveis)
 
                         st.session_state.hash_ultimo_audio = hash_atual
 
@@ -302,11 +295,8 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
                         st.rerun()
 
                     except Exception as e:
-                        st.error(
-                            f'Não foi possível processar o áudio. Tente novamente. (Detalhes: {e})'
-                        )
+                        st.error(f'Erro no processamento: {e}')
 
-    # ETAPA 2: CONFIRMAÇÃO
     elif st.session_state.etapa_voz == 'confirmacao':
         dados = st.session_state.dados_interpretados or {}
 
@@ -334,9 +324,7 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
         btn_salvar, btn_refazer = st.columns(2)
 
         with btn_salvar:
-            if st.button(
-                '✅ Confirmar e Gravar', type='primary', use_container_width=True
-            ):
+            if st.button('✅ Confirmar e Gravar', type='primary', use_container_width=True):
                 msg_sucesso = executar_acao_no_supabase(supabase, id_usuario, dados)
                 st.success(msg_sucesso)
 
