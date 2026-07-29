@@ -1,7 +1,6 @@
 import json
 from datetime import date, datetime
 import streamlit as st
-from google import genai
 from groq import Groq
 
 LIMITES_USO = {
@@ -41,14 +40,8 @@ def verificar_e_incrementar_limite(supabase, usuario_id):
     return True, 0, 30
 
 
-def transcrever_audio_groq(audio_bytes):
-    """Transcreve o áudio gravado usando o modelo Whisper no Groq (Gratuito/Ilimitado)."""
-    groq_key = st.secrets.get('GROQ_API_KEY')
-    if not groq_key:
-        raise ValueError('Chave GROQ_API_KEY não configurada nos Secrets!')
-
-    client_groq = Groq(api_key=groq_key)
-
+def transcrever_audio_groq(client_groq, audio_bytes):
+    """Transcreve o áudio gravado usando o modelo Whisper no Groq."""
     transcription = client_groq.audio.transcriptions.create(
         file=('audio.wav', audio_bytes),
         model='whisper-large-v3-turbo',
@@ -58,14 +51,8 @@ def transcrever_audio_groq(audio_bytes):
     return transcription.strip()
 
 
-def processar_texto_gemini(texto_transcrito, planos_disponiveis):
-    """Processa o texto transcrito no Gemini para gerar a estrutura de lançamento JSON."""
-    gemini_key = st.secrets.get('GEMINI_API_KEY')
-    if not gemini_key:
-        raise ValueError('Chave GEMINI_API_KEY não configurada nos Secrets!')
-
-    client_gemini = genai.Client(api_key=gemini_key)
-
+def processar_texto_groq(client_groq, texto_transcrito, planos_disponiveis):
+    """Processa o texto no Groq (Llama 3.3) para gerar a estrutura JSON."""
     prompt = f"""
     Você é o assistente financeiro do aplicativo ORCAS.
     Data de hoje: {date.today()}
@@ -86,21 +73,15 @@ def processar_texto_gemini(texto_transcrito, planos_disponiveis):
     }}
     """
 
-    try:
-        # Alterado para 'gemini-1.5-flash-latest' para evitar a cota zerada do 2.0-flash
-        response = client_gemini.models.generate_content(
-            model='gemini-1.5-flash-latest',
-            contents=prompt
-        )
+    response = client_groq.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.1,
+        response_format={"type": "json_object"}
+    )
 
-        texto_limpo = response.text.replace('```json', '').replace('```', '').strip()
-        return json.loads(texto_limpo)
-
-    except Exception as e:
-        erro_str = str(e)
-        if "429" in erro_str or "RESOURCE_EXHAUSTED" in erro_str:
-            raise ValueError("Cota temporária do Gemini excedida. Aguarde 30 segundos e tente novamente.")
-        raise e
+    texto_limpo = response.choices[0].message.content.strip()
+    return json.loads(texto_limpo)
 
 
 def buscar_planejamento_existente(supabase, usuario_id, projeto_id, descricao):
@@ -207,6 +188,13 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
     """Modal de interface por voz acionado via botão na barra lateral."""
     st.write('👋 **Olá! Em que posso ajudar nos seus lançamentos hoje?**')
 
+    groq_key = st.secrets.get('GROQ_API_KEY')
+    if not groq_key:
+        st.error('❌ Chave GROQ_API_KEY não configurada nos Secrets do Streamlit!')
+        return
+
+    client_groq = Groq(api_key=groq_key.strip())
+
     if 'etapa_voz' not in st.session_state:
         st.session_state.etapa_voz = 'gravacao'
     if 'dados_interpretados' not in st.session_state:
@@ -242,11 +230,11 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
             if hash_atual != st.session_state.hash_ultimo_audio:
                 with st.spinner('🤖 ORCAS está processando o áudio...'):
                     try:
-                        # 1. Transcrição pelo Groq (Whisper)
-                        texto = transcrever_audio_groq(audio_bytes)
+                        # 1. Transcrição via Groq Whisper
+                        texto = transcrever_audio_groq(client_groq, audio_bytes)
 
-                        # 2. Processamento estruturado pelo Gemini
-                        dados = processar_texto_gemini(texto, planos_disponiveis)
+                        # 2. Processamento JSON via Groq Llama 3.3
+                        dados = processar_texto_groq(client_groq, texto, planos_disponiveis)
 
                         st.session_state.hash_ultimo_audio = hash_atual
 
