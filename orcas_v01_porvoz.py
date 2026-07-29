@@ -86,13 +86,21 @@ def processar_texto_gemini(texto_transcrito, planos_disponiveis):
     }}
     """
 
-    response = client_gemini.models.generate_content(
-        model='gemini-2.0-flash',
-        contents=prompt
-    )
+    try:
+        # Alterado para 'gemini-1.5-flash-latest' para evitar a cota zerada do 2.0-flash
+        response = client_gemini.models.generate_content(
+            model='gemini-1.5-flash-latest',
+            contents=prompt
+        )
 
-    texto_limpo = response.text.replace('```json', '').replace('```', '').strip()
-    return json.loads(texto_limpo)
+        texto_limpo = response.text.replace('```json', '').replace('```', '').strip()
+        return json.loads(texto_limpo)
+
+    except Exception as e:
+        erro_str = str(e)
+        if "429" in erro_str or "RESOURCE_EXHAUSTED" in erro_str:
+            raise ValueError("Cota temporária do Gemini excedida. Aguarde 30 segundos e tente novamente.")
+        raise e
 
 
 def buscar_planejamento_existente(supabase, usuario_id, projeto_id, descricao):
