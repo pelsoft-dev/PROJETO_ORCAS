@@ -43,7 +43,7 @@ def verificar_e_incrementar_limite(supabase, usuario_id):
 
 
 def processar_comando_voz(audio_bytes, planos_disponiveis):
-    """Processa o áudio via SDK oficial com suporte a fallback de modelos estáveis."""
+    """Processa o áudio via SDK google-genai com tolerância a limites de cota."""
     api_key = st.secrets.get('GEMINI_API_KEY')
     if not api_key:
         raise ValueError('Chave GEMINI_API_KEY não encontrada nos Secrets!')
@@ -70,19 +70,19 @@ def processar_comando_voz(audio_bytes, planos_disponiveis):
 
     audio_part = types.Part.from_bytes(data=audio_bytes, mime_type='audio/wav')
 
-    # Tentativa principal com gemini-2.5-flash
+    # Tentativa principal usando modelo estável 2.0
     try:
         response = client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-2.0-flash',
             contents=[prompt, audio_part]
         )
     except Exception as e:
         str_erro = str(e)
-        # Se der erro de modelo não encontrado ou cota excedida, tenta gemini-2.0-flash
-        if '404' in str_erro or 'NOT_FOUND' in str_erro or '429' in str_erro or 'RESOURCE_EXHAUSTED' in str_erro:
-            time.sleep(1)
+        # Em caso de erro de rota/cota (404/429), tenta nova chamada com delay de respiro
+        if any(err in str_erro for err in ['429', '404', 'RESOURCE_EXHAUSTED', 'NOT_FOUND']):
+            time.sleep(2)
             response = client.models.generate_content(
-                model='gemini-2.0-flash',
+                model='gemini-2.0-flash-exp',
                 contents=[prompt, audio_part]
             )
         else:
@@ -289,10 +289,10 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
 
                 except Exception as e:
                     str_e = str(e)
-                    if '429' in str_e or 'RESOURCE_EXHAUSTED' in str_e:
+                    if any(err in str_e for err in ['429', 'RESOURCE_EXHAUSTED']):
                         st.warning(
-                            '⏱️ **Limite de requisições por minuto atingido (Free Tier)!**\n\n'
-                            'Aguarde cerca de **30 a 60 segundos** e clique no microfone para gravar novamente.'
+                            '⏱️ **A frequência de gravações atingiu o limite por minuto da API gratuita do Google.**\n\n'
+                            'Aguarde cerca de **30 a 60 segundos** e grave novamente seu comando de voz.'
                         )
                     else:
                         st.error(
