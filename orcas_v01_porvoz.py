@@ -69,7 +69,7 @@ def processar_comando_voz(audio_bytes, planos_disponiveis):
 
     audio_part = types.Part.from_bytes(data=audio_bytes, mime_type='audio/wav')
 
-    # Tenta gemini-2.0-flash primeiro, se falhar cai para gemini-2.0-flash-lite
+    # Fallback: Tenta gemini-2.0-flash primeiro, se falhar cai para gemini-2.0-flash-lite
     modelos = ['gemini-2.0-flash', 'gemini-2.0-flash-lite']
     
     for modelo in modelos:
@@ -186,10 +186,10 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
 
 @st.dialog('🎙️ Conversar com o ORCAS')
 def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
-    """Modal de interface com trava de re-processamento e reset de áudio."""
+    """Modal de interface com trava de re-processamento e reset do gravador."""
     st.write('👋 **Olá! Em que posso ajudar nos seus lançamentos hoje?**')
 
-    # Inicializa estados do modal
+    # Inicializa estados de sessão
     if 'etapa_voz' not in st.session_state:
         st.session_state.etapa_voz = 'gravacao'
     if 'dados_interpretados' not in st.session_state:
@@ -219,7 +219,7 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
             ' chamadas.'
         )
 
-        # Chave dinâmica para forçar recriação do componente quando necessário
+        # Chave dinâmica para forçar recriação e limpeza do gravador
         key_audio = f'audio_input_{st.session_state.audio_key_id}'
         audio_input = st.audio_input('Grave seu comando abaixo:', key=key_audio)
 
@@ -227,7 +227,7 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
             audio_bytes = audio_input.getvalue()
             hash_atual = hash(audio_bytes)
 
-            # SÓ PROCESSA SE FOR UM ÁUDIO NOVO (Evita loop infinito de requisições)
+            # Só envia para a API se for um áudio realmente NOVO
             if hash_atual != st.session_state.hash_ultimo_audio:
                 with st.spinner(
                     '🤖 ORCAS está processando o áudio e checando seus'
@@ -236,13 +236,11 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
                     try:
                         dados = processar_comando_voz(audio_bytes, planos_disponiveis)
 
-                        # Salva o hash para não reprocessar o mesmo áudio
                         st.session_state.hash_ultimo_audio = hash_atual
 
                         if not dados.get('projeto_id') and len(planos_disponiveis) == 1:
                             dados['projeto_id'] = planos_disponiveis[0]
 
-                        # Checagem no Supabase
                         item_existente = buscar_planejamento_existente(
                             supabase,
                             id_usuario,
@@ -339,7 +337,6 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
                 msg_sucesso = executar_acao_no_supabase(supabase, id_usuario, dados)
                 st.success(msg_sucesso)
 
-                # Limpa estados e incrementa key para resetar o áudio input
                 st.session_state.etapa_voz = 'gravacao'
                 st.session_state.dados_interpretados = None
                 st.session_state.hash_ultimo_audio = None
@@ -348,7 +345,6 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
 
         with btn_refazer:
             if st.button('🔄 Falar Novamente', use_container_width=True):
-                # Limpa estados e incrementa key para resetar o áudio input
                 st.session_state.etapa_voz = 'gravacao'
                 st.session_state.dados_interpretados = None
                 st.session_state.hash_ultimo_audio = None
