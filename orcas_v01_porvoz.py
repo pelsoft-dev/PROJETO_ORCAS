@@ -43,7 +43,7 @@ def verificar_e_incrementar_limite(supabase, usuario_id):
 
 
 def processar_comando_voz(audio_bytes, planos_disponiveis):
-    """Processa o áudio via SDK oficial utilizando o modelo estável gemini-2.0-flash."""
+    """Processa áudio via SDK google-genai com fallback automático entre modelos."""
     api_key = st.secrets.get('GEMINI_API_KEY')
     if not api_key:
         raise ValueError('Chave GEMINI_API_KEY não encontrada nos Secrets!')
@@ -70,14 +70,20 @@ def processar_comando_voz(audio_bytes, planos_disponiveis):
 
     audio_part = types.Part.from_bytes(data=audio_bytes, mime_type='audio/wav')
 
-    # Usando o modelo oficial, rápido e padrão gemini-2.0-flash
-    response = client.models.generate_content(
-        model='gemini-2.0-flash',
-        contents=[prompt, audio_part]
-    )
-
-    texto_limpo = response.text.replace('```json', '').replace('```', '').strip()
-    return json.loads(texto_limpo)
+    # Tenta 2.0-flash primeiro. Se estiver sem cota, usa o 2.0-flash-lite
+    modelos = ['gemini-2.0-flash', 'gemini-2.0-flash-lite']
+    
+    for modelo in modelos:
+        try:
+            response = client.models.generate_content(
+                model=modelo,
+                contents=[prompt, audio_part]
+            )
+            texto_limpo = response.text.replace('```json', '').replace('```', '').strip()
+            return json.loads(texto_limpo)
+        except Exception as e:
+            if modelo == modelos[-1]:
+                raise e
 
 
 def buscar_planejamento_existente(supabase, usuario_id, projeto_id, descricao):
@@ -121,7 +127,6 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
     tipo_fluxo = dados.get('tipo', 'Saida')
     id_lancamento_existente = dados.get('id_existente')
 
-    # 1. REALIZAR / CONCILIAR
     if intencao == 'REALIZAR':
         if id_lancamento_existente:
             payload_update = {
@@ -159,7 +164,6 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
                 ' com sucesso!'
             )
 
-    # 2. PROJETAR UM NOVO LANÇAMENTO
     elif intencao == 'PROJETAR':
         payload = {
             'usuario_id': usuario_id,
@@ -190,6 +194,8 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
         st.session_state.etapa_voz = 'gravacao'
     if 'dados_interpretados' not in st.session_state:
         st.session_state.dados_interpretados = None
+    if 'ultimo_audio_processado' not in st.session_state:
+        st.session_state.ultimo_audio_processado = None
 
     # ETAPA 1: GRAVAÇÃO E PROCESSAMENTO
     if st.session_state.etapa_voz == 'gravacao':
@@ -211,9 +217,10 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
             ' chamadas.'
         )
 
-        audio_input = st.audio_input('Grave seu comando abaixo:')
+        key_audio = f"audio_input_{st.session_state.get('audio_key_id', 0)}"
+        audio_input = st.audio_input('Grave seu comando abaixo:', key=key_audio)
 
-        if audio_input:
+        if audio_input and audio_input != st.session_state.ultimo_audio_processado:
             with st.spinner(
                 '🤖 ORCAS está processando o áudio e checando seus'
                 ' planejamentos...'
@@ -221,6 +228,8 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
                 try:
                     audio_bytes = audio_input.getvalue()
                     dados = processar_comando_voz(audio_bytes, planos_disponiveis)
+
+                    st.session_state.ultimo_audio_processado = audio_input
 
                     if not dados.get('projeto_id') and len(planos_disponiveis) == 1:
                         dados['projeto_id'] = planos_disponiveis[0]
@@ -324,10 +333,14 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
 
                 st.session_state.etapa_voz = 'gravacao'
                 st.session_state.dados_interpretados = None
+                st.session_state.ultimo_audio_processado = None
+                st.session_state.audio_key_id = st.session_state.get('audio_key_id', 0) + 1
                 st.rerun()
 
         with btn_refazer:
             if st.button('🔄 Falar Novamente', use_container_width=True):
                 st.session_state.etapa_voz = 'gravacao'
                 st.session_state.dados_interpretados = None
+                st.session_state.ultimo_audio_processado = None
+                st.session_state.audio_key_id = st.session_state.get('audio_key_id', 0) + 1
                 st.rerun()
