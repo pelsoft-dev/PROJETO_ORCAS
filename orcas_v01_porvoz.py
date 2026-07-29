@@ -43,7 +43,7 @@ def verificar_e_incrementar_limite(supabase, usuario_id):
 
 
 def processar_comando_voz(audio_bytes, planos_disponiveis):
-    """Processa o áudio via SDK google-genai com tolerância a limites de cota."""
+    """Processa o áudio via SDK oficial utilizando o modelo estável gemini-2.0-flash."""
     api_key = st.secrets.get('GEMINI_API_KEY')
     if not api_key:
         raise ValueError('Chave GEMINI_API_KEY não encontrada nos Secrets!')
@@ -70,23 +70,11 @@ def processar_comando_voz(audio_bytes, planos_disponiveis):
 
     audio_part = types.Part.from_bytes(data=audio_bytes, mime_type='audio/wav')
 
-    # Tentativa principal usando modelo estável 2.0
-    try:
-        response = client.models.generate_content(
-            model='gemini-2.0-flash',
-            contents=[prompt, audio_part]
-        )
-    except Exception as e:
-        str_erro = str(e)
-        # Em caso de erro de rota/cota (404/429), tenta nova chamada com delay de respiro
-        if any(err in str_erro for err in ['429', '404', 'RESOURCE_EXHAUSTED', 'NOT_FOUND']):
-            time.sleep(2)
-            response = client.models.generate_content(
-                model='gemini-2.0-flash-exp',
-                contents=[prompt, audio_part]
-            )
-        else:
-            raise e
+    # Usando o modelo oficial, rápido e padrão gemini-2.0-flash
+    response = client.models.generate_content(
+        model='gemini-2.0-flash',
+        contents=[prompt, audio_part]
+    )
 
     texto_limpo = response.text.replace('```json', '').replace('```', '').strip()
     return json.loads(texto_limpo)
@@ -291,8 +279,8 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
                     str_e = str(e)
                     if any(err in str_e for err in ['429', 'RESOURCE_EXHAUSTED']):
                         st.warning(
-                            '⏱️ **A frequência de gravações atingiu o limite por minuto da API gratuita do Google.**\n\n'
-                            'Aguarde cerca de **30 a 60 segundos** e grave novamente seu comando de voz.'
+                            '⏱️ **Limite de requisições por minuto atingido (Plano Gratuito).**\n\n'
+                            'Aguarde cerca de **30 a 60 segundos** para o Google liberar sua cota e tente gravar novamente.'
                         )
                     else:
                         st.error(
