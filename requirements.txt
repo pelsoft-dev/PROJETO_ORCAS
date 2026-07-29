@@ -6,3 +6,4 @@ supabase
 python-dateutil
 streamlit-js-eval
 google-genai
+groq

@@ -1,15 +1,15 @@
 import json
 from datetime import date, datetime
-import time
 import streamlit as st
 from google import genai
-from google.genai import types
+from groq import Groq
 
 LIMITES_USO = {
     'PADRAO': 30,          # 30 interações de voz/mês
     'INTERMEDIARIO': 100,  # 100 interações de voz/mês
     'ILIMITADO': 999999,   # Sem limite
 }
+
 
 def verificar_e_incrementar_limite(supabase, usuario_id):
     """Verifica no Supabase se o usuário ainda tem cota de uso de voz disponível no mês."""
@@ -41,23 +41,43 @@ def verificar_e_incrementar_limite(supabase, usuario_id):
     return True, 0, 30
 
 
-def processar_comando_voz(audio_bytes, planos_disponiveis):
-    """Processa áudio via SDK google-genai com fallback automático entre modelos."""
-    api_key = st.secrets.get('GEMINI_API_KEY')
-    if not api_key:
+def transcrever_audio_groq(audio_bytes):
+    """Transcreve o áudio gratuitamente usando o Whisper no Groq Cloud."""
+    groq_key = st.secrets.get('GROQ_API_KEY')
+    if not groq_key:
+        raise ValueError('Chave GROQ_API_KEY não encontrada nos Secrets!')
+
+    client_groq = Groq(api_key=groq_key)
+
+    # Transcreve o áudio usando o modelo ultra rápido whisper-large-v3-turbo
+    transcription = client_groq.audio.transcriptions.create(
+        file=('audio.wav', audio_bytes),
+        model='whisper-large-v3-turbo',
+        language='pt',
+        response_format='text'
+    )
+    return transcription.strip()
+
+
+def processar_texto_gemini(texto_transcrito, planos_disponiveis):
+    """Processa o texto já transcrito no Gemini para extrair os dados financeiros em JSON."""
+    gemini_key = st.secrets.get('GEMINI_API_KEY')
+    if not gemini_key:
         raise ValueError('Chave GEMINI_API_KEY não encontrada nos Secrets!')
 
-    client = genai.Client(api_key=api_key)
+    client_gemini = genai.Client(api_key=gemini_key)
 
     prompt = f"""
-    Você é o assistente financeiro de voz do aplicativo ORCAS.
+    Você é o assistente financeiro do aplicativo ORCAS.
     Data de hoje: {date.today()}
     Planos ativos cadastrados pelo usuário: {planos_disponiveis}
 
-    Analise o áudio e responda EXCLUSIVAMENTE um objeto JSON válido (sem markdown ou textos adicionais):
+    O usuário falou o seguinte texto: "{texto_transcrito}"
+
+    Analise o texto e responda EXCLUSIVAMENTE um objeto JSON válido (sem markdown ou textos adicionais):
     
     {{
-      "transcricao": "Texto exato falado pelo usuário",
+      "transcricao": "{texto_transcrito}",
       "intencao": "REALIZAR" ou "PROJETAR" ou "CONSULTAR",
       "projeto_id": "Nome/ID do plano citado pelo usuário. Se não citado e houver 1 plano ativo, use ele",
       "descricao": "Termo de busca/descrição limpa da conta (ex: Celular Claro, Aluguel, Supermercado)",
@@ -67,22 +87,13 @@ def processar_comando_voz(audio_bytes, planos_disponiveis):
     }}
     """
 
-    audio_part = types.Part.from_bytes(data=audio_bytes, mime_type='audio/wav')
+    response = client_gemini.models.generate_content(
+        model='gemini-2.0-flash',
+        contents=prompt
+    )
 
-    # Fallback: Tenta gemini-2.0-flash primeiro, se falhar cai para gemini-2.0-flash-lite
-    modelos = ['gemini-2.0-flash', 'gemini-2.0-flash-lite']
-    
-    for modelo in modelos:
-        try:
-            response = client.models.generate_content(
-                model=modelo,
-                contents=[prompt, audio_part]
-            )
-            texto_limpo = response.text.replace('```json', '').replace('```', '').strip()
-            return json.loads(texto_limpo)
-        except Exception as e:
-            if modelo == modelos[-1]:
-                raise e
+    texto_limpo = response.text.replace('```json', '').replace('```', '').strip()
+    return json.loads(texto_limpo)
 
 
 def buscar_planejamento_existente(supabase, usuario_id, projeto_id, descricao):
@@ -186,10 +197,9 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
 
 @st.dialog('🎙️ Conversar com o ORCAS')
 def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
-    """Modal de interface com trava de re-processamento e reset do gravador."""
+    """Modal de interface híbrido: Groq (Whisper) + Gemini 2.0 Flash."""
     st.write('👋 **Olá! Em que posso ajudar nos seus lançamentos hoje?**')
 
-    # Inicializa estados de sessão
     if 'etapa_voz' not in st.session_state:
         st.session_state.etapa_voz = 'gravacao'
     if 'dados_interpretados' not in st.session_state:
@@ -219,7 +229,6 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
             ' chamadas.'
         )
 
-        # Chave dinâmica para forçar recriação e limpeza do gravador
         key_audio = f'audio_input_{st.session_state.audio_key_id}'
         audio_input = st.audio_input('Grave seu comando abaixo:', key=key_audio)
 
@@ -227,14 +236,16 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
             audio_bytes = audio_input.getvalue()
             hash_atual = hash(audio_bytes)
 
-            # Só envia para a API se for um áudio realmente NOVO
             if hash_atual != st.session_state.hash_ultimo_audio:
                 with st.spinner(
-                    '🤖 ORCAS está processando o áudio e checando seus'
-                    ' planejamentos...'
+                    '🤖 ORCAS está ouvindo e processando seu áudio...'
                 ):
                     try:
-                        dados = processar_comando_voz(audio_bytes, planos_disponiveis)
+                        # 1. Transcreve o áudio via Groq (Instantâneo e Cota Grátis Gigante)
+                        texto_transcrito = transcrever_audio_groq(audio_bytes)
+
+                        # 2. Processa o texto no Gemini (Consumo de cota insignificante)
+                        dados = processar_texto_gemini(texto_transcrito, planos_disponiveis)
 
                         st.session_state.hash_ultimo_audio = hash_atual
 
@@ -291,17 +302,9 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis):
                         st.rerun()
 
                     except Exception as e:
-                        str_e = str(e)
-                        if any(err in str_e for err in ['429', 'RESOURCE_EXHAUSTED']):
-                            st.warning(
-                                '⏱️ **Limite de requisições por minuto atingido (Plano Gratuito).**\n\n'
-                                'Aguarde cerca de **30 a 60 segundos** para o Google liberar sua cota e tente gravar novamente.'
-                            )
-                        else:
-                            st.error(
-                                'Não foi possível processar o áudio. Tente novamente.'
-                                f' (Detalhes: {e})'
-                            )
+                        st.error(
+                            f'Não foi possível processar o áudio. Tente novamente. (Detalhes: {e})'
+                        )
 
     # ETAPA 2: CONFIRMAÇÃO
     elif st.session_state.etapa_voz == 'confirmacao':
