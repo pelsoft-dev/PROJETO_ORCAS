@@ -20,8 +20,9 @@ def normalizar_texto(texto):
         return ''
     nfkd = unicodedata.normalize('NFKD', str(texto))
     texto_sem_acento = ''.join([c for c in nfkd if not unicodedata.combining(c)])
-    texto_limpo = re.sub(r'[^\w\s]', '', texto_sem_acento)
-    return texto_limpo.strip().upper()
+    # Mantém apenas letras e números
+    texto_limpo = re.sub(r'[^a-zA-Z0-9\s]', ' ', texto_sem_acento)
+    return ' '.join(texto_limpo.split()).upper()
 
 
 def verificar_limite_uso(supabase, usuario_id):
@@ -110,15 +111,16 @@ def processar_texto_groq(
 
 
 def buscar_planejamento_existente(supabase, usuario_id, projeto_id, descricao):
-    """Busca inteligente de lançamentos pendentes com pontuação de similaridade."""
+    """Busca rigorosa de lançamentos pendentes (NÃO realizados e com valor realizado zerado)."""
     if not descricao or len(descricao.strip()) < 2:
         return None
 
     try:
         desc_buscada_norm = normalizar_texto(descricao)
-        palavras_busca = set(
-            [p for p in desc_buscada_norm.split() if len(p) >= 2]
-        )
+        palavras_busca = [p for p in desc_buscada_norm.split() if len(p) >= 2]
+
+        if not palavras_busca:
+            return None
 
         query = (
             supabase.table('lancamentos')
@@ -133,38 +135,38 @@ def buscar_planejamento_existente(supabase, usuario_id, projeto_id, descricao):
         if not res or not res.data:
             return None
 
-        # Regra Fundamental: Filtrar APENAS lançamentos NÃO realizados (planejados/pendentes)
-        pendentes = [
-            l
-            for l in res.data
-            if not l.get('realizado')
-            and str(l.get('status')).lower() != 'realizado'
-        ]
+        # REGRA CRÍTICA: Filtrar APENAS contas pendentes de fato
+        # (realizado == False, status PLAN e valor_realizado == 0)
+        pendentes = []
+        for l in res.data:
+            is_realizado = l.get('realizado') is True
+            status = str(l.get('status') or '').strip().upper()
+            val_real = float(l.get('valor_realizado') or l.get('valor_real') or 0.0)
+
+            if not is_realizado and status != 'REALIZADO' and val_real == 0:
+                pendentes.append(l)
 
         candidatos_avaliados = []
 
         for item in pendentes:
             desc_banco_norm = normalizar_texto(item.get('descricao', ''))
-            palavras_banco = set(
-                [p for p in desc_banco_norm.split() if len(p) >= 2]
-            )
+            palavras_banco = [p for p in desc_banco_norm.split() if len(p) >= 2]
 
-            # 1. Match exato ou contido completamente
-            if (
-                desc_buscada_norm == desc_banco_norm
-                or desc_buscada_norm in desc_banco_norm
-                or desc_banco_norm in desc_buscada_norm
-            ):
+            # 1. Match exato normalizado (Ex: "S63 FINANC ITAU" == "S63 FINANC ITAU")
+            if desc_buscada_norm == desc_banco_norm:
                 return item
 
-            # 2. Contagem de interseção de palavras chaves
-            intersecao = palavras_busca.intersection(palavras_banco)
-            qtd_coincidencias = len(intersecao)
+            # 2. Se todas as palavras faladas estiverem contidas na descrição do banco
+            if all(p in desc_banco_norm for p in palavras_busca):
+                candidatos_avaliados.append((100, item))
+                continue
 
-            if qtd_coincidencias >= 2 or (
-                len(palavras_busca) == 1 and qtd_coincidencias == 1
-            ):
-                candidatos_avaliados.append((qtd_coincidencias, item))
+            # 3. Pontuação por coincidência de termos (dando peso extra para palavras raras/específicas)
+            coincidencias = set(palavras_busca).intersection(set(palavras_banco))
+            if coincidencias:
+                score = len(coincidencias)
+                # Se coincidir termos fortes como 'FINANC' ou 'FINANQ', aumenta a relevância
+                candidatos_avaliados.append((score, item))
 
         if candidatos_avaliados:
             candidatos_avaliados.sort(key=lambda x: x[0], reverse=True)
@@ -259,13 +261,12 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
 
 
 @st.dialog('🎙️ Conversar com o ORCAS')
-def exibir_modal_voz_orcas(supabase, id_usuario, *args, **kwargs):
-    """Modal de interface por voz ajustado contra fechar prematuro e com tratamento *args / **kwargs para o Streamlit."""
+def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
+    """Modal de interface por voz sem o crash de empacotamento do Streamlit (*args/**kwargs removidos da assinatura)."""
     st.write('👋 **Olá! Em que posso ajudar nos seus lançamentos hoje?**')
 
-    planos_disponiveis = kwargs.get('planos_disponiveis') or (
-        args[0] if len(args) > 0 else []
-    )
+    if planos_disponiveis is None:
+        planos_disponiveis = []
 
     plano_ativo = st.session_state.get('projeto_ativo') or st.session_state.get(
         'plano_ativo'
@@ -317,7 +318,7 @@ def exibir_modal_voz_orcas(supabase, id_usuario, *args, **kwargs):
             if hash_atual != st.session_state.hash_ultimo_audio:
                 with st.spinner('🤖 ORCAS está processando o áudio...'):
                     try:
-                        # Incrementa o uso somente quando o áudio é de fato enviado
+                        # Incrementa apenas na execução do áudio
                         incrementar_uso_voz(supabase, id_usuario, uso_atual)
 
                         # 1. Transcrição do áudio via Whisper
