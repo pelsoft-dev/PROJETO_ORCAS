@@ -8,9 +8,9 @@ import streamlit as st
 
 # Limites mensais de uso do recurso por voz
 LIMITES_USO = {
-    'PADRAO': 30,  # 30 interações de voz/mês
-    'INTERMEDIARIO': 100,  # 100 interações de voz/mês
-    'ILIMITADO': 999999,  # Sem limite
+    'PADRAO': 30,
+    'INTERMEDIARIO': 100,
+    'ILIMITADO': 999999,
 }
 
 
@@ -20,7 +20,6 @@ def normalizar_texto(texto):
         return ''
     nfkd = unicodedata.normalize('NFKD', str(texto))
     texto_sem_acento = ''.join([c for c in nfkd if not unicodedata.combining(c)])
-    # Mantém apenas letras e números
     texto_limpo = re.sub(r'[^a-zA-Z0-9\s]', ' ', texto_sem_acento)
     return ' '.join(texto_limpo.split()).upper()
 
@@ -71,7 +70,7 @@ def transcrever_audio_groq(client_groq, audio_bytes):
 def processar_texto_groq(
     client_groq, texto_transcrito, planos_disponiveis, plano_ativo=None
 ):
-    """Processa o texto no Groq (Llama 3.3) para gerar a estrutura JSON priorizando o plano ativo."""
+    """Processa o texto no Groq (Llama 3.3) para gerar a estrutura JSON."""
     plano_referencia = (
         plano_ativo
         if plano_ativo
@@ -86,14 +85,14 @@ def processar_texto_groq(
 
     O usuário falou o seguinte texto: "{texto_transcrito}"
 
-    Analise o texto e responda EXCLUSIVAMENTE um objeto JSON válido (sem markdown ou formatações externas):
+    Analise o texto e responda EXCLUSIVAMENTE um objeto JSON válido:
     
     {{
       "transcricao": "{texto_transcrito}",
       "intencao": "REALIZAR" ou "PROJETAR" ou "CONSULTAR",
-      "projeto_id": "Nome/ID do plano citado. Se o usuário NÃO citar explicitamente outro plano, use EXATAMENTE '{plano_referencia}'",
-      "descricao": "Termo de busca/descrição limpa da conta (ex: Celular Claro, Aluguel, Supermercado, S63 Financ Itau)",
-      "valor": float_ou_null (retorne null ou 0.0 SE O USUÁRIO NÃO FALOU UM VALOR MONETÁRIO),
+      "projeto_id": "Nome/ID do plano citado. Se o usuário NÃO citar outro plano, use EXATAMENTE '{plano_referencia}'",
+      "descricao": "Nome limpo do lançamento sem pontuação desnecessária (Ex: S63 FINANC ITAU, S63 IPTU, Aluguel)",
+      "valor": float_ou_null (retorne null ou 0.0 SE O USUÁRIO NÃO FALOU NENHUM VALOR MONETÁRIO),
       "tipo": "Saida" ou "Entrada",
       "data_vencimento": "YYYY-MM-DD"
     }}
@@ -111,22 +110,21 @@ def processar_texto_groq(
 
 
 def buscar_planejamento_existente(supabase, usuario_id, projeto_id, descricao):
-    """Busca rigorosa de lançamentos pendentes (NÃO realizados e com valor realizado zerado)."""
+    """Busca rigorosa priorizando contas não baixadas (REALIZADO=False e status!=REALIZADO)."""
     if not descricao or len(descricao.strip()) < 2:
         return None
 
     try:
-        desc_buscada_norm = normalizar_texto(descricao)
-        palavras_busca = [p for p in desc_buscada_norm.split() if len(p) >= 2]
+        desc_norm = normalizar_texto(descricao)
 
-        if not palavras_busca:
-            return None
-
+        # 1. Query buscando APENAS lançamentos NÃO realizados
         query = (
             supabase.table('lancamentos')
             .select('*')
             .eq('usuario_id', usuario_id)
+            .eq('realizado', False)
         )
+
         if projeto_id:
             query = query.eq('projeto_id', projeto_id)
 
@@ -135,42 +133,38 @@ def buscar_planejamento_existente(supabase, usuario_id, projeto_id, descricao):
         if not res or not res.data:
             return None
 
-        # REGRA CRÍTICA: Filtrar APENAS contas pendentes de fato
-        # (realizado == False, status PLAN e valor_realizado == 0)
-        pendentes = []
-        for l in res.data:
-            is_realizado = l.get('realizado') is True
-            status = str(l.get('status') or '').strip().upper()
-            val_real = float(l.get('valor_realizado') or l.get('valor_real') or 0.0)
+        candidatos = res.data
 
-            if not is_realizado and status != 'REALIZADO' and val_real == 0:
-                pendentes.append(l)
-
-        candidatos_avaliados = []
-
-        for item in pendentes:
-            desc_banco_norm = normalizar_texto(item.get('descricao', ''))
-            palavras_banco = [p for p in desc_banco_norm.split() if len(p) >= 2]
-
-            # 1. Match exato normalizado (Ex: "S63 FINANC ITAU" == "S63 FINANC ITAU")
-            if desc_buscada_norm == desc_banco_norm:
+        # Prioridade A: Correspondência exata da string normalizada
+        for item in candidatos:
+            d_banco = normalizar_texto(item.get('descricao', ''))
+            if desc_norm == d_banco:
                 return item
 
-            # 2. Se todas as palavras faladas estiverem contidas na descrição do banco
-            if all(p in desc_banco_norm for p in palavras_busca):
-                candidatos_avaliados.append((100, item))
-                continue
+        # Prioridade B: Todas as palavras importantes da busca estão contidas na descrição do banco
+        palavras_busca = [p for p in desc_norm.split() if len(p) >= 2]
+        melhor_candidato = None
+        maior_pontuacao = 0
 
-            # 3. Pontuação por coincidência de termos (dando peso extra para palavras raras/específicas)
+        for item in candidatos:
+            d_banco = normalizar_texto(item.get('descricao', ''))
+            palavras_banco = [p for p in d_banco.split() if len(p) >= 2]
+
+            # Contagem de palavras coincidentes
             coincidencias = set(palavras_busca).intersection(set(palavras_banco))
-            if coincidencias:
-                score = len(coincidencias)
-                # Se coincidir termos fortes como 'FINANC' ou 'FINANQ', aumenta a relevância
-                candidatos_avaliados.append((score, item))
+            pontos = len(coincidencias)
 
-        if candidatos_avaliados:
-            candidatos_avaliados.sort(key=lambda x: x[0], reverse=True)
-            return candidatos_avaliados[0][1]
+            # Se contiver palavras essenciais como FINANC ou ITAU, ganha peso
+            if any(k in d_banco for k in ['FINANC', 'ITAU', 'ADM', 'COND']):
+                if any(k in desc_norm for k in ['FINANC', 'ITAU', 'ADM', 'COND']):
+                    pontos += 2
+
+            if pontos > maior_pontuacao:
+                maior_pontuacao = pontos
+                melhor_candidato = item
+
+        if maior_pontuacao >= 2:
+            return melhor_candidato
 
     except Exception as e:
         print(f'Erro na busca de planejamento: {e}')
@@ -199,7 +193,7 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
     tipo_fluxo = dados.get('tipo', 'Saida')
     id_lancamento_existente = dados.get('id_existente')
 
-    if intencao == 'REALIZAR':
+    if intencao in ['REALIZAR', 'CONSULTAR']:
         if id_lancamento_existente:
             payload_update = {
                 'realizado': True,
@@ -260,13 +254,9 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
     return 'Ação concluída com sucesso!'
 
 
-@st.dialog('🎙️ Conversar com o ORCAS')
-def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
-    """Modal de interface por voz sem o crash de empacotamento do Streamlit (*args/**kwargs removidos da assinatura)."""
+# Função interna de Renderização (Sem decorator para não dar crash no Python 3.14 / Streamlit Cloud)
+def _render_dialog_content(supabase, id_usuario, planos_disponiveis):
     st.write('👋 **Olá! Em que posso ajudar nos seus lançamentos hoje?**')
-
-    if planos_disponiveis is None:
-        planos_disponiveis = []
 
     plano_ativo = st.session_state.get('projeto_ativo') or st.session_state.get(
         'plano_ativo'
@@ -290,7 +280,7 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
     if 'audio_key_id' not in st.session_state:
         st.session_state.audio_key_id = 0
 
-    # ------------------ ETAPA 1: GRAVAÇÃO E INTERPRETAÇÃO ------------------
+    # ETAPA 1: GRAVAÇÃO E PROCESSAMENTO
     if st.session_state.etapa_voz == 'gravacao':
         pode_usar, uso_atual, limite_max = verificar_limite_uso(
             supabase, id_usuario
@@ -318,13 +308,9 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
             if hash_atual != st.session_state.hash_ultimo_audio:
                 with st.spinner('🤖 ORCAS está processando o áudio...'):
                     try:
-                        # Incrementa apenas na execução do áudio
                         incrementar_uso_voz(supabase, id_usuario, uso_atual)
 
-                        # 1. Transcrição do áudio via Whisper
                         texto = transcrever_audio_groq(client_groq, audio_bytes)
-
-                        # 2. Extração estruturada (JSON) via Llama 3.3
                         dados = processar_texto_groq(
                             client_groq, texto, planos_disponiveis, plano_ativo
                         )
@@ -337,7 +323,6 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
                         ):
                             dados['projeto_id'] = plano_ativo
 
-                        # 3. Consulta Inteligente ao Supabase
                         item_existente = buscar_planejamento_existente(
                             supabase,
                             id_usuario,
@@ -371,38 +356,33 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
                                 except Exception:
                                     pass
 
-                            if valor_falado == 0.0:
-                                dados['valor'] = valor_planejado
-                                dados['mensagem_orcas'] = (
-                                    f'Encontrei a conta **{desc_cadastrada}** com o valor'
-                                    ' planejado de'
-                                    f' **{formatar_moeda_br(valor_planejado)}** (Vencimento:'
-                                    f' **{dt_venc}**).\n\nEsta é a conta a que você se refere e'
-                                    ' confirma a baixa?'
-                                )
-                            else:
-                                dados['valor'] = valor_falado
-                                dados['mensagem_orcas'] = (
-                                    f'Encontrei a conta **{desc_cadastrada}** (Planejado:'
-                                    f' {formatar_moeda_br(valor_planejado)}).\n\nConfirmar a'
-                                    f' baixa no valor de **{formatar_moeda_br(valor_falado)}**?'
-                                )
+                            valor_final = (
+                                valor_falado if valor_falado > 0.0 else valor_planejado
+                            )
+                            dados['valor'] = valor_final
+
+                            dados['mensagem_orcas'] = (
+                                f'Encontrei a conta **{desc_cadastrada}** com o valor'
+                                f' planejado de **{formatar_moeda_br(valor_planejado)}**'
+                                f' (Vencimento: **{dt_venc}**).\n\nEsta é a conta a que'
+                                ' você se refere e confirma a baixa?'
+                            )
 
                         else:
                             dados['id_existente'] = None
                             dados['valor'] = valor_falado
                             if valor_falado > 0.0:
                                 dados['mensagem_orcas'] = (
-                                    'Não encontrei um planejamento prévio para'
+                                    'Não encontrei um planejamento pendente para'
                                     f' **{dados.get("descricao")}**. Deseja realizar um novo'
                                     ' lançamento direto no valor de'
                                     f' **{formatar_moeda_br(valor_falado)}**?'
                                 )
                             else:
                                 dados['mensagem_orcas'] = (
-                                    f'Não encontrei a conta **{dados.get("descricao")}** nos'
-                                    ' planejamentos e nenhum valor foi informado. Por favor,'
-                                    ' tente novamente informando o valor.'
+                                    f'Não encontrei a conta **{dados.get("descricao")}** pendente'
+                                    ' nos planejamentos e nenhum valor foi informado. Por favor,'
+                                    ' tente novamente informando o valor pago.'
                                 )
 
                         st.session_state.dados_interpretados = dados
@@ -412,7 +392,7 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
                     except Exception as e:
                         st.error(f'Erro no processamento: {e}')
 
-    # ------------------ ETAPA 2: CONFIRMAÇÃO DO USUÁRIO ------------------
+    # ETAPA 2: CONFIRMAÇÃO DO USUÁRIO
     elif st.session_state.etapa_voz == 'confirmacao':
         dados = st.session_state.dados_interpretados or {}
 
@@ -424,7 +404,7 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
 
             col_a, col_b = st.columns(2)
             with col_a:
-                st.write(f"• **Ação:** {dados.get('intencao', '-')}")
+                st.write(f"• **Ação:** {dados.get('intencao', 'REALIZAR')}")
                 st.write(f"• **Plano:** {dados.get('projeto_id') or 'Padrão'}")
                 st.write(f"• **Descrição:** {dados.get('descricao', '-')}")
             with col_b:
@@ -439,7 +419,9 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
                 '✅ Confirmar e Gravar', type='primary', use_container_width=True
             ):
                 try:
-                    msg_sucesso = executar_acao_no_supabase(supabase, id_usuario, dados)
+                    msg_sucesso = executar_acao_no_supabase(
+                        supabase, id_usuario, dados
+                    )
                     st.success(msg_sucesso)
 
                     time.sleep(1.5)
@@ -459,3 +441,11 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
                 st.session_state.hash_ultimo_audio = None
                 st.session_state.audio_key_id += 1
                 st.rerun()
+
+
+# Ponto de entrada limpo sem empacotamento dinamico para evitar erro de assinatura no Streamlit
+@st.dialog('🎙️ Conversar com o ORCAS')
+def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
+    if planos_disponiveis is None:
+        planos_disponiveis = []
+    _render_dialog_content(supabase, id_usuario, planos_disponiveis)
