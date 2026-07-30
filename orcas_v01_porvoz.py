@@ -117,7 +117,7 @@ def buscar_planejamento_existente(supabase, usuario_id, projeto_id, descricao):
     try:
         desc_norm = normalizar_texto(descricao)
 
-        # 1. Query buscando APENAS lançamentos NÃO realizados
+        # Query buscando APENAS lançamentos NÃO realizados
         query = (
             supabase.table('lancamentos')
             .select('*')
@@ -141,7 +141,7 @@ def buscar_planejamento_existente(supabase, usuario_id, projeto_id, descricao):
             if desc_norm == d_banco:
                 return item
 
-        # Prioridade B: Todas as palavras importantes da busca estão contidas na descrição do banco
+        # Prioridade B: Análise por palavras relevantes
         palavras_busca = [p for p in desc_norm.split() if len(p) >= 2]
         melhor_candidato = None
         maior_pontuacao = 0
@@ -150,11 +150,9 @@ def buscar_planejamento_existente(supabase, usuario_id, projeto_id, descricao):
             d_banco = normalizar_texto(item.get('descricao', ''))
             palavras_banco = [p for p in d_banco.split() if len(p) >= 2]
 
-            # Contagem de palavras coincidentes
             coincidencias = set(palavras_busca).intersection(set(palavras_banco))
             pontos = len(coincidencias)
 
-            # Se contiver palavras essenciais como FINANC ou ITAU, ganha peso
             if any(k in d_banco for k in ['FINANC', 'ITAU', 'ADM', 'COND']):
                 if any(k in desc_norm for k in ['FINANC', 'ITAU', 'ADM', 'COND']):
                     pontos += 2
@@ -254,9 +252,15 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
     return 'Ação concluída com sucesso!'
 
 
-# Função interna de Renderização (Sem decorator para não dar crash no Python 3.14 / Streamlit Cloud)
-def _render_dialog_content(supabase, id_usuario, planos_disponiveis):
+# A função decorada com @st.dialog ACEITA *args e **kwargs para suportar argumentos dinâmicos do Streamlit sem dar crash
+@st.dialog('🎙️ Conversar com o ORCAS')
+def exibir_modal_voz_orcas(
+    supabase, id_usuario, planos_disponiveis=None, *args, **kwargs
+):
     st.write('👋 **Olá! Em que posso ajudar nos seus lançamentos hoje?**')
+
+    if planos_disponiveis is None:
+        planos_disponiveis = []
 
     plano_ativo = st.session_state.get('projeto_ativo') or st.session_state.get(
         'plano_ativo'
@@ -441,11 +445,3 @@ def _render_dialog_content(supabase, id_usuario, planos_disponiveis):
                 st.session_state.hash_ultimo_audio = None
                 st.session_state.audio_key_id += 1
                 st.rerun()
-
-
-# Ponto de entrada limpo sem empacotamento dinamico para evitar erro de assinatura no Streamlit
-@st.dialog('🎙️ Conversar com o ORCAS')
-def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
-    if planos_disponiveis is None:
-        planos_disponiveis = []
-    _render_dialog_content(supabase, id_usuario, planos_disponiveis)
