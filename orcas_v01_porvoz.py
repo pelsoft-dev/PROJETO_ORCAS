@@ -152,7 +152,7 @@ def processar_texto_groq(
 
     REGRAS RÍGIDAS DE INTERPRETAÇÃO:
     1. INTENÇÃO:
-       - "PROJETAR": Criar/incluir um novo lançamento futuro, agendamento ou conta a pagar/receber.
+       - "PROJETAR": Criar/incluir um novo lançamento futuro, agendamento ou conta a pagar/receber (ex: "planejar para dia X", "projetar gasto", "agendar para dia X").
        - "REALIZAR": Baixar, pagar ou liquidar uma conta existente ou lançamento do dia.
        - "PARCIAL": Quando for um gasto do dia a dia (ex: Supermercado, Combustível, Farmácia, Restaurante) que abate/entra como lançamento parcial de uma projeção orçada.
        - "ALTERAR": Modificar valor, nome, descrição ou data de uma conta existente.
@@ -160,14 +160,14 @@ def processar_texto_groq(
        - "CONSULTAR": Perguntas sobre saldos, totais ou resumos.
 
     2. DATA DE VENCIMENTO OU DA OCORRÊNCIA (data_vencimento):
+       - PRIORIDADE MÁXIMA: Se o usuário mencionou uma data específica (ex: "dia 20 de agosto de 2026", "20/08/2026", "na data 30/07/2026", "no dia 15 de maio"), você DEVE obrigatoriamente converter e atribuir essa data no formato YYYY-MM-DD. NUNCA substitua pela data de hoje nem por datas passadas se o usuário citou uma data explícita.
        - Se o usuário disse "amanhã", atribua OBRIGATORIAMENTE a data: "{amanha_dt.strftime('%Y-%m-%d')}".
-       - Se o usuário disse "hoje", atribua OBRIGATORIAMENTE a data: "{hoje_dt.strftime('%Y-%m-%d')}".
+       - Se o usuário disse "hoje" ou "na data de hoje", atribua OBRIGATORIAMENTE a data: "{hoje_dt.strftime('%Y-%m-%d')}".
        - Se o usuário disse "ontem", atribua OBRIGATORIAMENTE a data: "{ontem_dt.strftime('%Y-%m-%d')}".
-       - Se o usuário citou uma data específica (ex: "10/10/2026", "10 de outubro de 2026"), extraia e formate como YYYY-MM-DD.
-       - Se nenhuma data foi mencionada para inclusão/projeção, use a data de HOJE: "{hoje_dt.strftime('%Y-%m-%d')}".
+       - Se nenhuma data foi mencionada para inclusão/projeção/realização, use a data de HOJE: "{hoje_dt.strftime('%Y-%m-%d')}".
 
     3. MÊS DE REFERÊNCIA (mes_referencia):
-       - Se o usuário mencionou um mês específico (ex: "em julho", "de setembro"), retorne o mês numérico (1 a 12). Caso contrário, retorne o mês da data identificada.
+       - Se o usuário mencionou um mês específico (ex: "em julho", "de setembro"), retorne o mês numérico (1 a 12). Caso contrário, retorne o mês da data_vencimento identificada.
 
     4. DESCRIÇÃO:
        - Extraia apenas o identificador/nome da conta ou serviço.
@@ -544,6 +544,9 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
             intencao = dados.get("intencao")
             incluir_realizados = intencao in ["EXCLUIR", "ALTERAR", "PARCIAL"]
 
+            # Guarda a data identificada pela IA antes de buscar no banco
+            data_identificada_ia = dados.get("data_vencimento")
+
             # IGNORA busca no banco para novas criações (PROJETAR)
             item_existente = None
             if intencao not in ["PROJETAR"]:
@@ -585,8 +588,11 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
               if permite_parcial or intencao == "PARCIAL":
                 dados["intencao"] = "PARCIAL"
                 dados["valor"] = valor_falado
-                if not dados.get("data_vencimento"):
+                # Preserva a data informada pela IA se existente, caso contrário usa a data de hoje
+                if not data_identificada_ia:
                   dados["data_vencimento"] = date.today().strftime("%Y-%m-%d")
+                else:
+                  dados["data_vencimento"] = data_identificada_ia
 
                 dt_venc_fmt = datetime.strptime(
                     dados["data_vencimento"], "%Y-%m-%d"
@@ -614,8 +620,10 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
                 )
 
               elif intencao == "ALTERAR":
-                if dt_banco:
+                # Se o usuário especificou uma nova data no comando, mantém a nova data; caso contrário, usa a do banco
+                if not data_identificada_ia and dt_banco:
                   dados["data_vencimento"] = str(dt_banco)[:10]
+
                 dados["valor"] = (
                     valor_falado if valor_falado > 0.0 else valor_planejado
                 )
@@ -625,7 +633,8 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
                 )
 
               else:
-                if dt_banco:
+                # Caso a IA não tenha extraído uma data explícita, recai sobre a data cadastrada no banco
+                if not data_identificada_ia and dt_banco:
                   dados["data_vencimento"] = str(dt_banco)[:10]
 
                 valor_final = (
