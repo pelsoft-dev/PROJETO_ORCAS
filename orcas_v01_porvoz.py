@@ -93,7 +93,7 @@ def processar_texto_groq(
       "projeto_id": "Nome/ID do plano citado. Se o usuário NÃO citar outro plano, use EXATAMENTE '{plano_referencia}'",
       "descricao": "Nome limpo do lançamento sem pontuação desnecessária (Ex: S63 FINANC ITAU, S63 IPTU, Aluguel)",
       "valor": float_ou_null (retorne null ou 0.0 SE O USUÁRIO NÃO FALOU NENHUM VALOR MONETÁRIO),
-      "tipo": "Saida" ou "Entrada",
+      "tipo": "Saída" ou "Entrada",
       "data_vencimento": "YYYY-MM-DD"
     }}
     """
@@ -110,23 +110,23 @@ def processar_texto_groq(
 
 
 def buscar_planejamento_existente(supabase, usuario_id, projeto_id, descricao):
-    """Busca rigorosa priorizando contas não baixadas (REALIZADO=False e status!=REALIZADO)."""
+    """Busca rigorosa na tabela lancamentos priorizando contas não baixadas (status = 'Planejado')."""
     if not descricao or len(descricao.strip()) < 2:
         return None
 
     try:
         desc_norm = normalizar_texto(descricao)
 
-        # Query buscando APENAS lançamentos NÃO realizados
+        # Busca lançamentos do usuário e plano que estão como Planejado ou não realizados
         query = (
             supabase.table('lancamentos')
             .select('*')
-            .eq('usuario_id', usuario_id)
-            .eq('realizado', False)
+            .eq('usuario_id', str(usuario_id))
+            .neq('status', 'Realizado')
         )
 
         if projeto_id:
-            query = query.eq('projeto_id', projeto_id)
+            query = query.eq('projeto_id', str(projeto_id))
 
         res = query.execute()
 
@@ -141,7 +141,7 @@ def buscar_planejamento_existente(supabase, usuario_id, projeto_id, descricao):
             if desc_norm == d_banco:
                 return item
 
-        # Prioridade B: Análise por palavras relevantes
+        # Prioridade B: Análise por palavras de peso (ex: FINANC, ITAU, IPTU)
         palavras_busca = [p for p in desc_norm.split() if len(p) >= 2]
         melhor_candidato = None
         maior_pontuacao = 0
@@ -153,8 +153,9 @@ def buscar_planejamento_existente(supabase, usuario_id, projeto_id, descricao):
             coincidencias = set(palavras_busca).intersection(set(palavras_banco))
             pontos = len(coincidencias)
 
-            if any(k in d_banco for k in ['FINANC', 'ITAU', 'ADM', 'COND']):
-                if any(k in desc_norm for k in ['FINANC', 'ITAU', 'ADM', 'COND']):
+            # Bônus para termos chave financeiros
+            for termo in ['FINANC', 'ITAU', 'ADM', 'COND', 'IPTU', 'CEF']:
+                if termo in d_banco and termo in desc_norm:
                     pontos += 2
 
             if pontos > maior_pontuacao:
@@ -171,7 +172,7 @@ def buscar_planejamento_existente(supabase, usuario_id, projeto_id, descricao):
 
 
 def formatar_moeda_br(valor):
-    """Auxiliar para formatar valores no padrão brasileiro R$ 1.234,56."""
+    """Auxiliar para formatar valores no padrão R$ 1.234,56."""
     try:
         val = float(valor or 0.0)
         return (
@@ -182,45 +183,48 @@ def formatar_moeda_br(valor):
 
 
 def executar_acao_no_supabase(supabase, usuario_id, dados):
-    """Executa a persistência dos dados no banco Supabase após confirmação."""
+    """
+    Executa a realização/gravação no Supabase seguindo os exatos padrões da Conciliação.
+    """
     intencao = dados.get('intencao')
-    projeto_id = dados.get('projeto_id')
+    projeto_id = str(dados.get('projeto_id'))
     descricao = dados.get('descricao')
     valor = float(dados.get('valor') or 0.0)
-    data_venc = dados.get('data_vencimento') or str(date.today())
-    tipo_fluxo = dados.get('tipo', 'Saida')
-    id_lancamento_existente = dados.get('id_existente')
+    data_hoje = date.today().strftime('%Y-%m-%d')
+    tipo_fluxo = dados.get('tipo', 'Saída')
+    if tipo_fluxo not in ['Entrada', 'Saída']:
+        tipo_fluxo = 'Saída'
+
+    id_existente = dados.get('id_existente')
 
     if intencao in ['REALIZAR', 'CONSULTAR']:
-        if id_lancamento_existente:
+        if id_existente:
+            # Baixa de conta existente (Igual à Conciliação)
             payload_update = {
-                'realizado': True,
-                'status': 'Realizado',
-                'valor_realizado': valor,
                 'valor_real': valor,
-                'parcial_data': str(date.today()),
+                'status': 'Realizado',
             }
             supabase.table('lancamentos').update(payload_update).eq(
-                'id', id_lancamento_existente
+                'id', id_existente
             ).execute()
             return (
-                f'✅ Lançamento **{descricao}** baixado como **REALIZADO** no valor'
-                f' de {formatar_moeda_br(valor)}!'
+                f'✅ Lançamento **{descricao}** baixado como **Realizado** no'
+                f' valor de {formatar_moeda_br(valor)}!'
             )
         else:
+            # Lançamento direto sem planejamento prévio (Igual à Conciliação)
             payload_direto = {
-                'usuario_id': usuario_id,
                 'projeto_id': projeto_id,
+                'usuario_id': str(usuario_id),
                 'descricao': descricao,
-                'valor': valor,
-                'valor_plan': valor,
-                'valor_realizado': valor,
-                'valor_real': valor,
+                'data': data_hoje,
+                'data_vencimento': data_hoje,
                 'tipo': tipo_fluxo,
-                'data_vencimento': data_venc,
-                'data': str(date.today()),
-                'realizado': True,
+                'valor_plan': 0,
+                'valor_real': valor,
                 'status': 'Realizado',
+                'parcial_real': 0,
+                'permite_parcial': False,
             }
             supabase.table('lancamentos').insert(payload_direto).execute()
             return (
@@ -229,30 +233,28 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
             )
 
     elif intencao == 'PROJETAR':
-        payload = {
-            'usuario_id': usuario_id,
+        payload_proj = {
             'projeto_id': projeto_id,
+            'usuario_id': str(usuario_id),
             'descricao': descricao,
-            'valor': valor,
-            'valor_plan': valor,
+            'data': data_hoje,
+            'data_vencimento': dados.get('data_vencimento') or data_hoje,
             'tipo': tipo_fluxo,
-            'data_vencimento': data_venc,
-            'data': data_venc,
-            'realizado': False,
+            'valor_plan': valor,
+            'valor_real': 0,
             'status': 'Planejado',
-            'valor_realizado': 0.0,
-            'valor_real': 0.0,
+            'parcial_real': 0,
+            'permite_parcial': False,
         }
-        supabase.table('lancamentos').insert(payload).execute()
+        supabase.table('lancamentos').insert(payload_proj).execute()
         return (
             f'✅ Lançamento **{descricao}** ({formatar_moeda_br(valor)}) projetado'
             ' com sucesso!'
         )
 
-    return 'Ação concluída com sucesso!'
+    return 'Ação realizada com sucesso!'
 
 
-# A função decorada com @st.dialog ACEITA *args e **kwargs para suportar argumentos dinâmicos do Streamlit sem dar crash
 @st.dialog('🎙️ Conversar com o ORCAS')
 def exibir_modal_voz_orcas(
     supabase, id_usuario, planos_disponiveis=None, *args, **kwargs
@@ -341,6 +343,10 @@ def exibir_modal_voz_orcas(
                             desc_cadastrada = item_existente.get(
                                 'descricao'
                             ) or dados.get('descricao')
+
+                            # FIX 1: CORRIGE A DESCRIÇÃO NO RESUMO COM O NOME EXATO DO BANCO
+                            dados['descricao'] = desc_cadastrada
+
                             valor_planejado = float(
                                 item_existente.get('valor_plan')
                                 or item_existente.get('valor')
@@ -412,7 +418,7 @@ def exibir_modal_voz_orcas(
                 st.write(f"• **Plano:** {dados.get('projeto_id') or 'Padrão'}")
                 st.write(f"• **Descrição:** {dados.get('descricao', '-')}")
             with col_b:
-                st.write(f"• **Tipo:** {dados.get('tipo', 'Saida')}")
+                st.write(f"• **Tipo:** {dados.get('tipo', 'Saída')}")
                 st.write(f"• **Valor:** {formatar_moeda_br(dados.get('valor'))}")
 
         st.markdown('---')
@@ -428,12 +434,14 @@ def exibir_modal_voz_orcas(
                     )
                     st.success(msg_sucesso)
 
-                    time.sleep(1.5)
+                    time.sleep(1.2)
 
+                    # Limpa e fecha a modal com sucesso
                     st.session_state.etapa_voz = 'gravacao'
                     st.session_state.dados_interpretados = None
                     st.session_state.hash_ultimo_audio = None
                     st.session_state.audio_key_id += 1
+                    st.session_state.abrir_modal_voz = False
                     st.rerun()
                 except Exception as e:
                     st.error(f'❌ Erro ao gravar lançamento: {e}')

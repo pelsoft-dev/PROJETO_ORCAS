@@ -2,6 +2,7 @@ import hashlib
 import os
 import random
 import smtplib
+import zoneinfo
 from datetime import datetime, timedelta
 from email.mime.text import MIMEText
 
@@ -226,8 +227,6 @@ def parse_moeda(t):
 # ==============================================================================
 # RETORNO DO MERCADO PAGO E LOGIN AUTOMÁTICO
 # ==============================================================================
-import zoneinfo
-
 status_retorno = None
 pref_id = None
 
@@ -761,7 +760,10 @@ with st.sidebar:
 
     if bloqueado:
         menu_opcoes = ["⚙️ Gestão"]
-        st.session_state.escolha = "⚙️ Gestão"
+        if st.session_state.escolha == "💳 Pagamentos":
+            menu_opcoes.append("💳 Pagamentos")
+        else:
+            st.session_state.escolha = "⚙️ Gestão"
         st.warning("Assinatura Expirada! Acesse a Gestão para renovar.")
     else:
         menu_opcoes = [
@@ -772,6 +774,8 @@ with st.sidebar:
             "⚙️ Gestão",
             "📊 Admin",
         ]
+        if st.session_state.escolha == "💳 Pagamentos":
+            menu_opcoes.append("💳 Pagamentos")
 
     if st.session_state.escolha in menu_opcoes:
         idx_selecionado = menu_opcoes.index(st.session_state.escolha)
@@ -783,14 +787,8 @@ with st.sidebar:
     )
 
     if escolha_sidebar != st.session_state.escolha:
-        if (
-            st.session_state.escolha == "💳 Pagamentos"
-            and escolha_sidebar == "⚙️ Gestão"
-        ):
-            pass
-        else:
-            st.session_state.escolha = escolha_sidebar
-            st.rerun()
+        st.session_state.escolha = escolha_sidebar
+        st.rerun()
 
     st.divider()
 
