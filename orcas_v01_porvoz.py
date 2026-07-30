@@ -393,7 +393,7 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
         "parcial_data": data_venc,
         "status": "Realizado",
         "permite_parcial": False,
-        "id_pai": id_existente if id_existente else None,
+        # "id_pai": id_existente if id_existente else None,
     }
     supabase.table("lancamentos").insert(payload_parcial).execute()
 
