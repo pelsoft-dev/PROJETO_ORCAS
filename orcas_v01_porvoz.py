@@ -15,7 +15,7 @@ LIMITES_USO = {
 
 
 def normalizar_texto(texto):
-  """Remove acentos, pontos e caracteres especiais, retornando o texto limpo."""
+  """Remove acentos, pontos, traços e converte para maiúsculo para comparação precisa."""
   if not texto:
     return ''
   nfkd = unicodedata.normalize('NFKD', str(texto))
@@ -113,14 +113,16 @@ def processar_texto_groq(
 
 
 def buscar_planejamento_existente(supabase, usuario_id, projeto_id, descricao):
-  """Verifica na tabela de lançamentos se já existe conta planejada correspondente com busca flexível e desacentuada."""
+  """Busca inteligente de lançamentos pendentes com pontuação de similaridade."""
   if not descricao or len(descricao.strip()) < 2:
     return None
 
   try:
-    desc_limpa = normalizar_texto(descricao)
+    desc_buscada_norm = normalizar_texto(descricao)
+    palavras_busca = set(
+        [p for p in desc_buscada_norm.split() if len(p) >= 2]
+    )
 
-    # 1. Busca ampla no Supabase filtrando por usuário e projeto
     query = (
         supabase.table('lancamentos')
         .select('*')
@@ -131,34 +133,50 @@ def buscar_planejamento_existente(supabase, usuario_id, projeto_id, descricao):
 
     res = query.execute()
 
-    if res and res.data:
-      # Filtra no código normalizando ambas as descrições (contorna limitações de acento/pontuação do banco)
-      palavras_chave = [p for p in desc_limpa.split() if len(p) >= 3]
+    if not res or not res.data:
+      return None
 
-      candidatos = []
-      for item in res.data:
-        desc_banco_norm = normalizar_texto(item.get('descricao', ''))
+    # Regra Fundamental: Filtrar APENAS lançamentos NÃO realizados (planejados/pendentes)
+    pendentes = [
+        l
+        for l in res.data
+        if not l.get('realizado')
+        and str(l.get('status')).lower() != 'realizado'
+    ]
 
-        # Se a descrição normalizada do banco contiver o termo limpo ou a palavra chave principal (ex: S63)
-        if desc_limpa in desc_banco_norm or any(
-            p in desc_banco_norm for p in palavras_chave
-        ):
-          candidatos.append(item)
+    candidatos_avaliados = []
 
-      if candidatos:
-        # Prioriza lançamentos que ainda NÃO foram realizados/baixados
-        planejados = [
-            l
-            for l in candidatos
-            if not l.get('realizado')
-            and str(l.get('status')).lower() != 'realizado'
-        ]
-        if planejados:
-          return planejados[0]
-        return candidatos[0]
+    for item in pendentes:
+      desc_banco_norm = normalizar_texto(item.get('descricao', ''))
+      palavras_banco = set(
+          [p for p in desc_banco_norm.split() if len(p) >= 2]
+      )
+
+      # 1. Match exato ou contido completamente
+      if (
+          desc_buscada_norm == desc_banco_norm
+          or desc_buscada_norm in desc_banco_norm
+          or desc_banco_norm in desc_buscada_norm
+      ):
+        return item
+
+      # 2. Contagem de interseção de palavras chaves (Ex: "S63", "FINANC", "ITAU")
+      intersecao = palavras_busca.intersection(palavras_banco)
+      qtd_coincidencias = len(intersecao)
+
+      # Só considera relevante se houver match em mais de 1 palavra ou termo chave forte
+      if qtd_coincidencias >= 2 or (
+          len(palavras_busca) == 1 and qtd_coincidencias == 1
+      ):
+        candidatos_avaliados.append((qtd_coincidencias, item))
+
+    # Retorna o item pendente com o maior número de palavras coincidentes
+    if candidatos_avaliados:
+      candidatos_avaliados.sort(key=lambda x: x[0], reverse=True)
+      return candidatos_avaliados[0][1]
 
   except Exception as e:
-    print(f'Erro na consulta prévia: {e}')
+    print(f'Erro na busca de planejamento: {e}')
 
   return None
 
@@ -246,11 +264,14 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
 
 
 @st.dialog('🎙️ Conversar com o ORCAS')
-def exibir_modal_voz_orcas(
-    supabase, id_usuario, planos_disponiveis, *args, **kwargs
-):
-  """Modal de interface por voz acionado via botão na barra lateral."""
+def exibir_modal_voz_orcas(supabase, id_usuario, *args, **kwargs):
+  """Modal de interface por voz ajustado contra fechar prematuro e com tratamento *args / **kwargs para o Streamlit."""
   st.write('👋 **Olá! Em que posso ajudar nos seus lançamentos hoje?**')
+
+  # Captura planos disponíveis se passados no args ou kwargs
+  planos_disponiveis = kwargs.get('planos_disponiveis') or (
+      args[0] if len(args) > 0 else []
+  )
 
   # Identifica o plano ativo na sessão
   plano_ativo = st.session_state.get('projeto_ativo') or st.session_state.get(
@@ -321,7 +342,7 @@ def exibir_modal_voz_orcas(
             ):
               dados['projeto_id'] = plano_ativo
 
-            # 3. Consulta ao Supabase
+            # 3. Consulta Inteligente ao Supabase
             item_existente = buscar_planejamento_existente(
                 supabase,
                 id_usuario,
@@ -355,7 +376,6 @@ def exibir_modal_voz_orcas(
                 except Exception:
                   pass
 
-              # Regra: Se o usuário NÃO falou valor, assume o valor planejado
               if valor_falado == 0.0:
                 dados['valor'] = valor_planejado
                 dados['mensagem_orcas'] = (
@@ -366,7 +386,6 @@ def exibir_modal_voz_orcas(
                     ' confirma a baixa?'
                 )
               else:
-                # Usuário informou um valor no áudio
                 dados['valor'] = valor_falado
                 dados['mensagem_orcas'] = (
                     f'Encontrei a conta **{desc_cadastrada}** (Planejado:'
@@ -375,7 +394,6 @@ def exibir_modal_voz_orcas(
                 )
 
             else:
-              # Não encontrou lançamento prévio
               dados['id_existente'] = None
               dados['valor'] = valor_falado
               if valor_falado > 0.0:
@@ -429,10 +447,8 @@ def exibir_modal_voz_orcas(
           msg_sucesso = executar_acao_no_supabase(supabase, id_usuario, dados)
           st.success(msg_sucesso)
 
-          # Pausa rápida para exibir o feedback antes do rerun/fechamento
-          time.sleep(1.2)
+          time.sleep(1.5)
 
-          # Reseta o modal para a próxima gravação
           st.session_state.etapa_voz = 'gravacao'
           st.session_state.dados_interpretados = None
           st.session_state.hash_ultimo_audio = None
