@@ -159,17 +159,24 @@ def processar_texto_groq(
        - "EXCLUIR": APENAS quando o usuário usar termos explícitos como "deletar", "excluir", "apagar", "remover".
        - "CONSULTAR": Perguntas sobre saldos, totais ou resumos.
 
-    2. DATA DE VENCIMENTO OU DA OCORRÊNCIA (data_vencimento):
+    2. PERMITE PARCIAIS E RECORRÊNCIA TEMPORAL (permite_parcial):
+       - Identifique se o usuário mencionou permitir parciais (ex: "permita parciais", "permita parcial", "aceita parcial", "com parcial"). Se sim, defina permite_parcial = true.
+       - Se o usuário disse "em todos os meses do meu plano" ou "em todos os meses", defina recorrencia_tipo = "TODOS".
+       - Se o usuário especificou um intervalo de meses (ex: "de agosto até dezembro de 2026", "de maio a outubro"), defina recorrencia_tipo = "PERIODO", e preencha mes_inicio e mes_fim no formato YYYY-MM-01 (ex: "2026-08-01" e "2026-12-01").
+       - Quando permite_parcial for true, a data base do lançamento DEVE ser o dia 01 do mês correspondente (ex: YYYY-MM-01).
+
+    3. DATA DE VENCIMENTO OU DA OCORRÊNCIA (data_vencimento):
        - PRIORIDADE MÁXIMA: Se o usuário mencionou uma data específica (ex: "dia 20 de agosto de 2026", "20/08/2026", "na data 30/07/2026", "no dia 15 de maio"), você DEVE obrigatoriamente converter e atribuir essa data no formato YYYY-MM-DD. NUNCA substitua pela data de hoje nem por datas passadas se o usuário citou uma data explícita.
+       - Se o usuário solicitar "permita parciais", garanta que a data seja dia 01 do mês citado ou do mês atual (ex: YYYY-MM-01).
        - Se o usuário disse "amanhã", atribua OBRIGATORIAMENTE a data: "{amanha_dt.strftime('%Y-%m-%d')}".
        - Se o usuário disse "hoje" ou "na data de hoje", atribua OBRIGATORIAMENTE a data: "{hoje_dt.strftime('%Y-%m-%d')}".
        - Se o usuário disse "ontem", atribua OBRIGATORIAMENTE a data: "{ontem_dt.strftime('%Y-%m-%d')}".
        - Se nenhuma data foi mencionada para inclusão/projeção/realização, use a data de HOJE: "{hoje_dt.strftime('%Y-%m-%d')}".
 
-    3. MÊS DE REFERÊNCIA (mes_referencia):
+    4. MÊS DE REFERÊNCIA (mes_referencia):
        - Se o usuário mencionou um mês específico (ex: "em julho", "de setembro"), retorne o mês numérico (1 a 12). Caso contrário, retorne o mês da data_vencimento identificada.
 
-    4. DESCRIÇÃO:
+    5. DESCRIÇÃO:
        - Extraia apenas o identificador/nome da conta ou serviço.
        - Remova termos genéricos iniciais como "conta", "lançamento", "boleto", "fatura".
 
@@ -183,7 +190,11 @@ def processar_texto_groq(
       "valor": float_ou_null,
       "tipo": "Saída" ou "Entrada",
       "data_vencimento": "YYYY-MM-DD",
-      "mes_referencia": int_ou_null
+      "mes_referencia": int_ou_null,
+      "permite_parcial": boolean,
+      "recorrencia_tipo": "TODOS" | "PERIODO" | null,
+      "mes_inicio": "YYYY-MM-01" | null,
+      "mes_fim": "YYYY-MM-01" | null
     }}
     """
 
@@ -332,6 +343,7 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
   valor = float(dados.get("valor") or 0.0)
   data_hoje = date.today().strftime("%Y-%m-%d")
   data_venc = dados.get("data_vencimento") or data_hoje
+  permite_parcial = bool(dados.get("permite_parcial", False))
 
   tipo_fluxo = dados.get("tipo", "Saída")
   if tipo_fluxo not in ["Entrada", "Saída"]:
@@ -361,6 +373,7 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
           "data": data_venc,  # Atualiza também o campo de referência temporal
           "tipo": tipo_fluxo,
           "projeto_id": projeto_id,
+          "permite_parcial": permite_parcial,
       }
       supabase.table("lancamentos").update(payload_alterar).eq(
           "id", id_existente
@@ -440,26 +453,81 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
           " registrado e baixado com sucesso!"
       )
 
-  # AÇÃO: PROJETAR (Ajustado para igualar data e data_vencimento)
+  # AÇÃO: PROJETAR (Com suporte completo a permite_parcial e recorrência por período/todos os meses)
   elif intencao == "PROJETAR":
-    payload_proj = {
-        "projeto_id": projeto_id,
-        "usuario_id": str(usuario_id),
-        "descricao": descricao,
-        "data": data_venc,  # CORREÇÃO CRÍTICA: 'data' recebe 'data_venc' para aparecer nos filtros do app
-        "data_vencimento": data_venc,
-        "tipo": tipo_fluxo,
-        "valor_plan": valor,
-        "valor_real": 0,
-        "status": "Planejado",
-        "parcial_real": 0,
-        "permite_parcial": False,
-    }
-    supabase.table("lancamentos").insert(payload_proj).execute()
-    dt_venc_fmt = datetime.strptime(data_venc, "%Y-%m-%d").strftime("%d/%m/%Y")
+    recorrencia_tipo = dados.get("recorrencia_tipo")
+    mes_inicio_str = dados.get("mes_inicio")
+    mes_fim_str = dados.get("mes_fim")
+
+    datas_para_inserir = []
+
+    if permite_parcial:
+      # Se permite parcial, garante que a data seja o dia 01 do mês
+      try:
+        dt_base = datetime.strptime(data_venc, "%Y-%m-%d").replace(day=1)
+      except Exception:
+        dt_base = date.today().replace(day=1)
+
+      if recorrencia_tipo == "TODOS":
+        # Gera para os 12 meses do ano vigente a partir do mês atual ou informado
+        ano_atual = dt_base.year
+        datas_para_inserir = [
+            date(ano_atual, m, 1).strftime("%Y-%m-%d") for m in range(1, 13)
+        ]
+
+      elif recorrencia_tipo == "PERIODO" and mes_inicio_str and mes_fim_str:
+        try:
+          dt_ini = datetime.strptime(mes_inicio_str, "%Y-%m-%d").replace(day=1)
+          dt_fim = datetime.strptime(mes_fim_str, "%Y-%m-%d").replace(day=1)
+          curr = dt_ini
+          while curr <= dt_fim:
+            datas_para_inserir.append(curr.strftime("%Y-%m-%d"))
+            # Avança 1 mês
+            if curr.month == 12:
+              curr = date(curr.year + 1, 1, 1)
+            else:
+              curr = date(curr.year, curr.month + 1, 1)
+        except Exception:
+          datas_para_inserir = [dt_base.strftime("%Y-%m-%d")]
+      else:
+        datas_para_inserir = [dt_base.strftime("%Y-%m-%d")]
+
+    else:
+      datas_para_inserir = [data_venc]
+
+    payloads = []
+    for dt_ins in datas_para_inserir:
+      payloads.append({
+          "projeto_id": projeto_id,
+          "usuario_id": str(usuario_id),
+          "descricao": descricao,
+          "data": dt_ins,
+          "data_vencimento": dt_ins,
+          "tipo": tipo_fluxo,
+          "valor_plan": valor,
+          "valor_real": 0,
+          "status": "Planejado",
+          "parcial_real": 0,
+          "permite_parcial": permite_parcial,
+      })
+
+    supabase.table("lancamentos").insert(payloads).execute()
+
+    qtd = len(payloads)
+    if qtd > 1:
+      return (
+          f"✅ {qtd} lançamentos de **{descricao}** ({formatar_moeda_br(valor)})"
+          " projetados com sucesso (Permite Parciais)!"
+      )
+
+    dt_venc_fmt = datetime.strptime(
+        datas_para_inserir[0], "%Y-%m-%d"
+    ).strftime("%d/%m/%Y")
+    info_parcial = " (Permite Parciais)" if permite_parcial else ""
     return (
         f"✅ Lançamento **{descricao}** ({formatar_moeda_br(valor)}) com"
-        f" vencimento para **{dt_venc_fmt}** projetado com sucesso!"
+        f" vencimento para **{dt_venc_fmt}**{info_parcial} projetado com"
+        " sucesso!"
     )
 
   return "Ação realizada com sucesso!"
@@ -674,10 +742,15 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
                     f" **{dados.get('descricao')}** para ser alterado."
                 )
               elif intencao == "PROJETAR":
+                str_parcial = (
+                    " (Permite Parciais)"
+                    if dados.get("permite_parcial")
+                    else ""
+                )
                 dados["mensagem_orcas"] = (
                     f"Deseja incluir o lançamento **{dados.get('descricao')}**"
                     f" no valor de **{formatar_moeda_br(valor_falado)}** com"
-                    f" vencimento para **{dt_venc_fmt}**?"
+                    f" vencimento para **{dt_venc_fmt}**{str_parcial}?"
                 )
               elif valor_falado > 0.0:
                 dados["mensagem_orcas"] = (
@@ -762,6 +835,11 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
               format="DD/MM/YYYY",
           )
 
+        novo_permite_parcial = st.checkbox(
+            "Permite Lançamento Parcial?",
+            value=bool(dados.get("permite_parcial", False)),
+        )
+
         st.markdown("---")
         btn_salvar, btn_refazer, btn_cancelar = st.columns(3)
 
@@ -793,6 +871,10 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
             "valor": novo_valor,
             "tipo": novo_tipo,
             "data_vencimento": nova_data_venc.strftime("%Y-%m-%d"),
+            "permite_parcial": novo_permite_parcial,
+            "recorrencia_tipo": dados.get("recorrencia_tipo"),
+            "mes_inicio": dados.get("mes_inicio"),
+            "mes_fim": dados.get("mes_fim"),
             "id_existente": dados.get("id_existente"),
         }
         try:
