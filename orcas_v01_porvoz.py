@@ -163,11 +163,11 @@ def processar_texto_groq(
        - Se o usuário disse "amanhã", atribua OBRIGATORIAMENTE a data: "{amanha_dt.strftime('%Y-%m-%d')}".
        - Se o usuário disse "hoje", atribua OBRIGATORIAMENTE a data: "{hoje_dt.strftime('%Y-%m-%d')}".
        - Se o usuário disse "ontem", atribua OBRIGATORIAMENTE a data: "{ontem_dt.strftime('%Y-%m-%d')}".
-       - Se o usuário citou um mês específico (ex: "Julho"), calcule a data no mês de Julho.
+       - Se o usuário citou uma data específica (ex: "10/10/2026", "10 de outubro de 2026"), extraia e formate como YYYY-MM-DD.
        - Se nenhuma data foi mencionada para inclusão/projeção, use a data de HOJE: "{hoje_dt.strftime('%Y-%m-%d')}".
 
     3. MÊS DE REFERÊNCIA (mes_referencia):
-       - Se o usuário mencionou um mês específico (ex: "em julho", "deste mês"), retorne o mês numérico (1 a 12). Caso contrário, retorne o mês da data identificada.
+       - Se o usuário mencionou um mês específico (ex: "em julho", "de setembro"), retorne o mês numérico (1 a 12). Caso contrário, retorne o mês da data identificada.
 
     4. DESCRIÇÃO:
        - Extraia apenas o identificador/nome da conta ou serviço.
@@ -205,8 +205,10 @@ def buscar_planejamento_existente(
     descricao,
     incluir_realizados=False,
     mes_referencia=None,
+    valor_filtro=None,
+    data_venc_filtro=None,
 ):
-  """Busca lançamentos no Supabase com suporte a busca flexível e filtro por mês específico."""
+  """Busca lançamentos no Supabase com suporte a busca flexível e filtro por valor/data exatos para evitar exclusões/alterações erradas."""
   if not descricao or len(descricao.strip()) < 2:
     return None
 
@@ -241,7 +243,7 @@ def buscar_planejamento_existente(
 
     candidatos = res.data
 
-    # Filtragem por mês de referência (se especificado)
+    # Filtragem por mês de referência
     if mes_referencia is not None:
       candidatos_mes = []
       for item in candidatos:
@@ -256,30 +258,54 @@ def buscar_planejamento_existente(
       if candidatos_mes:
         candidatos = candidatos_mes
 
-    # Prioridade 1: Match exato normalizado
+    # Filtragem por correspondência de nomes
+    candidatos_nome = []
+    palavras_busca = [p for p in desc_limpa.split() if len(p) >= 2]
+
     for item in candidatos:
       d_banco = normalizar_texto(item.get("descricao", ""))
-      if desc_norm == d_banco or desc_limpa == limpar_descricao_busca(d_banco):
-        return item
-
-    # Prioridade 2: Análise por palavras-chave
-    palavras_busca = [p for p in desc_limpa.split() if len(p) >= 2]
-    melhor_candidato = None
-    maior_pontuacao = 0
-
-    for item in candidatos:
       d_banco_limpo = limpar_descricao_busca(item.get("descricao", ""))
       palavras_banco = [p for p in d_banco_limpo.split() if len(p) >= 2]
 
-      coincidencias = set(palavras_busca).intersection(set(palavras_banco))
-      pontos = len(coincidencias)
+      # Match exato ou interseção de palavras
+      if (
+          desc_norm == d_banco
+          or desc_limpa == d_banco_limpo
+          or len(set(palavras_busca).intersection(set(palavras_banco))) >= 1
+      ):
+        candidatos_nome.append(item)
 
-      if pontos > maior_pontuacao:
-        maior_pontuacao = pontos
-        melhor_candidato = item
+    if not candidatos_nome:
+      return None
 
-    if maior_pontuacao >= 1:
-      return melhor_candidato
+    # Se o usuário citou um valor exato, filtra preferencialmente por ele
+    if valor_filtro and float(valor_filtro) > 0:
+      candidatos_valor = [
+          c
+          for c in candidatos_nome
+          if abs(
+              float(
+                  c.get("valor_plan") or c.get("valor_real") or c.get("valor") or 0
+              )
+              - float(valor_filtro)
+          )
+          < 0.01
+      ]
+      if candidatos_valor:
+        candidatos_nome = candidatos_valor
+
+    # Se o usuário citou data específica, desempata pela data
+    if data_venc_filtro:
+      candidatos_data = [
+          c
+          for c in candidatos_nome
+          if str(c.get("data_vencimento") or c.get("data"))[:10]
+          == str(data_venc_filtro)[:10]
+      ]
+      if candidatos_data:
+        return candidatos_data[0]
+
+    return candidatos_nome[0]
 
   except Exception as e:
     print(f"Erro na busca de planejamento: {e}")
@@ -332,6 +358,7 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
           "descricao": nova_desc,
           "valor_plan": valor,
           "data_vencimento": data_venc,
+          "data": data_venc,  # Atualiza também o campo de referência temporal
           "tipo": tipo_fluxo,
           "projeto_id": projeto_id,
       }
@@ -345,7 +372,7 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
           " alteração."
       )
 
-  # AÇÃO: PARCIAL (Lançamento Parcial associado à conta pai)
+  # AÇÃO: PARCIAL
   if intencao == "PARCIAL":
     try:
       dt_obj = datetime.strptime(data_venc, "%Y-%m-%d")
@@ -357,15 +384,15 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
         "projeto_id": projeto_id,
         "usuario_id": str(usuario_id),
         "descricao": descricao,
-        "data": data_primeiro_dia,  # Dia 01 do mês corrente para a coluna 'data'
+        "data": data_primeiro_dia,
         "data_vencimento": data_primeiro_dia,
         "tipo": tipo_fluxo,
         "valor_plan": 0,
         "valor_real": 0,
-        "parcial_real": valor,  # Registra o gasto efetuado no parcial_real
-        "parcial_data": data_venc,  # Data efetiva do gasto
+        "parcial_real": valor,
+        "parcial_data": data_venc,
         "status": "Realizado",
-        "permite_parcial": False,  # Apenas o pai consolidador possui True
+        "permite_parcial": False,
         "parent_id": id_existente if id_existente else None,
     }
     supabase.table("lancamentos").insert(payload_parcial).execute()
@@ -398,7 +425,7 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
           "projeto_id": projeto_id,
           "usuario_id": str(usuario_id),
           "descricao": descricao,
-          "data": data_hoje,
+          "data": data_venc,  # Usa a data informada para manter consistência nos filtros
           "data_vencimento": data_venc,
           "tipo": tipo_fluxo,
           "valor_plan": 0,
@@ -413,13 +440,13 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
           " registrado e baixado com sucesso!"
       )
 
-  # AÇÃO: PROJETAR
+  # AÇÃO: PROJETAR (Ajustado para igualar data e data_vencimento)
   elif intencao == "PROJETAR":
     payload_proj = {
         "projeto_id": projeto_id,
         "usuario_id": str(usuario_id),
         "descricao": descricao,
-        "data": data_hoje,
+        "data": data_venc,  # CORREÇÃO CRÍTICA: 'data' recebe 'data_venc' para aparecer nos filtros do app
         "data_vencimento": data_venc,
         "tipo": tipo_fluxo,
         "valor_plan": valor,
@@ -429,10 +456,10 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
         "permite_parcial": False,
     }
     supabase.table("lancamentos").insert(payload_proj).execute()
+    dt_venc_fmt = datetime.strptime(data_venc, "%Y-%m-%d").strftime("%d/%m/%Y")
     return (
         f"✅ Lançamento **{descricao}** ({formatar_moeda_br(valor)}) com"
-        f" vencimento para {datetime.strptime(data_venc, '%Y-%m-%d').strftime('%d/%m/%Y')} projetado"
-        " com sucesso!"
+        f" vencimento para **{dt_venc_fmt}** projetado com sucesso!"
     )
 
   return "Ação realizada com sucesso!"
@@ -517,7 +544,7 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
             intencao = dados.get("intencao")
             incluir_realizados = intencao in ["EXCLUIR", "ALTERAR", "PARCIAL"]
 
-            # IGNORA busca no banco caso a intenção seja PROJETAR (criação direta)
+            # IGNORA busca no banco para novas criações (PROJETAR)
             item_existente = None
             if intencao not in ["PROJETAR"]:
               item_existente = buscar_planejamento_existente(
@@ -527,6 +554,8 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
                   dados.get("descricao", ""),
                   incluir_realizados=incluir_realizados,
                   mes_referencia=dados.get("mes_referencia"),
+                  valor_filtro=dados.get("valor"),
+                  data_venc_filtro=dados.get("data_vencimento"),
               )
 
             valor_falado = float(dados.get("valor") or 0.0)
@@ -618,7 +647,6 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
               dados["id_existente"] = None
               dados["valor"] = valor_falado
 
-              # Garante que a data enviada pela IA esteja preenchida
               if not dados.get("data_vencimento"):
                 dados["data_vencimento"] = date.today().strftime("%Y-%m-%d")
 
@@ -673,7 +701,6 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
       st.markdown(f"🤖 **ORCAS:** {dados.get('mensagem_orcas')}")
       st.markdown("---")
 
-      # FORMULÁRIO EDITÁVEL PARA AJUSTES DIRETOS DO USUÁRIO
       with st.form("form_confirmacao_orcas"):
         col_1, col_2 = st.columns(2)
 
@@ -713,7 +740,6 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
               "Valor (R$)", value=valor_inicial, step=5.0, format="%.2f"
           )
 
-          # Trata e exibe o campo editável de Data de Vencimento / Ocorrência
           try:
             dt_val = datetime.strptime(
                 dados.get("data_vencimento", str(date.today())), "%Y-%m-%d"
@@ -750,7 +776,6 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
               "❌ Cancelar / Sair", use_container_width=True
           )
 
-      # TRATAMENTO DAS AÇÕES DO FORMULÁRIO
       if submit_salvar:
         dados_atualizados = {
             "intencao": nova_intencao,
