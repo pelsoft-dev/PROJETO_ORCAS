@@ -422,7 +422,7 @@ def exibir_modal_voz_orcas(
                 st.write(f"• **Valor:** {formatar_moeda_br(dados.get('valor'))}")
 
         st.markdown('---')
-        btn_salvar, btn_refazer = st.columns(2)
+        btn_salvar, btn_refazer, btn_cancelar = st.columns(3)
 
         with btn_salvar:
             if st.button(
@@ -452,4 +452,13 @@ def exibir_modal_voz_orcas(
                 st.session_state.dados_interpretados = None
                 st.session_state.hash_ultimo_audio = None
                 st.session_state.audio_key_id += 1
+                st.rerun()
+
+        with btn_cancelar:
+            if st.button('❌ Cancelar / Sair', use_container_width=True):
+                st.session_state.etapa_voz = 'gravacao'
+                st.session_state.dados_interpretados = None
+                st.session_state.hash_ultimo_audio = None
+                st.session_state.audio_key_id += 1
+                st.session_state.abrir_modal_voz = False
                 st.rerun()
