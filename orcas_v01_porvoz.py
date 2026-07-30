@@ -517,14 +517,17 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
             intencao = dados.get("intencao")
             incluir_realizados = intencao in ["EXCLUIR", "ALTERAR", "PARCIAL"]
 
-            item_existente = buscar_planejamento_existente(
-                supabase,
-                id_usuario,
-                dados.get("projeto_id"),
-                dados.get("descricao", ""),
-                incluir_realizados=incluir_realizados,
-                mes_referencia=dados.get("mes_referencia"),
-            )
+            # IGNORA busca no banco caso a intenção seja PROJETAR (criação direta)
+            item_existente = None
+            if intencao not in ["PROJETAR"]:
+              item_existente = buscar_planejamento_existente(
+                  supabase,
+                  id_usuario,
+                  dados.get("projeto_id"),
+                  dados.get("descricao", ""),
+                  incluir_realizados=incluir_realizados,
+                  mes_referencia=dados.get("mes_referencia"),
+              )
 
             valor_falado = float(dados.get("valor") or 0.0)
 
@@ -593,7 +596,7 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
                 )
 
               else:
-                if dt_banco and intencao != "PROJETAR":
+                if dt_banco:
                   dados["data_vencimento"] = str(dt_banco)[:10]
 
                 valor_final = (
@@ -615,6 +618,14 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
               dados["id_existente"] = None
               dados["valor"] = valor_falado
 
+              # Garante que a data enviada pela IA esteja preenchida
+              if not dados.get("data_vencimento"):
+                dados["data_vencimento"] = date.today().strftime("%Y-%m-%d")
+
+              dt_venc_fmt = datetime.strptime(
+                  dados["data_vencimento"], "%Y-%m-%d"
+              ).strftime("%d/%m/%Y")
+
               if intencao == "EXCLUIR":
                 dados["mensagem_orcas"] = (
                     "Não encontrei nenhum lançamento com o nome"
@@ -626,9 +637,6 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
                     f" **{dados.get('descricao')}** para ser alterado."
                 )
               elif intencao == "PROJETAR":
-                dt_venc_fmt = datetime.strptime(
-                    dados["data_vencimento"], "%Y-%m-%d"
-                ).strftime("%d/%m/%Y")
                 dados["mensagem_orcas"] = (
                     f"Deseja incluir o lançamento **{dados.get('descricao')}**"
                     f" no valor de **{formatar_moeda_br(valor_falado)}** com"
@@ -705,7 +713,7 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
               "Valor (R$)", value=valor_inicial, step=5.0, format="%.2f"
           )
 
-          # Trata e exibe o campo de Data de Vencimento / Ocorrência
+          # Trata e exibe o campo editável de Data de Vencimento / Ocorrência
           try:
             dt_val = datetime.strptime(
                 dados.get("data_vencimento", str(date.today())), "%Y-%m-%d"
