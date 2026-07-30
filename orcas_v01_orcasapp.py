@@ -792,38 +792,15 @@ with st.sidebar:
 
     st.divider()
 
-#    # --- BOTÃO "FALAR COM ORCAS" ---
-#    if st.button("🎙️ Falar com ORCAS", use_container_width=True, type="primary"):
-#        plano_atual = st.session_state.get("projeto_ativo")
-#        porvoz.exibir_modal_voz_orcas(
-#            supabase, ID_USUARIO_LOGADO, plano_atual
-#        )
-
-    # 1. Clique do botão ativa o sinal (flag)
+    # --- BOTÃO "FALAR COM ORCAS" ---
     if st.sidebar.button("🎙️ Falar com ORCAS", use_container_width=True, type="primary"):
         st.session_state.abrir_modal_orcas = True
 
-    # 2. Se o sinal estiver ativo, renderiza o modal
     if st.session_state.get("abrir_modal_orcas", False):
         plano_atual = st.session_state.get("projeto_ativo")
-    
-        # Chama o modal passando os seus parâmetros corretos
         porvoz.exibir_modal_voz_orcas(
             supabase, ID_USUARIO_LOGADO, plano_atual
         )
-
-## --- CHAMADOR (Menu / Barra Lateral) ---
-#
-#    # 1. Clique do botão apenas ativa o sinal (flag)
-#    if st.button("🎙️ Falar com ORCAS", use_container_width=True, type="primary"):
-#        st.session_state.abrir_modal_orcas = True
-#
-#    # 2. Se o sinal estiver ativo, renderiza o modal
-#    if st.session_state.get("abrir_modal_orcas", False):
-#        plano_atual = st.session_state.get("projeto_ativo")
-#        porvoz.exibir_modal_voz_orcas(
-#            supabase, ID_USUARIO_LOGADO, plano_atual
-#        )
 
     if st.button("Sair do Sistema", use_container_width=True):
         st.session_state.clear()
@@ -930,10 +907,7 @@ else:
 
 # --- RODAPÉ ---
 st.divider()
-usuario_rodape = st.session_state.get("usuario", "")
-st.caption(
-    f"ORCAS v01 | Usuário: {usuario_rodape} | Projeto:"
-    f" {st.session_state.projeto_ativo}"
+usuario_rodape = st.session_state.get(
+    "usuario_email", st.session_state.get("usuario", "Usuário")
 )
-
-st.stop()
+st.caption(f"🐋 ORCAS App • Logado como: {usuario_rodape}")

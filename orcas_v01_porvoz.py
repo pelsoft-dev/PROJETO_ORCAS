@@ -13,6 +13,13 @@ LIMITES_USO = {
     'ILIMITADO': 999999,
 }
 
+# Palavras de preenchimento a serem ignoradas na busca de lançamentos
+STOPWORDS_FINANCEIRAS = {
+    'CONTA', 'CONTAS', 'LANCAMENTO', 'LANCAMENTOS', 'BOLETO', 'BOLETOS',
+    'FATURA', 'FATURAS', 'PAGAMENTO', 'PAGAMENTOS', 'PARCELA', 'PARCELAS',
+    'DE', 'DO', 'DA', 'DOS', 'DAS', 'E', 'A', 'O'
+}
+
 
 def normalizar_texto(texto):
     """Remove acentos, pontos, traços e converte para maiúsculo para comparação precisa."""
@@ -22,6 +29,13 @@ def normalizar_texto(texto):
     texto_sem_acento = ''.join([c for c in nfkd if not unicodedata.combining(c)])
     texto_limpo = re.sub(r'[^a-zA-Z0-9\s]', ' ', texto_sem_acento)
     return ' '.join(texto_limpo.split()).upper()
+
+
+def limpar_descricao_busca(descricao):
+    """Remove palavras como 'conta', 'lançamento', 'fatura' para facilitar o match no banco."""
+    norm = normalizar_texto(descricao)
+    palavras = [p for p in norm.split() if p not in STOPWORDS_FINANCEIRAS]
+    return ' '.join(palavras) if palavras else norm
 
 
 def buscar_planos_do_usuario(supabase, usuario_id):
@@ -105,13 +119,21 @@ def processar_texto_groq(
 
     O usuário falou o seguinte texto: "{texto_transcrito}"
 
+    ATENÇÃO PARA A DESCRIÇÃO: 
+    Extraia APENAS o nome próprio ou identificador da conta/despesa.
+    NÃO inclua palavras de preenchimento como "conta", "lançamento", "fatura", "boleto", "pagamento", "do plano", "do dia".
+    Exemplos:
+    - "Paguei a conta Faxina" -> descricao: "Faxina"
+    - "Paguei o lançamento Academia" -> descricao: "Academia"
+    - "Paguei a conta S63 IPTU" -> descricao: "S63 IPTU"
+
     Analise o texto e responda EXCLUSIVAMENTE um objeto JSON válido:
     
     {{
       "transcricao": "{texto_transcrito}",
       "intencao": "REALIZAR" ou "PROJETAR" ou "CONSULTAR" ou "EXCLUIR",
-      "projeto_id": "Nome/ID do plano citado se houver em {planos_disponiveis}. Se o usuário NÃO citar explicitamente outro plano, use EXATAMENTE '{plano_referencia}'",
-      "descricao": "Nome limpo do lançamento sem pontuação desnecessária (Ex: Academia, S63 IPTU, Aluguel)",
+      "projeto_id": "Nome do plano citado se houver em {planos_disponiveis}. Se o usuário NÃO citar explicitamente outro plano, use EXATAMENTE '{plano_referencia}'",
+      "descricao": "Nome limpo do lançamento sem palavras genéricas como 'conta' ou 'lançamento'",
       "valor": float_ou_null (retorne null ou 0.0 SE O USUÁRIO NÃO FALOU NENHUM VALOR MONETÁRIO OU SE A INTENÇÃO FOR EXCLUIR/CONSULTAR),
       "tipo": "Saída" ou "Entrada",
       "data_vencimento": "YYYY-MM-DD"
@@ -130,12 +152,13 @@ def processar_texto_groq(
 
 
 def buscar_planejamento_existente(supabase, usuario_id, projeto_id, descricao, incluir_realizados=False):
-    """Busca lançamentos no Supabase priorizando correspondências por descrição."""
+    """Busca lançamentos no Supabase com suporte a busca flexível ignorando 'conta', 'lançamento', etc."""
     if not descricao or len(descricao.strip()) < 2:
         return None
 
     try:
         desc_norm = normalizar_texto(descricao)
+        desc_limpa = limpar_descricao_busca(descricao)
 
         query = (
             supabase.table('lancamentos')
@@ -146,37 +169,45 @@ def buscar_planejamento_existente(supabase, usuario_id, projeto_id, descricao, i
         if not incluir_realizados:
             query = query.neq('status', 'Realizado')
 
-        if projeto_id:
+        # Se o usuário especificou um plano válido, filtra por ele; caso contrário, busca em todos os seus planos
+        if projeto_id and projeto_id != 'Padrão':
             query = query.eq('projeto_id', str(projeto_id))
 
         res = query.execute()
+
+        if not res or not res.data:
+            # Tenta busca global nos planos do usuário caso não ache no filtro estrito
+            if projeto_id and projeto_id != 'Padrão':
+                res = (
+                    supabase.table('lancamentos')
+                    .select('*')
+                    .eq('usuario_id', str(usuario_id))
+                    .neq('status', 'Realizado' if not incluir_realizados else 'IGNORE')
+                    .execute()
+                )
 
         if not res or not res.data:
             return None
 
         candidatos = res.data
 
-        # Prioridade A: Correspondência exata da string normalizada
+        # Prioridade 1: Match exato normalizado
         for item in candidatos:
             d_banco = normalizar_texto(item.get('descricao', ''))
-            if desc_norm == d_banco:
+            if desc_norm == d_banco or desc_limpa == limpar_descricao_busca(d_banco):
                 return item
 
-        # Prioridade B: Análise por palavras de peso
-        palavras_busca = [p for p in desc_norm.split() if len(p) >= 2]
+        # Prioridade 2: Análise por palavras-chave relevantes
+        palavras_busca = [p for p in desc_limpa.split() if len(p) >= 2]
         melhor_candidato = None
         maior_pontuacao = 0
 
         for item in candidatos:
-            d_banco = normalizar_texto(item.get('descricao', ''))
-            palavras_banco = [p for p in d_banco.split() if len(p) >= 2]
+            d_banco_limpo = limpar_descricao_busca(item.get('descricao', ''))
+            palavras_banco = [p for p in d_banco_limpo.split() if len(p) >= 2]
 
             coincidencias = set(palavras_busca).intersection(set(palavras_banco))
             pontos = len(coincidencias)
-
-            for termo in ['FINANC', 'ITAU', 'ADM', 'COND', 'IPTU', 'CEF', 'ACADEMIA']:
-                if termo in d_banco and termo in desc_norm:
-                    pontos += 2
 
             if pontos > maior_pontuacao:
                 maior_pontuacao = pontos
@@ -282,11 +313,12 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
 
 
 def fechar_modal_voz():
-    """Função auxiliar para resetar o estado e fechar o modal com segurança."""
+    """Reset de estados ao fechar o modal."""
     st.session_state.etapa_voz = 'gravacao'
     st.session_state.dados_interpretados = None
     st.session_state.hash_ultimo_audio = None
     st.session_state.audio_key_id = st.session_state.get('audio_key_id', 0) + 1
+    st.session_state.abrir_modal_orcas = False
     st.session_state.abrir_modal_voz = False
 
 
@@ -294,7 +326,6 @@ def fechar_modal_voz():
 def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
     st.write('👋 **Olá! Em que posso ajudar nos seus lançamentos hoje?**')
 
-    # Busca planos do usuário caso não tenham sido passados
     if not planos_disponiveis:
         planos_disponiveis = buscar_planos_do_usuario(supabase, id_usuario)
 
@@ -354,12 +385,6 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
 
                         st.session_state.hash_ultimo_audio = hash_atual
 
-                        if (
-                            not dados.get('projeto_id')
-                            or dados.get('projeto_id') not in planos_disponiveis
-                        ):
-                            dados['projeto_id'] = plano_ativo
-
                         intencao = dados.get('intencao')
                         incluir_realizados = (intencao == 'EXCLUIR')
 
@@ -377,6 +402,10 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
                             dados['id_existente'] = item_existente.get('id')
                             desc_cadastrada = item_existente.get('descricao') or dados.get('descricao')
                             dados['descricao'] = desc_cadastrada
+
+                            # ATUALIZA O PLANO COM O PLANO REAL ONDE O ITEM FOI ENCONTRADO
+                            if item_existente.get('projeto_id'):
+                                dados['projeto_id'] = item_existente.get('projeto_id')
 
                             valor_planejado = float(
                                 item_existente.get('valor_plan')
@@ -481,8 +510,6 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
                     st.success(msg_sucesso)
 
                     time.sleep(1.2)
-
-                    # Garante que o modal fecha e desativa a flag de exibição
                     fechar_modal_voz()
                     st.rerun()
                 except Exception as e:
