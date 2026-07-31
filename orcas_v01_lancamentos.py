@@ -53,24 +53,41 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                 data_atual_loop = data_atual_loop.replace(month=data_atual_loop.month + 1)
         
         saldo_acumulado_mes = s_db
+        mes_hoje_str = datetime.now().strftime('%Y-%m')
         
         for mes_str in meses_periodo:
             mask_mes = pd.to_datetime(df['data']).dt.strftime('%Y-%m') == mes_str
             df_mes = df[mask_mes].copy()
             
-            def calcular_total_tipo(df_tipo):
+            # Identifica se é um mês já fechado (anterior ao mês corrente)
+            mes_fechado = mes_str < mes_hoje_str
+            
+            def calcular_total_tipo(df_tipo, e_fechado):
                 total = 0
-                itens_principais = df_tipo[(df_tipo['valor_plan'] > 0) | ((df_tipo['valor_plan'] == 0) & (df_tipo['valor_real'] > 0))]
-                for _, x in itens_principais.iterrows():
-                    if x['permite_parcial']:
-                        v_parciais = df_mes[(df_mes['descricao'] == x['descricao']) & (df_mes['valor_plan'] == 0)]['parcial_real'].sum()
-                        total += max(x['valor_plan'], v_parciais)
-                    else:
-                        total += x['valor_real'] if x['valor_real'] > 0 else x['valor_plan']
+                if e_fechado:
+                    # PARA MESES FECHADOS: Soma estritamente apenas os realizados
+                    for _, x in df_tipo.iterrows():
+                        if x['permite_parcial']:
+                            # Soma parciais realizadas
+                            v_parciais = df_mes[(df_mes['descricao'] == x['descricao']) & (df_mes['valor_plan'] == 0)]['parcial_real'].sum()
+                            total += v_parciais
+                        else:
+                            # Se a conta normal foi realizada, soma o valor real
+                            if x['status'] == 'Realizado':
+                                total += x['valor_real']
+                else:
+                    # PARA MÊS CORRENTE E FUTUROS: Mantém lógica original de orçamento/projeção
+                    itens_principais = df_tipo[(df_tipo['valor_plan'] > 0) | ((df_tipo['valor_plan'] == 0) & (df_tipo['valor_real'] > 0))]
+                    for _, x in itens_principais.iterrows():
+                        if x['permite_parcial']:
+                            v_parciais = df_mes[(df_mes['descricao'] == x['descricao']) & (df_mes['valor_plan'] == 0)]['parcial_real'].sum()
+                            total += max(x['valor_plan'], v_parciais)
+                        else:
+                            total += x['valor_real'] if x['valor_real'] > 0 else x['valor_plan']
                 return total
 
-            entradas_mes = calcular_total_tipo(df_mes[df_mes['tipo'] == 'Entrada'])
-            saidas_mes = calcular_total_tipo(df_mes[df_mes['tipo'] == 'Saída'])
+            entradas_mes = calcular_total_tipo(df_mes[df_mes['tipo'] == 'Entrada'], mes_fechado)
+            saidas_mes = calcular_total_tipo(df_mes[df_mes['tipo'] == 'Saída'], mes_fechado)
             saldo_final_mes = saldo_acumulado_mes + entradas_mes - saidas_mes
             nome_mes_exibicao = datetime.strptime(mes_str, '%Y-%m').strftime('%m/%Y')
             
