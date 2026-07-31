@@ -3,13 +3,14 @@ import json
 import re
 import time
 import unicodedata
+import zoneinfo
 from groq import Groq
 import streamlit as st
 
 # Limites mensais de uso do recurso por voz
 LIMITES_USO = {
-    "PADRAO": 30,
-    "INTERMEDIARIO": 100,
+    "PADRÃO": 30,
+    "INTERMEDIÁRIO": 100,
     "ILIMITADO": 999999,
 }
 
@@ -38,6 +39,12 @@ STOPWORDS_FINANCEIRAS = {
 }
 
 
+def obter_hoje_brasil():
+  """Garante que a data de HOJE respeite sempre o fuso horário de Brasília (GMT-3)."""
+  fuso_br = zoneinfo.ZoneInfo("America/Sao_Paulo")
+  return datetime.now(fuso_br).date()
+
+
 def normalizar_texto(texto):
   """Remove acentos, pontos, traços e converte para maiúsculo para comparação precisa."""
   if not texto:
@@ -50,9 +57,9 @@ def normalizar_texto(texto):
 
 def limpar_descricao_busca(descricao):
   """Remove palavras como 'conta', 'lançamento', 'fatura' para facilitar o match no banco."""
-  norm = normalizar_texto(descricao)
-  palavras = [p for p in norm.split() if p not in STOPWORDS_FINANCEIRAS]
-  return " ".join(palavras) if palavras else norm
+  norma = normalizar_texto(descricao)
+  palavras = [p for p in norma.split() if p not in STOPWORDS_FINANCEIRAS]
+  return " ".join(palavras) if palavras else norma
 
 
 def buscar_planos_do_usuario(supabase, usuario_id):
@@ -132,14 +139,15 @@ def processar_texto_groq(
       else (planos_disponiveis[0] if planos_disponiveis else "Padrão")
   )
 
-  hoje_dt = date.today()
+  # AJUSTE DE FUSO HORÁRIO BRASÍLIA (GMT-3)
+  hoje_dt = obter_hoje_brasil()
   amanha_dt = hoje_dt + timedelta(days=1)
   ontem_dt = hoje_dt - timedelta(days=1)
 
   prompt = f"""
     Você é o assistente financeiro inteligente do aplicativo ORCAS.
     
-    INFORMAÇÕES DE CONTEXTO TEMPORAL RIGOROSAS:
+    INFORMAÇÕES DE CONTEXTO TEMPORAL RIGOROSAS (FUSO HORÁRIO BRASÍLIA):
     - Data de HOJE: {hoje_dt.strftime('%Y-%m-%d')} ({hoje_dt.strftime('%A')})
     - Data de AMANHÃ: {amanha_dt.strftime('%Y-%m-%d')}
     - Data de ONTEM: {ontem_dt.strftime('%Y-%m-%d')}
@@ -245,7 +253,7 @@ def buscar_planejamento_existente(
             supabase.table("lancamentos")
             .select("*")
             .eq("usuario_id", str(usuario_id))
-            .neq("status", "Realizado" if not incluir_realizados else "IGNORE")
+            .neq("status", "IGNORE" if incluir_realizados else "Realizado")
             .execute()
         )
 
@@ -341,7 +349,9 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
   projeto_id = str(dados.get("projeto_id"))
   descricao = dados.get("descricao")
   valor = float(dados.get("valor") or 0.0)
-  data_hoje = date.today().strftime("%Y-%m-%d")
+  
+  # AJUSTE DE FUSO HORÁRIO BRASÍLIA
+  data_hoje = obter_hoje_brasil().strftime("%Y-%m-%d")
   data_venc = dados.get("data_vencimento") or data_hoje
   permite_parcial = bool(dados.get("permite_parcial", False))
 
@@ -370,7 +380,7 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
           "descricao": nova_desc,
           "valor_plan": valor,
           "data_vencimento": data_venc,
-          "data": data_venc,  # Atualiza também o campo de referência temporal
+          "data": data_venc,
           "tipo": tipo_fluxo,
           "projeto_id": projeto_id,
           "permite_parcial": permite_parcial,
@@ -391,7 +401,7 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
       dt_obj = datetime.strptime(data_venc, "%Y-%m-%d")
       data_primeiro_dia = dt_obj.replace(day=1).strftime("%Y-%m-%d")
     except Exception:
-      data_primeiro_dia = date.today().replace(day=1).strftime("%Y-%m-%d")
+      data_primeiro_dia = obter_hoje_brasil().replace(day=1).strftime("%Y-%m-%d")
 
     payload_parcial = {
         "projeto_id": projeto_id,
@@ -406,7 +416,6 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
         "parcial_data": data_venc,
         "status": "Realizado",
         "permite_parcial": False,
-        # "id_pai": id_existente if id_existente else None,
     }
     supabase.table("lancamentos").insert(payload_parcial).execute()
 
@@ -438,7 +447,7 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
           "projeto_id": projeto_id,
           "usuario_id": str(usuario_id),
           "descricao": descricao,
-          "data": data_venc,  # Usa a data informada para manter consistência nos filtros
+          "data": data_venc,
           "data_vencimento": data_venc,
           "tipo": tipo_fluxo,
           "valor_plan": 0,
@@ -453,7 +462,7 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
           " registrado e baixado com sucesso!"
       )
 
-  # AÇÃO: PROJETAR (Com suporte completo a permite_parcial e recorrência por período/todos os meses)
+  # AÇÃO: PROJETAR
   elif intencao == "PROJETAR":
     recorrencia_tipo = dados.get("recorrencia_tipo")
     mes_inicio_str = dados.get("mes_inicio")
@@ -462,14 +471,12 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
     datas_para_inserir = []
 
     if permite_parcial:
-      # Se permite parcial, garante que a data seja o dia 01 do mês
       try:
         dt_base = datetime.strptime(data_venc, "%Y-%m-%d").replace(day=1)
       except Exception:
-        dt_base = date.today().replace(day=1)
+        dt_base = obter_hoje_brasil().replace(day=1)
 
       if recorrencia_tipo == "TODOS":
-        # Gera para os 12 meses do ano vigente a partir do mês atual ou informado
         ano_atual = dt_base.year
         datas_para_inserir = [
             date(ano_atual, m, 1).strftime("%Y-%m-%d") for m in range(1, 13)
@@ -482,7 +489,6 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
           curr = dt_ini
           while curr <= dt_fim:
             datas_para_inserir.append(curr.strftime("%Y-%m-%d"))
-            # Avança 1 mês
             if curr.month == 12:
               curr = date(curr.year + 1, 1, 1)
             else:
@@ -612,10 +618,8 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
             intencao = dados.get("intencao")
             incluir_realizados = intencao in ["EXCLUIR", "ALTERAR", "PARCIAL"]
 
-            # Guarda a data identificada pela IA antes de buscar no banco
             data_identificada_ia = dados.get("data_vencimento")
 
-            # IGNORA busca no banco para novas criações (PROJETAR)
             item_existente = None
             if intencao not in ["PROJETAR"]:
               item_existente = buscar_planejamento_existente(
@@ -656,9 +660,8 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
               if permite_parcial or intencao == "PARCIAL":
                 dados["intencao"] = "PARCIAL"
                 dados["valor"] = valor_falado
-                # Preserva a data informada pela IA se existente, caso contrário usa a data de hoje
                 if not data_identificada_ia:
-                  dados["data_vencimento"] = date.today().strftime("%Y-%m-%d")
+                  dados["data_vencimento"] = obter_hoje_brasil().strftime("%Y-%m-%d")
                 else:
                   dados["data_vencimento"] = data_identificada_ia
 
@@ -688,7 +691,6 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
                 )
 
               elif intencao == "ALTERAR":
-                # Se o usuário especificou uma nova data no comando, mantém a nova data; caso contrário, usa a do banco
                 if not data_identificada_ia and dt_banco:
                   dados["data_vencimento"] = str(dt_banco)[:10]
 
@@ -701,7 +703,6 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
                 )
 
               else:
-                # Caso a IA não tenha extraído uma data explícita, recai sobre a data cadastrada no banco
                 if not data_identificada_ia and dt_banco:
                   dados["data_vencimento"] = str(dt_banco)[:10]
 
@@ -725,7 +726,7 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
               dados["valor"] = valor_falado
 
               if not dados.get("data_vencimento"):
-                dados["data_vencimento"] = date.today().strftime("%Y-%m-%d")
+                dados["data_vencimento"] = obter_hoje_brasil().strftime("%Y-%m-%d")
 
               dt_venc_fmt = datetime.strptime(
                   dados["data_vencimento"], "%Y-%m-%d"
@@ -824,10 +825,10 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
 
           try:
             dt_val = datetime.strptime(
-                dados.get("data_vencimento", str(date.today())), "%Y-%m-%d"
+                dados.get("data_vencimento", str(obter_hoje_brasil())), "%Y-%m-%d"
             ).date()
           except Exception:
-            dt_val = date.today()
+            dt_val = obter_hoje_brasil()
 
           nova_data_venc = st.date_input(
               "Data de Vencimento / Ocorrência",
