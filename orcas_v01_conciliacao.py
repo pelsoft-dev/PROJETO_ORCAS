@@ -64,7 +64,9 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
 
     hoje_c = datetime.now().date()
     ini_mes_c = hoje_c.replace(day=1)
-    limite_c = hoje_c - timedelta(days=3)
+    
+    # AJUSTE: Limite para os últimos 5 dias (hoje + 4 dias atrás)
+    limite_c = hoje_c - timedelta(days=4)
 
     # LINHA DE COMANDO - Proporção [4, 3] para acomodar os toggles à direita com folga
     col_aviso, col_tog = st.columns([4, 3])
@@ -118,7 +120,17 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
             # REGRA: parcial_real > 0 NÃO devem ser listados
             df_f = df_c[(df_c['dt_obj'] >= ini_mes_c) & (df_c['dt_obj'] <= fim_mes_c) & (df_c['parcial_real'] == 0)].copy()
         else:
-            df_f = df_c[(df_c['dt_obj'] <= hoje_c) & ((df_c['status'] == 'Planejado') | ((df_c['status'] == 'Realizado') & (df_c['dt_obj'] >= limite_c)) | ((df_c['valor_plan'] == 0) & (df_c['valor_real'] > 0)))].copy()
+            # AJUSTE: Trava para exibir apenas lançamentos dentro do mês corrente (>= ini_mes_c)
+            # e limitando ao período entre os últimos 5 dias (>= limite_c) até hoje (<= hoje_c)
+            df_f = df_c[
+                (df_c['dt_obj'] >= ini_mes_c) & 
+                (df_c['dt_obj'] <= hoje_c) & 
+                (
+                    (df_c['status'] == 'Planejado') | 
+                    ((df_c['status'] == 'Realizado') & (df_c['dt_obj'] >= limite_c)) | 
+                    ((df_c['valor_plan'] == 0) & (df_c['valor_real'] > 0))
+                )
+            ].copy()
         
         parciais_topo = df_f[(df_f['permite_parcial'] == True) & (df_f['dt_obj'] >= ini_mes_c)]
         demais_itens = df_f[~df_f.index.isin(parciais_topo.index)].sort_values('dt_obj', ascending=False)
