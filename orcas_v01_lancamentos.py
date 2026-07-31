@@ -66,13 +66,16 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                 total = 0
                 if e_fechado:
                     # PARA MESES FECHADOS: Soma estritamente apenas os realizados
-                    for _, x in df_tipo.iterrows():
+                    # 1. Filtra itens principais (pais ou contas normais)
+                    itens_principais = df_tipo[(df_tipo['valor_plan'] > 0) | ((df_tipo['valor_plan'] == 0) & (df_tipo['valor_real'] > 0))]
+                    
+                    for _, x in itens_principais.iterrows():
                         if x['permite_parcial']:
-                            # Soma parciais realizadas
+                            # SOMA APENAS OS FILHOS (parcial_real): ignora valor_real do pai
                             v_parciais = df_mes[(df_mes['descricao'] == x['descricao']) & (df_mes['valor_plan'] == 0)]['parcial_real'].sum()
                             total += v_parciais
                         else:
-                            # Se a conta normal foi realizada, soma o valor real
+                            # Contas normais: soma apenas se estiver Realizado
                             if x['status'] == 'Realizado':
                                 total += x['valor_real']
                 else:
