@@ -5,6 +5,29 @@ from orcas_v01_security import supabase
 
 BATCH_SIZE = 100
 
+# Lista estrita de colunas existentes na tabela 'lancamentos' do Supabase
+COLUNAS_VALIDAS_BANCO = {
+    "id",
+    "usuario_id",
+    "projeto_id",
+    "descricao",
+    "complemento",
+    "categoria",
+    "tipo",
+    "valor",
+    "data_vencimento",
+    "data",
+    "realizado",
+    "valor_realizado",
+    "valor_real",
+    "parcial_real",
+    "parcial_data",
+    "recorrente",
+    "permite_parcial",
+    "usar_media",
+    "observacao"
+}
+
 def sanitize_val(val):
     if pd.isna(val) or val is None:
         return None
@@ -82,17 +105,22 @@ def render_upload(usuario_id=None, projeto_id=None):
                     for _, row in df.iterrows():
                         item = {}
                         for col in df.columns:
+                            # Ignora colunas que não existem no banco de dados
+                            if col not in COLUNAS_VALIDAS_BANCO:
+                                continue
+
                             val = sanitize_val(row[col])
-                            
+
                             # Trata booleanos
                             if col in ["realizado", "recorrente", "permite_parcial", "usar_media"]:
                                 if val is not None:
                                     val = bool(val)
-                            
-                            # Ignora ID nulo (ou quando for limpeza total) para usar a sequence automática
-                            if col == "id" and (val is None or modo_importacao == "Apague todos os dados do DB e suba todo o conteúdo da planilha"):
-                                continue
-                                
+
+                            # Tratamento da coluna ID
+                            if col == "id":
+                                if val is None or modo_importacao == "Apague todos os dados do DB e suba todo o conteúdo da planilha":
+                                    continue
+
                             item[col] = val
 
                         # MODO 3: Zerar Realizados na Importação

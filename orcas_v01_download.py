@@ -8,7 +8,6 @@ def render_download(usuario_id=None, projeto_id=None):
     st.write("Baixe os lançamentos do seu projeto ativo em formato Excel (.xlsx).")
 
     # --- RESOLUÇÃO FLEXÍVEL DAS CHAVES DE SESSÃO ---
-    # Tenta usar os parâmetros informados ou busca as variações comuns no session_state
     usr_id = usuario_id or st.session_state.get("user_id") or st.session_state.get("usuario_id") or st.session_state.get("usuario")
     proj_id = projeto_id or st.session_state.get("projeto_ativo") or st.session_state.get("projeto") or st.session_state.get("plano_ativo")
 
@@ -37,16 +36,25 @@ def render_download(usuario_id=None, projeto_id=None):
 
                 df = pd.DataFrame(data)
 
-                # Ordenação exata das colunas
+                # --- REMOÇÃO DE COLUNAS INTERNAS (SINCRONIZAÇÃO COM UPLOAD) ---
+                # 'id', 'usuario_id' e 'projeto_id' são omitidos para o usuário não precisar manipulá-los no Excel
+                colunas_para_remover = ["id", "usuario_id", "projeto_id"]
+                df = df.drop(columns=[col for col in colunas_para_remover if col in df.columns])
+
+                # Ordenação exata e limpa das colunas de dados
                 col_order = [
-                    "id", "usuario_id", "descricao", "valor", "tipo", "data_vencimento",
-                    "realizado", "valor_realizado", "categoria", "recorrente", "projeto_id",
+                    "descricao", "valor", "tipo", "data_vencimento",
+                    "realizado", "valor_realizado", "categoria", "recorrente",
                     "valor_plan", "valor_real", "status", "data", "permite_parcial",
                     "usar_media", "complemento_tipo", "complemento_texto", "correcao_freq",
                     "correcao_valor", "id_pai", "parcial_real", "parcial_data", "regra_parcial"
                 ]
+                
+                # Seleciona apenas as colunas existentes
                 existing_cols = [c for c in col_order if c in df.columns]
-                df = df[existing_cols]
+                # Preserva qualquer outra coluna secundária que venha do banco
+                other_cols = [c for c in df.columns if c not in existing_cols]
+                df = df[existing_cols + other_cols]
 
                 # Exporta para memória RAM (BytesIO)
                 buffer = io.BytesIO()
