@@ -18,13 +18,13 @@ import datetime as dt_modulo  # Evitar conflitos de nomes
 from fpdf import FPDF
 
 # ==============================================================================
-# CONFIGURAÇÃO DE GATILHO - EVOLUTION API (WHATSAPP)
+# CONFIGURAÇÕES DE TESTE E AMBIENTE
 # ==============================================================================
+# Mude para True para SIMULAR que hoje é dia 01 e testar as regras de virada de mês agora!
+MODO_TESTE = True 
+
 WHATSAPP_HABILITADO = False  
 
-# ==============================================================================
-# CONFIGURAÇÕES DE AMBIENTE (SECRETOS DO GITHUB)
-# ==============================================================================
 URL = os.environ.get("SUPABASE_URL")
 KEY = os.environ.get("SUPABASE_KEY")
 
@@ -48,7 +48,6 @@ def fmt_br(valor):
 # ==============================================================================
 # GERAÇÃO DO RELATÓRIO PDF (RESUMO DIÁRIO ORCAS)
 # ==============================================================================
-# CORREÇÃO AQUI: Alterado o parâmetro de agenda_hoje para dados_hoje para casar com a lógica interna
 def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, dados_hoje, resumo_ontem, analise_macro, gastos_excedidos, todos_lancamentos):    
     pdf = FPDF()
     pdf.add_page()
@@ -207,7 +206,6 @@ def gerar_pdf_relatorio(usuario_nome, nome_plano, data_hoje, dados_hoje, resumo_
     total_e_pend = 0
     total_s_pend = 0
     
-    # CORREÇÃO DETECTADA: Agora dados_hoje é devidamente mapeado sem lançar NameError
     if not dados_hoje:
         pdf.cell(190, 7, "Nenhuma pendência ou lançamento para hoje.", 1, new_x="LMARGIN", new_y="NEXT", align="C")
     else:
@@ -357,7 +355,14 @@ def job_madrugada():
     supabase = create_client(URL, KEY)
     fuso_br = timezone(timedelta(hours=-3))
     agora = datetime.now(fuso_br)
-    hoje = agora.date()
+    
+    # --- MODO DE TESTE (Permite testar o dia 01 a qualquer momento) ---
+    if MODO_TESTE:
+        hoje = agora.date().replace(day=1) # Força ser dia 01 do mês corrente
+        print(f"⚠️ ATENÇÃO: MODO DE TESTE ATIVO! Simulando data de HOJE como: {hoje.strftime('%d/%m/%Y')}")
+    else:
+        hoje = agora.date()
+
     ontem = hoje - timedelta(days=1)
     
     p_mes = hoje.replace(day=1)
@@ -365,7 +370,7 @@ def job_madrugada():
     u_mes_ant = p_mes - timedelta(days=1)
     p_mes_ant = u_mes_ant.replace(day=1)
 
-    print(f"--- INICIANDO ROTINA INTEGRAL ORCAS: {agora.strftime('%d/%m/%Y %H:%M:%S')} ---")
+    print(f"--- INICIANDO ROTINA INTEGRAL ORCAS: {agora.strftime('%d/%m/%Y %H:%M:%S')} (Data Ref: {hoje.strftime('%d/%m/%Y')}) ---")
 
     try:
         # 1. ATUALIZAÇÃO DE MÉDIA HISTÓRICA (usar_media=True)
@@ -385,43 +390,77 @@ def job_madrugada():
                         supabase.table("lancamentos").update({"valor_plan": round(float(media), 2)})\
                             .eq("id", item['id']).execute()
 
-        # 2. PROCESSAMENTO DE RESÍDUOS (Sobra de orçamento de ontem)
-        lancamentos_ontem = supabase.table("lancamentos")\
-            .select("*")\
-            .eq("data", ontem.strftime('%Y-%m-%d'))\
-            .eq("status", "Planejado")\
-            .neq("regra_parcial", "Zera o Realizado")\
-            .execute()
-
-        for item in lancamentos_ontem.data:
-            valor_p = float(item.get('valor_plan', 0) or 0)
-            valor_r = float(item.get('valor_real', 0) or 0)
-            sobra = valor_p - valor_r
+        # ==============================================================================
+        # 2. PROCESSAMENTO DE PARCIAIS E RESÍDUOS NA VIRADA DO MÊS (EXECUTADO NO DIA 1)
+        # ==============================================================================
+        if hoje.day != 1:
+            print(f"ℹ️ Hoje é dia {hoje.day}. Regras de ajuste de orçamento do mês anterior são executadas apenas no dia 1. Pulando etapa...")
+        else:
+            print(f"🗓️ DIA 1 DETECTADO: Processando ajustes de orçamentos (Parciais e Resíduos) do mês anterior ({p_mes_ant.strftime('%m/%Y')})...")
             
-            if sobra > 0:
-                regra = item['regra_parcial']
-                proximo = supabase.table("lancamentos")\
-                    .select("id, valor_plan")\
-                    .eq("descricao", item['descricao'])\
-                    .eq("usuario_id", item['usuario_id'])\
-                    .gt("data", ontem.strftime('%Y-%m-%d'))\
-                    .order("data")\
-                    .limit(1)\
-                    .execute()
+            # Busca todos os lançamentos "PAI" do mês anterior que possuem regra de transporte de saldo
+            lancamentos_mes_ant = supabase.table("lancamentos")\
+                .select("*")\
+                .gte("data", p_mes_ant.strftime('%Y-%m-%d'))\
+                .lte("data", u_mes_ant.strftime('%Y-%m-%d'))\
+                .neq("regra_parcial", "Zera o Realizado")\
+                .execute()
 
-                if "Adicione a diferença" in regra and proximo.data:
-                    novo_v = float(proximo.data[0]['valor_plan'] or 0) + sobra
-                    supabase.table("lancamentos").update({"valor_plan": round(novo_v, 2)}).eq("id", proximo.data[0]['id']).execute()
-                elif "Copia a diferença" in regra:
-                    if proximo.data:
-                        supabase.table("lancamentos").update({"valor_plan": round(sobra, 2)}).eq("id", proximo.data[0]['id']).execute()
-                    else:
-                        novo_item = item.copy()
-                        novo_item.pop('id', None)
-                        novo_item['data'] = hoje.strftime('%Y-%m-%d')
-                        novo_item['valor_plan'] = round(sobra, 2)
-                        novo_item['valor_real'] = 0.0
-                        supabase.table("lancamentos").insert(novo_item).execute()
+            for item in lancamentos_mes_ant.data:
+                valor_p = float(item.get('valor_plan', 0) or 0)
+                regra = item.get('regra_parcial', '')
+                
+                # CÁLCULO DO REALIZADO DO MÊS PASSADO:
+                if item.get('permite_parcial') == True:
+                    # Se permite parciais, o realizado do mês é a SOMA DOS FILHOS (parcial_real)
+                    res_filhos = supabase.table("lancamentos")\
+                        .select("parcial_real")\
+                        .eq("projeto_id", item['projeto_id'])\
+                        .eq("descricao", item['descricao'])\
+                        .gte("data", p_mes_ant.strftime('%Y-%m-%d'))\
+                        .lte("data", u_mes_ant.strftime('%Y-%m-%d'))\
+                        .gt("parcial_real", 0)\
+                        .execute()
+                    
+                    valor_r = sum(float(f['parcial_real'] or 0) for f in res_filhos.data) if res_filhos.data else 0.0
+                else:
+                    # Se é conta normal, pega o valor_real direto do pai
+                    valor_r = float(item.get('valor_real', 0) or 0)
+
+                sobra = valor_p - valor_r
+                
+                # Se sobrou orçamento (Planejado > Realizado), aplica a regra no mês atual
+                if sobra > 0:
+                    # Busca o lançamento correspondente do MÊS ATUAL (ou o próximo futuro)
+                    proximo = supabase.table("lancamentos")\
+                        .select("id, valor_plan")\
+                        .eq("descricao", item['descricao'])\
+                        .eq("usuario_id", item['usuario_id'])\
+                        .eq("projeto_id", item['projeto_id'])\
+                        .gte("data", p_mes.strftime('%Y-%m-%d'))\
+                        .order("data")\
+                        .limit(1)\
+                        .execute()
+
+                    if "Adicione a diferença" in regra and proximo.data:
+                        v_plan_atual = float(proximo.data[0]['valor_plan'] or 0)
+                        novo_v = v_plan_atual + sobra
+                        supabase.table("lancamentos").update({"valor_plan": round(novo_v, 2)}).eq("id", proximo.data[0]['id']).execute()
+                        print(f"  [+] 'Adicione a diferença' aplicado para '{item['descricao']}': Plan. de {v_plan_atual} + {sobra} = {novo_v:.2f}")
+
+                    elif "Copia a diferença" in regra:
+                        if proximo.data:
+                            supabase.table("lancamentos").update({"valor_plan": round(sobra, 2)}).eq("id", proximo.data[0]['id']).execute()
+                            print(f"  [=] 'Copia a diferença' aplicado para '{item['descricao']}': Novo Plan = {sobra:.2f}")
+                        else:
+                            # Se o mês atual ainda não tiver o lançamento criado, cria um novo
+                            novo_item = item.copy()
+                            novo_item.pop('id', None)
+                            novo_item['data'] = p_mes.strftime('%Y-%m-%d')
+                            novo_item['valor_plan'] = round(sobra, 2)
+                            novo_item['valor_real'] = 0.0
+                            supabase.table("lancamentos").insert(novo_item).execute()
+                            print(f"  [*] Novo lançamento criado para '{item['descricao']}' com valor = {sobra:.2f}")
 
         # 3. GERAÇÃO DE RELATÓRIOS E ENVIOS POR USUÁRIO/PROJETO
         try:
@@ -538,7 +577,7 @@ def job_madrugada():
                 ]
                 dados_hoje.sort(key=lambda x: x['data'])
                 
-                # Chamada corrigida
+                # Chamada do PDF
                 pdf_path = gerar_pdf_relatorio(perfil['nome'], cfg['projeto_id'], hoje, dados_hoje, {}, macro, alertas, lancamentos_all.data)
                 
                 # Despacho por E-mail
