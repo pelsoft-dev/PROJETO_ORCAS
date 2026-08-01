@@ -14,13 +14,6 @@ def sanitize_val(val):
 
 def render_upload(usuario_id=None, projeto_id=None):
     st.subheader("📤 Importar Lançamentos via Excel")
-    
-    # Mensagem amigável e clara para o usuário
-    st.write(
-        "Faça o envio da sua planilha Excel (`.xlsx`) no formato padrão. "
-        "Lançamentos novos serão **cadastrados automaticamente**, e aqueles que já possuem **ID** "
-        "serão **atualizados** no sistema."
-    )
 
     # --- RESOLUÇÃO FLEXÍVEL DAS CHAVES DE SESSÃO ---
     usr_id = (
@@ -42,7 +35,24 @@ def render_upload(usuario_id=None, projeto_id=None):
 
     st.info(f"📌 **Vinculará os dados importados a:** Usuário `{usr_id}` | Projeto `{proj_id}`")
 
-    uploaded_file = st.file_uploader("Selecione a planilha Excel", type=["xlsx"])
+    # --- SELEÇÃO DAS REGRAS DE IMPORTAÇÃO (RADIO BUTTONS SEM PADRÃO) ---
+    st.markdown("### Selecione o modo de importação:")
+    modo_importacao = st.radio(
+        "Escolha como o sistema deve tratar os dados da planilha em relação ao banco de dados:",
+        options=[
+            "Apague todos os dados do DB e suba todo o conteúdo da planilha",
+            "Lançamentos novos serão cadastrados, e os já existentes serão atualizados",
+            "Suba todos os Lançamentos e seus Planejamentos, mas zere todos os Realizados"
+        ],
+        index=None,
+        key="modo_importacao_radio"
+    )
+
+    if not modo_importacao:
+        st.warning("⚠️ Selecione um modo de importação acima para habilitar o envio do arquivo.")
+        return
+
+    uploaded_file = st.file_uploader("Selecione a planilha Excel (.xlsx)", type=["xlsx"])
 
     if uploaded_file is not None:
         if st.button("Iniciar Upload para o Supabase", type="primary", use_container_width=True):
@@ -54,7 +64,16 @@ def render_upload(usuario_id=None, projeto_id=None):
                         st.warning("A planilha enviada está vazia.")
                         return
 
-                    # Formata datas para o padrão aceito pelo banco (AAAA-MM-DD)
+                    # MODO 1: Deletar dados antigos do usuário + projeto antes da gravação
+                    if modo_importacao == "Apague todos os dados do DB e suba todo o conteúdo da planilha":
+                        st.toast("Limpando lançamentos anteriores do projeto...", icon="🗑️")
+                        supabase.table("lancamentos") \
+                            .delete() \
+                            .eq("usuario_id", usr_id) \
+                            .eq("projeto_id", proj_id) \
+                            .execute()
+
+                    # Formata colunas de datas para YYYY-MM-DD
                     for col in ["data_vencimento", "data", "parcial_data"]:
                         if col in df.columns:
                             df[col] = pd.to_datetime(df[col], errors="coerce").dt.strftime("%Y-%m-%d")
@@ -70,11 +89,18 @@ def render_upload(usuario_id=None, projeto_id=None):
                                 if val is not None:
                                     val = bool(val)
                             
-                            # Ignora ID nulo para usar a sequência automática do banco de dados
-                            if col == "id" and val is None:
+                            # Ignora ID nulo (ou quando for limpeza total) para usar a sequence automática
+                            if col == "id" and (val is None or modo_importacao == "Apague todos os dados do DB e suba todo o conteúdo da planilha"):
                                 continue
                                 
                             item[col] = val
+
+                        # MODO 3: Zerar Realizados na Importação
+                        if modo_importacao == "Suba todos os Lançamentos e seus Planejamentos, mas zere todos os Realizados":
+                            item["realizado"] = False
+                            item["valor_realizado"] = 0.0
+                            item["valor_real"] = 0.0
+                            item["parcial_real"] = 0.0
 
                         # --- FORÇA O PERTENCIMENTO AO USUÁRIO E PROJETO ATIVO ---
                         item["usuario_id"] = usr_id
@@ -93,6 +119,6 @@ def render_upload(usuario_id=None, projeto_id=None):
                         uploaded_count += len(batch)
                         progress_bar.progress(uploaded_count / total)
 
-                    st.success(f"✅ Upload concluído! {total} registro(s) processado(s) com sucesso.")
+                    st.success(f"✅ Upload concluído com sucesso! {total} registro(s) processado(s).")
                 except Exception as e:
                     st.error(f"Erro durante o upload: {e}")
