@@ -6,21 +6,19 @@ import orcas_v01_ajuda_admin
 
 def exibir_admin(df, supabase, ID_USUARIO_LOGADO, ir_para_o_topo):
     """
-    Hub principal da Tela Admin com layout padronizado de cabeçalho + ajuda,
+    Hub principal da Tela Admin com cabeçalho padronizado (Título + Botão AJUDA)
     e navegação via radio buttons sem seleção inicial.
     """
     projeto_ativo = st.session_state.get("projeto_ativo")
 
-    # --- CABEÇALHO COM TÍTULO E BOTÃO DE AJUDA ---
-    col_titulo, col_ajuda = st.columns([0.8, 0.2])
+    # --- CABEÇALHO PADRONIZADO (IDÊNTICO À TELA PROJETAR) ---
+    col_titulo, col_ajuda = st.columns([0.75, 0.25])
     
     with col_titulo:
-        st.title("Admin")
+        st.subheader("Admin")
         
     with col_ajuda:
-        # Espaçamento para alinhar o botão verticalmente ao título
-        st.write("")
-        if st.button("AJUDA", type="primary", use_container_width=True):
+        if st.button("AJUDA", type="primary", use_container_width=True, key="btn_ajuda_admin_main"):
             orcas_v01_ajuda_admin.exibir_ajuda_admin()
 
     st.markdown("---")
