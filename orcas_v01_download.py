@@ -5,16 +5,33 @@ from orcas_v01_security import supabase
 
 def render_download():
     st.subheader("📥 Exportar Lançamentos")
-    st.write("Baixe a tabela completa de lançamentos em formato Excel (.xlsx).")
+    st.write("Baixe os lançamentos do seu projeto ativo em formato Excel (.xlsx).")
 
-    if st.button("Gerar Planilha para Download"):
-        with st.spinner("Buscando dados no Supabase..."):
+    # --- VALIDAÇÕES DE SEGURANÇA E CONTEXTO ---
+    usuario_id = st.session_state.get("user_id")
+    projeto_id = st.session_state.get("projeto_ativo")
+
+    if not usuario_id or not projeto_id:
+        st.error("⚠️ Usuário ou Projeto Ativo não identificados na sessão. Efetue o login novamente.")
+        return
+
+    st.info(f"📌 **Filtro Aplicado:** Usuário ID `{usuario_id}` | Projeto `{projeto_id}`")
+
+    if st.button("Gerar Planilha para Download", type="primary", use_container_width=True):
+        with st.spinner("Buscando lançamentos no Supabase..."):
             try:
-                response = supabase.table("lancamentos").select("*").execute()
+                # Consulta filtrada estritamente pelo usuario_id e projeto_id
+                response = (
+                    supabase.table("lancamentos")
+                    .select("*")
+                    .eq("usuario_id", usuario_id)
+                    .eq("projeto_id", projeto_id)
+                    .execute()
+                )
                 data = response.data
 
                 if not data:
-                    st.warning("Nenhum registro encontrado na tabela 'lancamentos'.")
+                    st.warning("Nenhum lançamento encontrado para este usuário e projeto.")
                     return
 
                 df = pd.DataFrame(data)
@@ -30,20 +47,24 @@ def render_download():
                 existing_cols = [c for c in col_order if c in df.columns]
                 df = df[existing_cols]
 
-                # Exporta para memória RAM (BytesIO) sem salvar em disco
+                # Exporta para memória RAM (BytesIO)
                 buffer = io.BytesIO()
                 with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
                     df.to_excel(writer, index=False, sheet_name="Lancamentos")
                 buffer.seek(0)
 
-                st.success("Planilha gerada com sucesso!")
+                st.success(f"✅ {len(df)} lançamentos processados com sucesso!")
                 
-                # Botão nativo do Streamlit para o usuário baixar no navegador
+                # Nome dinâmico para o arquivo exportado
+                nome_arquivo = f"orcas_{projeto_id}_lancamentos.xlsx".lower().replace(" ", "_")
+
+                # Botão nativo para o usuário baixar no navegador
                 st.download_button(
-                    label="💾 Baixar Arquivo Excel",
+                    label="💾 Clique aqui para Baixar o Arquivo Excel",
                     data=buffer,
-                    file_name="orcas_lancamentos.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    file_name=nome_arquivo,
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
                 )
             except Exception as e:
                 st.error(f"Erro ao exportar lançamentos: {e}")
