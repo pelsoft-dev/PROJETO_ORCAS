@@ -21,7 +21,7 @@ from fpdf import FPDF
 # CONFIGURAÇÕES DE TESTE E AMBIENTE
 # ==============================================================================
 # Mude para True para SIMULAR que hoje é dia 01 e testar as regras de virada de mês agora!
-MODO_TESTE = True 
+MODO_TESTE = False 
 
 WHATSAPP_HABILITADO = False  
 
@@ -508,8 +508,9 @@ def job_madrugada():
                 }
 
                 alertas = []
-                m_atual = [x for x in lancamentos_all.data if p_mes.strftime('%Y-%m-%d') <= x['data'] <= hoje.strftime('%Y-%m-%d')]
-                m_anterior = [x for x in lancamentos_all.data if p_mes_ant.strftime('%Y-%m-%d') <= x['data'] <= u_mes_ant.strftime('%Y-%m-%d')]
+                # FILTRO APLICADO: Apenas lançamentos do tipo 'Saída'
+                m_atual = [x for x in lancamentos_all.data if p_mes.strftime('%Y-%m-%d') <= x['data'] <= hoje.strftime('%Y-%m-%d') and x.get('tipo') == 'Saída']
+                m_anterior = [x for x in lancamentos_all.data if p_mes_ant.strftime('%Y-%m-%d') <= x['data'] <= u_mes_ant.strftime('%Y-%m-%d') and x.get('tipo') == 'Saída']
                 
                 todas_descricoes = set([x['descricao'] for x in m_atual] + [x['descricao'] for x in m_anterior])
                 for d in todas_descricoes:
