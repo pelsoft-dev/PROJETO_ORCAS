@@ -1,48 +1,25 @@
 import streamlit as st
-import pandas as pd
 from orcas_v01_dbupdate import renderizar_dbupdate
 from orcas_v01_download import render_download
 from orcas_v01_upload import render_upload
-from orcas_v01_ajuda_admin import renderizar_ajuda_admin
+import orcas_v01_ajuda_admin
 
 def exibir_admin(df, supabase, ID_USUARIO_LOGADO, ir_para_o_topo):
     """
-    Hub principal da Tela Admin com cabeçalho padrão
+    Hub principal da Tela Admin com cabeçalho padronizado (Título + Botão AJUDA)
     e navegação via radio buttons sem seleção inicial.
     """
-    projeto_ativo = st.session_state.get("projeto_ativo", "")
+    projeto_ativo = st.session_state.get("projeto_ativo")
 
-    # --- CABEÇALHO ALINHADO COM BOTÃO DE AJUDA ---
-    col_titulo, col_ajuda = st.columns([4, 1])
+    # --- CABEÇALHO PADRONIZADO (IDÊNTICO À TELA PROJETAR) ---
+    col_titulo, col_ajuda = st.columns([0.75, 0.25])
     
     with col_titulo:
-        st.markdown(
-            f'<div class="titulo-tela" style="margin-top:0px;">Administração: {projeto_ativo}</div>', 
-            unsafe_allow_html=True
-        )
+        st.subheader("Admin")
         
     with col_ajuda:
-        st.markdown("""
-            <style>
-            div.stButton > button:first-child {
-                background-color: #007ba7 !important;
-                color: white !important;
-                border: none !important;
-            }
-            div.stButton > button:first-child:hover {
-                background-color: #005f81 !important;
-                color: white !important;
-            }
-            </style>
-        """, unsafe_allow_html=True)
-        
         if st.button("AJUDA", type="primary", use_container_width=True, key="btn_ajuda_admin_main"):
-            st.session_state["exibir_ajuda_admin"] = not st.session_state.get("exibir_ajuda_admin", False)
-            st.rerun()
-
-    # --- EXIBIÇÃO DA TELA DE AJUDA SE O BOTÃO FOR CLICADO ---
-    if st.session_state.get("exibir_ajuda_admin", False):
-        renderizar_ajuda_admin()
+            orcas_v01_ajuda_admin.exibir_ajuda_admin()
 
     st.markdown("---")
 
