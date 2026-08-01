@@ -8,7 +8,7 @@ def exibir_admin(df, supabase, ID_USUARIO_LOGADO, ir_para_o_topo):
     Hub principal da Tela Admin.
     Organiza as sub-rotinas administrativas em abas.
     """
-    st.markdown(f'<div class="titulo-tela" style="margin-top:0px;">⚙️ Painel do Administrador</div>', unsafe_allow_html=True)
+    projeto_ativo = st.session_state.get("projeto_ativo")
 
     # Criação das abas administrativas
     tab_dbupdate, tab_download, tab_upload = st.tabs([
@@ -17,14 +17,14 @@ def exibir_admin(df, supabase, ID_USUARIO_LOGADO, ir_para_o_topo):
         "📤 Upload (Importar)"
     ])
 
-    # Aba 1: Funcionalidade histórica do Admin
+    # Aba 1: DB Update
     with tab_dbupdate:
         renderizar_dbupdate(df, supabase, ID_USUARIO_LOGADO, ir_para_o_topo)
 
     # Aba 2: Exportação em Excel
     with tab_download:
-        render_download()
+        render_download(usuario_id=ID_USUARIO_LOGADO, projeto_id=projeto_ativo)
 
     # Aba 3: Importação via Excel
     with tab_upload:
-        render_upload()
+        render_upload(usuario_id=ID_USUARIO_LOGADO, projeto_id=projeto_ativo)

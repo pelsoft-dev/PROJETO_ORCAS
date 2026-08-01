@@ -12,19 +12,35 @@ def sanitize_val(val):
         return None
     return val
 
-def render_upload():
+def render_upload(usuario_id=None, projeto_id=None):
     st.subheader("📤 Importar Lançamentos via Excel")
-    st.write("Envie um arquivo `.xlsx` com a estrutura padrão. Registros com `id` existente serão atualizados (Upsert); sem `id`, serão inseridos.")
+    
+    # Mensagem amigável e clara para o usuário
+    st.write(
+        "Faça o envio da sua planilha Excel (`.xlsx`) no formato padrão. "
+        "Lançamentos novos serão **cadastrados automaticamente**, e aqueles que já possuem **ID** "
+        "serão **atualizados** no sistema."
+    )
 
-    # --- VALIDAÇÕES DE SEGURANÇA E CONTEXTO ---
-    usuario_id = st.session_state.get("user_id")
-    projeto_id = st.session_state.get("projeto_ativo")
+    # --- RESOLUÇÃO FLEXÍVEL DAS CHAVES DE SESSÃO ---
+    usr_id = (
+        usuario_id 
+        or st.session_state.get("user_id") 
+        or st.session_state.get("usuario_id") 
+        or st.session_state.get("usuario")
+    )
+    proj_id = (
+        projeto_id 
+        or st.session_state.get("projeto_ativo") 
+        or st.session_state.get("projeto") 
+        or st.session_state.get("plano_ativo")
+    )
 
-    if not usuario_id or not projeto_id:
+    if not usr_id or not proj_id:
         st.error("⚠️ Usuário ou Projeto Ativo não identificados na sessão. Efetue o login novamente.")
         return
 
-    st.info(f"📌 **Vinculará os dados a:** Usuário ID `{usuario_id}` | Projeto `{projeto_id}`")
+    st.info(f"📌 **Vinculará os dados importados a:** Usuário `{usr_id}` | Projeto `{proj_id}`")
 
     uploaded_file = st.file_uploader("Selecione a planilha Excel", type=["xlsx"])
 
@@ -38,7 +54,7 @@ def render_upload():
                         st.warning("A planilha enviada está vazia.")
                         return
 
-                    # Formata datas
+                    # Formata datas para o padrão aceito pelo banco (AAAA-MM-DD)
                     for col in ["data_vencimento", "data", "parcial_data"]:
                         if col in df.columns:
                             df[col] = pd.to_datetime(df[col], errors="coerce").dt.strftime("%Y-%m-%d")
@@ -54,15 +70,15 @@ def render_upload():
                                 if val is not None:
                                     val = bool(val)
                             
-                            # Ignora ID nulo para usar a sequence automática do Supabase
+                            # Ignora ID nulo para usar a sequência automática do banco de dados
                             if col == "id" and val is None:
                                 continue
                                 
                             item[col] = val
 
                         # --- FORÇA O PERTENCIMENTO AO USUÁRIO E PROJETO ATIVO ---
-                        item["usuario_id"] = usuario_id
-                        item["projeto_id"] = projeto_id
+                        item["usuario_id"] = usr_id
+                        item["projeto_id"] = proj_id
 
                         records.append(item)
 

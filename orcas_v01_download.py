@@ -3,19 +3,20 @@ import pandas as pd
 import streamlit as st
 from orcas_v01_security import supabase
 
-def render_download():
+def render_download(usuario_id=None, projeto_id=None):
     st.subheader("📥 Exportar Lançamentos")
     st.write("Baixe os lançamentos do seu projeto ativo em formato Excel (.xlsx).")
 
-    # --- VALIDAÇÕES DE SEGURANÇA E CONTEXTO ---
-    usuario_id = st.session_state.get("user_id")
-    projeto_id = st.session_state.get("projeto_ativo")
+    # --- RESOLUÇÃO FLEXÍVEL DAS CHAVES DE SESSÃO ---
+    # Tenta usar os parâmetros informados ou busca as variações comuns no session_state
+    usr_id = usuario_id or st.session_state.get("user_id") or st.session_state.get("usuario_id") or st.session_state.get("usuario")
+    proj_id = projeto_id or st.session_state.get("projeto_ativo") or st.session_state.get("projeto") or st.session_state.get("plano_ativo")
 
-    if not usuario_id or not projeto_id:
+    if not usr_id or not proj_id:
         st.error("⚠️ Usuário ou Projeto Ativo não identificados na sessão. Efetue o login novamente.")
         return
 
-    st.info(f"📌 **Filtro Aplicado:** Usuário ID `{usuario_id}` | Projeto `{projeto_id}`")
+    st.info(f"📌 **Filtro Aplicado:** Usuário `{usr_id}` | Projeto `{proj_id}`")
 
     if st.button("Gerar Planilha para Download", type="primary", use_container_width=True):
         with st.spinner("Buscando lançamentos no Supabase..."):
@@ -24,8 +25,8 @@ def render_download():
                 response = (
                     supabase.table("lancamentos")
                     .select("*")
-                    .eq("usuario_id", usuario_id)
-                    .eq("projeto_id", projeto_id)
+                    .eq("usuario_id", usr_id)
+                    .eq("projeto_id", proj_id)
                     .execute()
                 )
                 data = response.data
@@ -56,7 +57,7 @@ def render_download():
                 st.success(f"✅ {len(df)} lançamentos processados com sucesso!")
                 
                 # Nome dinâmico para o arquivo exportado
-                nome_arquivo = f"orcas_{projeto_id}_lancamentos.xlsx".lower().replace(" ", "_")
+                nome_arquivo = f"orcas_{proj_id}_lancamentos.xlsx".lower().replace(" ", "_")
 
                 # Botão nativo para o usuário baixar no navegador
                 st.download_button(
