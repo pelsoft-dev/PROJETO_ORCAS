@@ -5,7 +5,7 @@ from orcas_v01_security import supabase
 
 BATCH_SIZE = 100
 
-# Colunas oficiais da tabela 'lancamentos' no Supabase
+# Lista exata das colunas existentes no Supabase conforme sua tabela
 COLUNAS_VALIDAS_BANCO = {
     "usuario_id",
     "projeto_id",
@@ -14,14 +14,19 @@ COLUNAS_VALIDAS_BANCO = {
     "categoria",
     "tipo",
     "valor",
+    "valor_plan",
+    "valor_real",
+    "valor_realizado",
     "data_vencimento",
     "data",
     "realizado",
-    "valor_realizado",
     "recorrente",
     "permite_parcial",
     "usar_media",
-    "observacao"
+    "observacao",
+    "parcial_real",
+    "parcial_data",
+    "status"
 }
 
 def sanitize_val(val):
@@ -99,32 +104,32 @@ def render_upload(usuario_id=None, projeto_id=None):
                     for _, row in df.iterrows():
                         item = {}
 
-                        # --- TRATAMENTO E MIGRAÇÃO DAS COLUNAS DE VALOR (LEGAIS -> ATUAIS) ---
-                        val_original = sanitize_val(row.get("valor"))
+                        # --- RESGATE DOS VALORES DA PLANILHA ---
+                        val_orig = sanitize_val(row.get("valor"))
                         val_plan = sanitize_val(row.get("valor_plan"))
                         val_real = sanitize_val(row.get("valor_real"))
-                        val_realizado_orig = sanitize_val(row.get("valor_realizado"))
+                        val_realizado = sanitize_val(row.get("valor_realizado"))
                         parcial_real = sanitize_val(row.get("parcial_real"))
 
-                        # 1. Define o valor planejado (se 'valor' estiver vazio, usa 'valor_plan')
-                        valor_final = val_original if val_original is not None else val_plan
-                        if valor_final is None:
-                            valor_final = 0.0
+                        # Definição do PLANEJADO (vai para valor_plan)
+                        final_plan = val_plan if val_plan is not None else val_orig
+                        if final_plan is None:
+                            final_plan = 0.0
 
-                        # 2. Define o valor realizado (prioriza 'valor_realizado', 'valor_real' ou 'parcial_real')
-                        realizado_final = val_realizado_orig
-                        if realizado_final is None:
-                            realizado_final = val_real if val_real is not None else parcial_real
-                        if realizado_final is None:
-                            realizado_final = 0.0
+                        # Definição do REALIZADO (vai para valor_real)
+                        final_real = val_real
+                        if final_real is None:
+                            final_real = val_realizado if val_realizado is not None else parcial_real
+                        if final_real is None:
+                            final_real = 0.0
 
-                        # Preenche os campos oficiais
-                        item["valor"] = float(valor_final)
-                        item["valor_realizado"] = float(realizado_final)
+                        # Preenche AS DUAS COLUNAS PRINCIPAIS DO SEU BANCO
+                        item["valor_plan"] = float(final_plan)
+                        item["valor_real"] = float(final_real)
 
-                        # Copia as demais colunas válidas
+                        # Copia as demais colunas válidas sem sobrescrever valor_plan e valor_real
                         for col in df.columns:
-                            if col in COLUNAS_VALIDAS_BANCO and col not in ["valor", "valor_realizado"]:
+                            if col in COLUNAS_VALIDAS_BANCO and col not in ["valor_plan", "valor_real"]:
                                 val = sanitize_val(row[col])
 
                                 if col in ["realizado", "recorrente", "permite_parcial", "usar_media"]:
@@ -136,7 +141,9 @@ def render_upload(usuario_id=None, projeto_id=None):
                         # MODO 3: Zerar Realizados se selecionado
                         if modo_importacao == "Suba todos os Lançamentos e seus Planejamentos, mas zere todos os Realizados":
                             item["realizado"] = False
-                            item["valor_realizado"] = 0.0
+                            item["valor_real"] = 0.0
+                            if "valor_realizado" in item:
+                                item["valor_realizado"] = 0.0
 
                         # Força o vínculo com usuário e projeto
                         item["usuario_id"] = usr_id
