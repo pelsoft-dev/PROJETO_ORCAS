@@ -1,6 +1,8 @@
 import io
 import pandas as pd
 import streamlit as st
+from openpyxl.styles import Font, Alignment, PatternFill
+from openpyxl.utils import get_column_letter
 from orcas_v01_security import supabase
 
 def render_download(usuario_id=None, projeto_id=None):
@@ -37,7 +39,6 @@ def render_download(usuario_id=None, projeto_id=None):
                 df = pd.DataFrame(data)
 
                 # --- REMOÇÃO DE COLUNAS INTERNAS (SINCRONIZAÇÃO COM UPLOAD) ---
-                # 'id', 'usuario_id' e 'projeto_id' são omitidos para o usuário não precisar manipulá-los no Excel
                 colunas_para_remover = ["id", "usuario_id", "projeto_id"]
                 df = df.drop(columns=[col for col in colunas_para_remover if col in df.columns])
 
@@ -52,14 +53,84 @@ def render_download(usuario_id=None, projeto_id=None):
                 
                 # Seleciona apenas as colunas existentes
                 existing_cols = [c for c in col_order if c in df.columns]
-                # Preserva qualquer outra coluna secundária que venha do banco
                 other_cols = [c for c in df.columns if c not in existing_cols]
                 df = df[existing_cols + other_cols]
 
-                # Exporta para memória RAM (BytesIO)
+                # Garantir a conversão correta dos tipos de data no Pandas antes do Excel
+                colunas_data = ["data_vencimento", "data", "parcial_data"]
+                for col in colunas_data:
+                    if col in df.columns:
+                        df[col] = pd.to_datetime(df[col], errors="coerce")
+
+                # Exporta para memória RAM (BytesIO) com Formatação via OpenPyXL
                 buffer = io.BytesIO()
                 with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
                     df.to_excel(writer, index=False, sheet_name="Lancamentos")
+                    
+                    workbook = writer.book
+                    worksheet = writer.sheets["Lancamentos"]
+
+                    # Definições das Regras de Tipo de Coluna
+                    colunas_numericas = ["valor", "valor_plan", "valor_real", "valor_realizado", "parcial_real", "correcao_valor"]
+                    colunas_booleanas = ["realizado", "recorrente", "permite_parcial", "usar_media"]
+
+                    # Estilos
+                    header_font = Font(bold=True, color="FFFFFF")
+                    header_fill = PatternFill(start_color="2C3E50", end_color="2C3E50", fill_type="solid")
+                    
+                    align_left = Alignment(horizontal="left", vertical="center")
+                    align_right = Alignment(horizontal="right", vertical="center")
+                    align_center = Alignment(horizontal="center", vertical="center")
+
+                    # 1. Estilização do Cabeçalho (Linha 1)
+                    for col_idx in range(1, worksheet.max_column + 1):
+                        cell = worksheet.cell(row=1, column=col_idx)
+                        cell.font = header_font
+                        cell.fill = header_fill
+                        cell.alignment = align_center
+
+                    # Mapeamento dos nomes de colunas
+                    col_names = [worksheet.cell(row=1, column=col_idx).value for col_idx in range(1, worksheet.max_column + 1)]
+
+                    # 2. Formatação por Célula / Coluna
+                    for row_idx in range(2, worksheet.max_row + 1):
+                        for col_idx, col_name in enumerate(col_names, start=1):
+                            cell = worksheet.cell(row=row_idx, column=col_idx)
+
+                            # --- CAMPOS DE DATA (dd/mm/aaaa - Alinhado ao Centro) ---
+                            if col_name in colunas_data:
+                                cell.number_format = "DD/MM/YYYY"
+                                cell.alignment = align_center
+
+                            # --- CAMPOS NUMÉRICOS (#.##0,00 - Alinhado à Direita) ---
+                            elif col_name in colunas_numericas:
+                                cell.number_format = "#,##0.00"
+                                cell.alignment = align_right
+
+                            # --- CAMPOS BOOLEANOS (Alinhado ao Centro) ---
+                            elif col_name in colunas_booleanas:
+                                cell.alignment = align_center
+
+                            # --- CAMPOS ALFANUMÉRICOS / TEXTO (Alinhado à Esquerda) ---
+                            else:
+                                cell.number_format = "@"
+                                cell.alignment = align_left
+
+                    # 3. Ajuste Automático da Largura das Colunas
+                    for col in worksheet.columns:
+                        max_len = 0
+                        col_letter = get_column_letter(col[0].column)
+                        for cell in col:
+                            # Formatação de string limpa para medição de tamanho
+                            if cell.value is not None:
+                                val_str = cell.value.strftime("%d/%m/%Y") if hasattr(cell.value, "strftime") else str(cell.value)
+                            else:
+                                val_str = ""
+                            if len(val_str) > max_len:
+                                max_len = len(val_str)
+                        
+                        worksheet.column_dimensions[col_letter].width = max(max_len + 4, 12)
+
                 buffer.seek(0)
 
                 st.success(f"✅ {len(df)} lançamentos processados com sucesso!")

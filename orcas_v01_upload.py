@@ -32,16 +32,39 @@ COLUNAS_VALIDAS_BANCO = {
 }
 
 def sanitize_val(val):
+    """Sanitiza valores vindos do Pandas/Excel."""
     if pd.isna(val) or val is None:
         return None
     if isinstance(val, float) and math.isnan(val):
         return None
     return val
 
+def parse_float_val(val):
+    """
+    Converte valores numéricos para float, tratando formatações
+    brasileiras de texto como '1.234,56' se necessário.
+    """
+    val_clean = sanitize_val(val)
+    if val_clean is None:
+        return 0.0
+    if isinstance(val_clean, (int, float)):
+        return float(val_clean)
+    
+    val_str = str(val_clean).strip()
+    if not val_str:
+        return 0.0
+    
+    # Tratamento de string no formato PT-BR "1.234,56"
+    try:
+        val_str = val_str.replace(".", "").replace(",", ".")
+        return float(val_str)
+    except ValueError:
+        return 0.0
+
 def format_date_str(val):
     """
-    Normaliza QUALQUER formato de data inserido pelo utilizador final 
-    para o formato ISO 'YYYY-MM-DD' exigido pelo Supabase.
+    Normaliza QUALQUER formato de data vindo do Excel (DD/MM/YYYY, datetime,
+    número serial ou YYYY-MM-DD) para o formato ISO 'YYYY-MM-DD' do Supabase.
     """
     if pd.isna(val) or val is None:
         return None
@@ -50,6 +73,7 @@ def format_date_str(val):
     if not val_str or val_str.lower() in ["none", "nan", "nat", "null"]:
         return None
 
+    # Remove componente de hora caso exista
     val_str = val_str.split(" ")[0].strip()
 
     try:
@@ -63,13 +87,7 @@ def format_date_str(val):
             if num_val > 30000:
                 return pd.to_datetime(num_val, unit="D", origin="1899-12-30").strftime("%Y-%m-%d")
 
-        # 3. String em formato ISO YYYY-MM-DD
-        match_iso = re.match(r"^(\d{4})[-/. ](\d{1,2})[-/. ](\d{1,2})$", val_str)
-        if match_iso:
-            ano, mes, dia = match_iso.groups()
-            return f"{int(ano):04d}-{int(mes):02d}-{int(dia):02d}"
-
-        # 4. String em formato BR DD/MM/YYYY
+        # 3. String em formato BR DD/MM/YYYY ou DD-MM-YYYY
         match_br = re.match(r"^(\d{1,2})[-/. ](\d{1,2})[-/. ](\d{2,4})$", val_str)
         if match_br:
             dia, mes, ano = match_br.groups()
@@ -77,7 +95,13 @@ def format_date_str(val):
                 ano = "20" + ano
             return f"{int(ano):04d}-{int(mes):02d}-{int(dia):02d}"
 
-        # 5. Parsing genérico via Pandas
+        # 4. String em formato ISO YYYY-MM-DD
+        match_iso = re.match(r"^(\d{4})[-/. ](\d{1,2})[-/. ](\d{1,2})$", val_str)
+        if match_iso:
+            ano, mes, dia = match_iso.groups()
+            return f"{int(ano):04d}-{int(mes):02d}-{int(dia):02d}"
+
+        # 5. Parsing genérico via Pandas (forçando dia primeiro)
         dt_parsed = pd.to_datetime(val_str, dayfirst=True, errors="coerce")
         if not pd.isna(dt_parsed):
             return dt_parsed.strftime("%Y-%m-%d")
@@ -179,21 +203,13 @@ def render_upload(usuario_id=None, projeto_id=None):
                     records_para_envio = []
 
                     for _, row in df.iterrows():
-                        # --- INICIALIZAÇÃO OBRIGATÓRIA E ABSOLUTA DE TODAS AS VARIÁVEIS NO INÍCIO DO LOOP ---
-                        descricao = ""
-                        tipo = ""
-                        data_venc = None
-                        parcial_data = None
-                        parcial_real = 0.0
-                        permite_parcial = False
-
-                        # Atribuição dos valores extraídos
+                        # --- INICIALIZAÇÃO E LEITURA ANTECIPADA DE TODAS AS VARIÁVEIS BASE ---
                         descricao = str(sanitize_val(row.get("descricao")) or "").strip()
                         tipo = str(sanitize_val(row.get("tipo")) or "").strip()
                         data_venc = format_date_str(sanitize_val(row.get("data_vencimento")) or sanitize_val(row.get("data")))
                         parcial_data = format_date_str(sanitize_val(row.get("parcial_data")))
                         
-                        parcial_real = float(sanitize_val(row.get("parcial_real")) or 0.0)
+                        parcial_real = parse_float_val(row.get("parcial_real"))
                         permite_parcial = bool(sanitize_val(row.get("permite_parcial")) or False)
 
                         # MODO 3: Ignora linhas de parciais realizadas
@@ -201,16 +217,18 @@ def render_upload(usuario_id=None, projeto_id=None):
                             if parcial_real > 0:
                                 continue
 
-                        # Valores planejados e realizados
-                        val_orig = sanitize_val(row.get("valor"))
-                        val_plan = sanitize_val(row.get("valor_plan"))
-                        val_real = sanitize_val(row.get("valor_real"))
-                        val_realizado = sanitize_val(row.get("valor_realizado"))
+                        # Resgate e parse numérico seguro dos valores
+                        val_orig = parse_float_val(row.get("valor"))
+                        val_plan = row.get("valor_plan")
+                        val_real = row.get("valor_real")
+                        val_realizado = row.get("valor_realizado")
 
-                        final_plan = float(val_plan if val_plan is not None else (val_orig or 0.0))
-                        final_real = float(val_real if val_real is not None else (val_realizado or parcial_real or 0.0))
+                        final_plan = parse_float_val(val_plan) if sanitize_val(val_plan) is not None else val_orig
+                        
+                        raw_real = val_real if sanitize_val(val_real) is not None else val_realizado
+                        final_real = parse_float_val(raw_real) if sanitize_val(raw_real) is not None else parcial_real
 
-                        # Estrutura base do objeto
+                        # Estrutura base do objeto para o Supabase
                         item = {
                             "usuario_id": usr_id,
                             "projeto_id": proj_id,
@@ -225,13 +243,15 @@ def render_upload(usuario_id=None, projeto_id=None):
                         if parcial_data:
                             item["parcial_data"] = parcial_data
 
-                        # Copia colunas válidas restantes
+                        # Copia colunas válidas restantes sanitizando
                         for col in df.columns:
                             if col in COLUNAS_VALIDAS_BANCO and col not in ["valor_plan", "valor_real", "id", "data_vencimento", "data", "parcial_data"]:
                                 val = sanitize_val(row[col])
                                 if col in ["realizado", "recorrente", "permite_parcial", "usar_media"]:
                                     if val is not None:
                                         val = bool(val)
+                                elif col in ["valor", "valor_realizado", "parcial_real", "correcao_valor"]:
+                                    val = parse_float_val(val)
                                 item[col] = val
 
                         # Ajustes do Modo 3 (Zerar realizados)
