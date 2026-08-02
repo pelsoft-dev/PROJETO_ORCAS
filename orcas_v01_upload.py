@@ -37,11 +37,25 @@ def sanitize_val(val):
     return val
 
 def format_date_str(val):
-    """Converte qualquer tipo de data para string 'YYYY-MM-DD' de forma ultra segura."""
+    """Converte qualquer formato de data (Excel Serial, ISO, BR, Timestamp) para 'YYYY-MM-DD'."""
     if pd.isna(val) or val is None or val == "":
         return ""
+
     try:
-        return pd.to_datetime(val).strftime("%Y-%m-%d")
+        # 1. Trata número serial do Excel (ex: 46263 ou "46263")
+        if isinstance(val, (int, float)) or (isinstance(val, str) and val.strip().isdigit()):
+            num_val = float(val)
+            if num_val > 30000: # Faixa de datas válidas no Excel
+                return pd.to_datetime(num_val, unit="D", origin="1899-12-30").strftime("%Y-%m-%d")
+
+        # 2. Tenta conversão genérica do Pandas (com suporte a dayfirst para dd/mm/yyyy)
+        parsed_dt = pd.to_datetime(val, dayfirst=True, errors="coerce")
+        if not pd.isna(parsed_dt):
+            return parsed_dt.strftime("%Y-%m-%d")
+
+        # 3. Fallback: limpa string se já vier no formato YYYY-MM-DD
+        val_str = str(val).strip().split(" ")[0]
+        return val_str
     except Exception:
         return str(val).strip()
 
@@ -104,7 +118,7 @@ def render_upload(usuario_id=None, projeto_id=None):
                             .eq("projeto_id", proj_id) \
                             .execute()
 
-                    # Formatação das colunas de data da planilha para string 'YYYY-MM-DD'
+                    # Formatação universal de colunas de data
                     for col in ["data_vencimento", "data", "parcial_data"]:
                         if col in df.columns:
                             df[col] = df[col].apply(format_date_str)
@@ -129,7 +143,6 @@ def render_upload(usuario_id=None, projeto_id=None):
                             db_id = db_row.get("id")
 
                             if db_id is not None:
-                                # Popula os mapas de busca sem risco de KeyError
                                 if desc and dt and tp:
                                     lookup_normais[(desc, dt, tp)] = db_id
                                 if desc and p_dt:
@@ -168,12 +181,17 @@ def render_upload(usuario_id=None, projeto_id=None):
                             "descricao": descricao,
                             "tipo": tipo,
                             "valor_plan": final_plan,
-                            "valor_real": final_real
+                            "valor_real": final_real,
+                            "data_vencimento": data_venc,
+                            "data": data_venc
                         }
+
+                        if parcial_data:
+                            item["parcial_data"] = parcial_data
 
                         # Copia colunas válidas restantes
                         for col in df.columns:
-                            if col in COLUNAS_VALIDAS_BANCO and col not in ["valor_plan", "valor_real", "id"]:
+                            if col in COLUNAS_VALIDAS_BANCO and col not in ["valor_plan", "valor_real", "id", "data_vencimento", "data", "parcial_data"]:
                                 val = sanitize_val(row[col])
                                 if col in ["realizado", "recorrente", "permite_parcial", "usar_media"]:
                                     if val is not None:
@@ -202,7 +220,6 @@ def render_upload(usuario_id=None, projeto_id=None):
                                 if match_id:
                                     item["id"] = match_id
                                     item["valor_plan"] = final_plan
-                                    # Não altera valor_real no Pai de Parcial
                                     item.pop("valor_real", None)
 
                             # CENÁRIO 1: Lançamento Normal (permite_parcial == False e parcial_real == 0)
