@@ -5,7 +5,6 @@ from orcas_v01_security import supabase
 
 BATCH_SIZE = 100
 
-# Lista exata das colunas existentes no Supabase conforme sua tabela
 COLUNAS_VALIDAS_BANCO = {
     "usuario_id",
     "projeto_id",
@@ -102,32 +101,42 @@ def render_upload(usuario_id=None, projeto_id=None):
 
                     records = []
                     for _, row in df.iterrows():
+                        parcial_real = sanitize_val(row.get("parcial_real")) or 0.0
+
+                        # --- MODO 3: REGRA DE DESCARTE DE PARCIAIS REALIZADAS ---
+                        if modo_importacao == "Suba todos os Lançamentos e seus Planejamentos, mas zere todos os Realizados":
+                            # Se for uma linha exclusiva de parcial realizada, ignora e NÃO inclui no banco
+                            if float(parcial_real) > 0:
+                                continue
+
                         item = {}
 
-                        # --- RESGATE DOS VALORES DA PLANILHA ---
+                        # Resgate e conversão dos valores
                         val_orig = sanitize_val(row.get("valor"))
                         val_plan = sanitize_val(row.get("valor_plan"))
                         val_real = sanitize_val(row.get("valor_real"))
                         val_realizado = sanitize_val(row.get("valor_realizado"))
-                        parcial_real = sanitize_val(row.get("parcial_real"))
 
-                        # Definição do PLANEJADO (vai para valor_plan)
                         final_plan = val_plan if val_plan is not None else val_orig
                         if final_plan is None:
                             final_plan = 0.0
 
-                        # Definição do REALIZADO (vai para valor_real)
                         final_real = val_real
                         if final_real is None:
                             final_real = val_realizado if val_realizado is not None else parcial_real
                         if final_real is None:
                             final_real = 0.0
 
-                        # Preenche AS DUAS COLUNAS PRINCIPAIS DO SEU BANCO
+                        # MODO 3: Zerar Realizados nos Lançamentos Principais
+                        if modo_importacao == "Suba todos os Lançamentos e seus Planejamentos, mas zere todos os Realizados":
+                            final_real = 0.0
+                            item["realizado"] = False
+                            item["parcial_real"] = 0.0
+
                         item["valor_plan"] = float(final_plan)
                         item["valor_real"] = float(final_real)
 
-                        # Copia as demais colunas válidas sem sobrescrever valor_plan e valor_real
+                        # Copia as demais colunas válidas
                         for col in df.columns:
                             if col in COLUNAS_VALIDAS_BANCO and col not in ["valor_plan", "valor_real"]:
                                 val = sanitize_val(row[col])
@@ -138,14 +147,6 @@ def render_upload(usuario_id=None, projeto_id=None):
 
                                 item[col] = val
 
-                        # MODO 3: Zerar Realizados se selecionado
-                        if modo_importacao == "Suba todos os Lançamentos e seus Planejamentos, mas zere todos os Realizados":
-                            item["realizado"] = False
-                            item["valor_real"] = 0.0
-                            if "valor_realizado" in item:
-                                item["valor_realizado"] = 0.0
-
-                        # Força o vínculo com usuário e projeto
                         item["usuario_id"] = usr_id
                         item["projeto_id"] = proj_id
 
@@ -155,6 +156,10 @@ def render_upload(usuario_id=None, projeto_id=None):
                     progress_bar = st.progress(0)
                     total = len(records)
                     uploaded_count = 0
+
+                    if total == 0:
+                        st.warning("Nenhum lançamento válido para importar após a filtragem.")
+                        return
 
                     for i in range(0, total, BATCH_SIZE):
                         batch = records[i:i + BATCH_SIZE]
