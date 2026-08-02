@@ -179,20 +179,19 @@ def render_upload(usuario_id=None, projeto_id=None):
                     records_para_envio = []
 
                     for _, row in df.iterrows():
+                        # --- 1. DECLARAÇÃO / LEITURA DE TODAS AS VARIÁVEIS BASE (PRIMEIRA COISA DA ITERAÇÃO) ---
+                        descricao = str(sanitize_val(row.get("descricao")) or "").strip()
+                        tipo = str(sanitize_val(row.get("tipo")) or "").strip()
+                        data_venc = format_date_str(sanitize_val(row.get("data_vencimento")) or sanitize_val(row.get("data")))
+                        parcial_data = format_date_str(sanitize_val(row.get("parcial_data")))
+                        
                         parcial_real = float(sanitize_val(row.get("parcial_real")) or 0.0)
                         permite_parcial = bool(sanitize_val(row.get("permite_parcial")) or False)
 
-                        # --- MODO 3: Descartar parciais realizadas ---
+                        # --- 2. REGRA DO MODO 3 (Pula parciais se necessário) ---
                         if modo_importacao == "Suba todos os Lançamentos e seus Planejamentos, mas zere todos os Realizados":
                             if parcial_real > 0:
                                 continue
-
-                        # Resgate dos campos chave da linha
-                        descricao = str(sanitize_val(row.get("descricao")) or "").strip()
-                        tipo = str(sanitize_val(row.get("tipo")) or "").strip()
-                        
-                        data_venc = format_date_str(sanitize_val(row.get("data_vencimento")) or sanitize_val(row.get("data")))
-                        parcial_data = format_date_str(sanitize_val(row.get("parcial_data")))
 
                         # Resgate de valores planejados e realizados
                         val_orig = sanitize_val(row.get("valor"))
@@ -233,7 +232,7 @@ def render_upload(usuario_id=None, projeto_id=None):
                             item["realizado"] = False
                             item["parcial_real"] = 0.0
 
-                        # --- MODO 2: LÓGICA DE ATUALIZAÇÃO SEM DUPLICAÇÃO ---
+                        # --- 3. MODO 2: LÓGICA DE ATUALIZAÇÃO SEM DUPLICAÇÃO ---
                         if modo_importacao == "Lançamentos novos serão cadastrados, e os já existentes serão atualizados":
                             
                             # CENÁRIO 3: Lançamento Filho Parcial (permite_parcial == False e parcial_real > 0)
