@@ -40,7 +40,7 @@ def sanitize_val(val):
 
 def format_date_str(val):
     """
-    Normaliza QUALQUER formato de data inserido pelo usuário final 
+    Normaliza QUALQUER formato de data inserido pelo utilizador final 
     para o formato ISO 'YYYY-MM-DD' exigido pelo Supabase.
     """
     if pd.isna(val) or val is None:
@@ -179,7 +179,7 @@ def render_upload(usuario_id=None, projeto_id=None):
                     records_para_envio = []
 
                     for _, row in df.iterrows():
-                        # --- 1. DECLARAÇÃO / LEITURA DE TODAS AS VARIÁVEIS BASE (PRIMEIRA COISA DA ITERAÇÃO) ---
+                        # --- 1. EXTRAÇÃO E INICIALIZAÇÃO DE TODAS AS VARIÁVEIS BASE ---
                         descricao = str(sanitize_val(row.get("descricao")) or "").strip()
                         tipo = str(sanitize_val(row.get("tipo")) or "").strip()
                         data_venc = format_date_str(sanitize_val(row.get("data_vencimento")) or sanitize_val(row.get("data")))
@@ -188,12 +188,12 @@ def render_upload(usuario_id=None, projeto_id=None):
                         parcial_real = float(sanitize_val(row.get("parcial_real")) or 0.0)
                         permite_parcial = bool(sanitize_val(row.get("permite_parcial")) or False)
 
-                        # --- 2. REGRA DO MODO 3 (Pula parciais se necessário) ---
+                        # --- 2. FILTRO DO MODO 3 ---
                         if modo_importacao == "Suba todos os Lançamentos e seus Planejamentos, mas zere todos os Realizados":
                             if parcial_real > 0:
                                 continue
 
-                        # Resgate de valores planejados e realizados
+                        # Valores planejados e realizados
                         val_orig = sanitize_val(row.get("valor"))
                         val_plan = sanitize_val(row.get("valor_plan"))
                         val_real = sanitize_val(row.get("valor_real"))
@@ -202,7 +202,7 @@ def render_upload(usuario_id=None, projeto_id=None):
                         final_plan = float(val_plan if val_plan is not None else (val_orig or 0.0))
                         final_real = float(val_real if val_real is not None else (val_realizado or parcial_real or 0.0))
 
-                        # Objeto base para montagem
+                        # Estrutura base do objeto
                         item = {
                             "usuario_id": usr_id,
                             "projeto_id": proj_id,
@@ -217,7 +217,7 @@ def render_upload(usuario_id=None, projeto_id=None):
                         if parcial_data:
                             item["parcial_data"] = parcial_data
 
-                        # Copia colunas válidas restantes garantindo sanitização
+                        # Copia colunas válidas restantes
                         for col in df.columns:
                             if col in COLUNAS_VALIDAS_BANCO and col not in ["valor_plan", "valor_real", "id", "data_vencimento", "data", "parcial_data"]:
                                 val = sanitize_val(row[col])
@@ -232,17 +232,17 @@ def render_upload(usuario_id=None, projeto_id=None):
                             item["realizado"] = False
                             item["parcial_real"] = 0.0
 
-                        # --- 3. MODO 2: LÓGICA DE ATUALIZAÇÃO SEM DUPLICAÇÃO ---
+                        # --- 3. MODO 2: ATUALIZAÇÃO SEM DUPLICAÇÃO ---
                         if modo_importacao == "Lançamentos novos serão cadastrados, e os já existentes serão atualizados":
                             
-                            # CENÁRIO 3: Lançamento Filho Parcial (permite_parcial == False e parcial_real > 0)
+                            # CENÁRIO 3: Lançamento Filho Parcial
                             if not permite_parcial and parcial_real > 0:
                                 match_id = lookup_parciais.get((descricao, parcial_data))
                                 if match_id:
                                     item["id"] = match_id
                                     item["parcial_real"] = parcial_real
 
-                            # CENÁRIO 2: Lançamento Pai (permite_parcial == True)
+                            # CENÁRIO 2: Lançamento Pai
                             elif permite_parcial:
                                 match_id = lookup_normais.get((descricao, data_venc, tipo))
                                 if match_id:
@@ -250,7 +250,7 @@ def render_upload(usuario_id=None, projeto_id=None):
                                     item["valor_plan"] = final_plan
                                     item.pop("valor_real", None)
 
-                            # CENÁRIO 1: Lançamento Normal (permite_parcial == False e parcial_real == 0)
+                            # CENÁRIO 1: Lançamento Normal
                             else:
                                 match_id = lookup_normais.get((descricao, data_venc, tipo))
                                 if match_id:
