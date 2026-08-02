@@ -37,7 +37,7 @@ def sanitize_val(val):
     return val
 
 def format_date_str(val):
-    """Converte qualquer tipo de data (Timestamp, datetime, str) para string 'YYYY-MM-DD'."""
+    """Converte qualquer tipo de data para string 'YYYY-MM-DD'."""
     if pd.isna(val) or val is None:
         return ""
     try:
@@ -109,8 +109,10 @@ def render_upload(usuario_id=None, projeto_id=None):
                         if col in df.columns:
                             df[col] = df[col].apply(format_date_str)
 
-                    # Se for MODO 2 (Atualização inteligente), carrega todos os lançamentos existentes do DB
-                    existentes_db = []
+                    # Dicionários de índice rápido para o MODO 2
+                    lookup_normais = {}    # Chave: (descricao, data, tipo) -> id
+                    lookup_parciais = {}   # Chave: (descricao, parcial_data) -> id
+
                     if modo_importacao == "Lançamentos novos serão cadastrados, e os já existentes serão atualizados":
                         res = supabase.table("lancamentos") \
                             .select("*") \
@@ -118,12 +120,19 @@ def render_upload(usuario_id=None, projeto_id=None):
                             .eq("projeto_id", proj_id) \
                             .execute()
                         
-                        # Normaliza as datas vindas do banco para garantir comparabilidade com string
                         raw_data = res.data or []
                         for db_row in raw_data:
-                            db_row["data_vencimento_str"] = format_date_str(db_row.get("data_vencimento") or db_row.get("data"))
-                            db_row["parcial_data_str"] = format_date_str(db_row.get("parcial_data"))
-                            existentes_db.append(db_row)
+                            desc = str(db_row.get("descricao", "")).strip()
+                            tp = str(db_row.get("tipo", "")).strip()
+                            dt = format_date_str(db_row.get("data_vencimento") or db_row.get("data"))
+                            p_dt = format_date_str(db_row.get("parcial_data"))
+                            db_id = db_row.get("id")
+
+                            # Popula mapas de busca rápida
+                            if desc and dt and tp:
+                                lookup_normais[(desc, dt, tp)] = db_id
+                            if desc and p_dt:
+                                lookup_parciais[(desc, p_dt)] = db_id
 
                     records_para_envio = []
 
@@ -178,27 +187,17 @@ def render_upload(usuario_id=None, projeto_id=None):
 
                         # --- MODO 2: LÓGICA DE ATUALIZAÇÃO SEM DUPLICAÇÃO ---
                         if modo_importacao == "Lançamentos novos serão cadastrados, e os já existentes serão atualizados":
-                            match_id = None
-
+                            
                             # CENÁRIO 3: Lançamento Filho Parcial (permite_parcial == False e parcial_real > 0)
                             if not permite_parcial and parcial_real > 0:
-                                for db_item in existentes_db:
-                                    if (str(db_item.get("descricao", "")).strip() == descricao and 
-                                        db_item.get("parcial_data_str", "") == parcial_data):
-                                        match_id = db_item.get("id")
-                                        break
+                                match_id = lookup_parciais.get((descricao, parcial_data))
                                 if match_id:
                                     item["id"] = match_id
                                     item["parcial_real"] = parcial_real
 
                             # CENÁRIO 2: Lançamento Pai (permite_parcial == True)
                             elif permite_parcial:
-                                for db_item in existentes_db:
-                                    if (str(db_item.get("descricao", "")).strip() == descricao and 
-                                        db_item.get("data_vencimento_str", "") == data_venc and 
-                                        str(db_item.get("tipo", "")).strip() == tipo):
-                                        match_id = db_item.get("id")
-                                        break
+                                match_id = lookup_normais.get((descricao, data_venc, tipo))
                                 if match_id:
                                     item["id"] = match_id
                                     item["valor_plan"] = final_plan
@@ -207,12 +206,7 @@ def render_upload(usuario_id=None, projeto_id=None):
 
                             # CENÁRIO 1: Lançamento Normal (permite_parcial == False e parcial_real == 0)
                             else:
-                                for db_item in existentes_db:
-                                    if (str(db_item.get("descricao", "")).strip() == descricao and 
-                                        db_item.get("data_vencimento_str", "") == data_venc and 
-                                        str(db_item.get("tipo", "")).strip() == tipo):
-                                        match_id = db_item.get("id")
-                                        break
+                                match_id = lookup_normais.get((descricao, data_venc, tipo))
                                 if match_id:
                                     item["id"] = match_id
                                     item["valor_plan"] = final_plan
