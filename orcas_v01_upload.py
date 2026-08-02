@@ -1,4 +1,5 @@
 import math
+import datetime
 import pandas as pd
 import streamlit as st
 from orcas_v01_security import supabase
@@ -37,18 +38,21 @@ def sanitize_val(val):
     return val
 
 def format_date_str(val):
-    """Converte qualquer formato de data (Excel Serial, ISO, BR, Timestamp) para 'YYYY-MM-DD'."""
+    """Converte qualquer formato de data (Excel Serial, ISO, BR, Timestamp, datetime) para 'YYYY-MM-DD'."""
     if pd.isna(val) or val is None or val == "":
         return ""
 
     try:
-        # 1. Se já for um Timestamp ou datetime do Pandas, formata direto
-        if isinstance(val, (pd.Timestamp, pd.DatetimeIndex)):
-            return val.strftime("%Y-%m-%d")
+        # 1. Se já for um objeto de data/hora (Timestamp, datetime, date) que possui strftime
+        if hasattr(val, "strftime") and callable(getattr(val, "strftime")):
+            try:
+                return val.strftime("%Y-%m-%d")
+            except Exception:
+                pass
 
         # 2. Trata número serial do Excel (ex: 46263 ou 46263.0)
         if isinstance(val, (int, float)):
-            if val > 30000:
+            if val > 30000:  # Faixa de datas válidas no Excel
                 return pd.to_datetime(val, unit="D", origin="1899-12-30").strftime("%Y-%m-%d")
         elif isinstance(val, str) and val.strip().replace(".", "", 1).isdigit():
             num_val = float(val)
@@ -60,7 +64,7 @@ def format_date_str(val):
         if not pd.isna(parsed_dt):
             return parsed_dt.strftime("%Y-%m-%d")
 
-        # 4. Fallback
+        # 4. Fallback: limpa string se já vier no formato YYYY-MM-DD
         val_str = str(val).strip().split(" ")[0]
         return val_str
     except Exception:
