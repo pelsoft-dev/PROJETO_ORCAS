@@ -5,9 +5,8 @@ from orcas_v01_security import supabase
 
 BATCH_SIZE = 100
 
-# Lista estrita de colunas existentes na tabela 'lancamentos' do Supabase
+# Colunas oficiais da tabela 'lancamentos' no Supabase
 COLUNAS_VALIDAS_BANCO = {
-    "id",
     "usuario_id",
     "projeto_id",
     "descricao",
@@ -19,9 +18,6 @@ COLUNAS_VALIDAS_BANCO = {
     "data",
     "realizado",
     "valor_realizado",
-    "valor_real",
-    "parcial_real",
-    "parcial_data",
     "recorrente",
     "permite_parcial",
     "usar_media",
@@ -38,7 +34,6 @@ def sanitize_val(val):
 def render_upload(usuario_id=None, projeto_id=None):
     st.subheader("📤 Importar Lançamentos via Excel")
 
-    # --- RESOLUÇÃO FLEXÍVEL DAS CHAVES DE SESSÃO ---
     usr_id = (
         usuario_id 
         or st.session_state.get("user_id") 
@@ -58,7 +53,6 @@ def render_upload(usuario_id=None, projeto_id=None):
 
     st.info(f"📌 **Vinculará os dados importados a:** Usuário `{usr_id}` | Projeto `{proj_id}`")
 
-    # --- SELEÇÃO DAS REGRAS DE IMPORTAÇÃO (RADIO BUTTONS SEM PADRÃO) ---
     st.markdown("### Selecione o modo de importação:")
     modo_importacao = st.radio(
         "Escolha como o sistema deve tratar os dados da planilha em relação ao banco de dados:",
@@ -87,7 +81,7 @@ def render_upload(usuario_id=None, projeto_id=None):
                         st.warning("A planilha enviada está vazia.")
                         return
 
-                    # MODO 1: Deletar dados antigos do usuário + projeto antes da gravação
+                    # Limpa registros antigos se a opção 1 for escolhida
                     if modo_importacao == "Apague todos os dados do DB e suba todo o conteúdo da planilha":
                         st.toast("Limpando lançamentos anteriores do projeto...", icon="🗑️")
                         supabase.table("lancamentos") \
@@ -96,7 +90,7 @@ def render_upload(usuario_id=None, projeto_id=None):
                             .eq("projeto_id", proj_id) \
                             .execute()
 
-                    # Formata colunas de datas para YYYY-MM-DD
+                    # Formatação de datas
                     for col in ["data_vencimento", "data", "parcial_data"]:
                         if col in df.columns:
                             df[col] = pd.to_datetime(df[col], errors="coerce").dt.strftime("%Y-%m-%d")
@@ -104,39 +98,53 @@ def render_upload(usuario_id=None, projeto_id=None):
                     records = []
                     for _, row in df.iterrows():
                         item = {}
+
+                        # --- TRATAMENTO E MIGRAÇÃO DAS COLUNAS DE VALOR (LEGAIS -> ATUAIS) ---
+                        val_original = sanitize_val(row.get("valor"))
+                        val_plan = sanitize_val(row.get("valor_plan"))
+                        val_real = sanitize_val(row.get("valor_real"))
+                        val_realizado_orig = sanitize_val(row.get("valor_realizado"))
+                        parcial_real = sanitize_val(row.get("parcial_real"))
+
+                        # 1. Define o valor planejado (se 'valor' estiver vazio, usa 'valor_plan')
+                        valor_final = val_original if val_original is not None else val_plan
+                        if valor_final is None:
+                            valor_final = 0.0
+
+                        # 2. Define o valor realizado (prioriza 'valor_realizado', 'valor_real' ou 'parcial_real')
+                        realizado_final = val_realizado_orig
+                        if realizado_final is None:
+                            realizado_final = val_real if val_real is not None else parcial_real
+                        if realizado_final is None:
+                            realizado_final = 0.0
+
+                        # Preenche os campos oficiais
+                        item["valor"] = float(valor_final)
+                        item["valor_realizado"] = float(realizado_final)
+
+                        # Copia as demais colunas válidas
                         for col in df.columns:
-                            # Ignora colunas que não existem no banco de dados
-                            if col not in COLUNAS_VALIDAS_BANCO:
-                                continue
+                            if col in COLUNAS_VALIDAS_BANCO and col not in ["valor", "valor_realizado"]:
+                                val = sanitize_val(row[col])
 
-                            val = sanitize_val(row[col])
+                                if col in ["realizado", "recorrente", "permite_parcial", "usar_media"]:
+                                    if val is not None:
+                                        val = bool(val)
 
-                            # Trata booleanos
-                            if col in ["realizado", "recorrente", "permite_parcial", "usar_media"]:
-                                if val is not None:
-                                    val = bool(val)
+                                item[col] = val
 
-                            # Tratamento da coluna ID
-                            if col == "id":
-                                if val is None or modo_importacao == "Apague todos os dados do DB e suba todo o conteúdo da planilha":
-                                    continue
-
-                            item[col] = val
-
-                        # MODO 3: Zerar Realizados na Importação
+                        # MODO 3: Zerar Realizados se selecionado
                         if modo_importacao == "Suba todos os Lançamentos e seus Planejamentos, mas zere todos os Realizados":
                             item["realizado"] = False
                             item["valor_realizado"] = 0.0
-                            item["valor_real"] = 0.0
-                            item["parcial_real"] = 0.0
 
-                        # --- FORÇA O PERTENCIMENTO AO USUÁRIO E PROJETO ATIVO ---
+                        # Força o vínculo com usuário e projeto
                         item["usuario_id"] = usr_id
                         item["projeto_id"] = proj_id
 
                         records.append(item)
 
-                    # Envio em lotes (Batches)
+                    # Envio em lotes
                     progress_bar = st.progress(0)
                     total = len(records)
                     uploaded_count = 0
