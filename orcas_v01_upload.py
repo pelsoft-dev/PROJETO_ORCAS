@@ -36,6 +36,15 @@ def sanitize_val(val):
         return None
     return val
 
+def format_date_str(val):
+    """Converte qualquer tipo de data (Timestamp, datetime, str) para string 'YYYY-MM-DD'."""
+    if pd.isna(val) or val is None:
+        return ""
+    try:
+        return pd.to_datetime(val).strftime("%Y-%m-%d")
+    except Exception:
+        return str(val).strip()
+
 def render_upload(usuario_id=None, projeto_id=None):
     st.subheader("📤 Importar Lançamentos via Excel")
 
@@ -95,10 +104,10 @@ def render_upload(usuario_id=None, projeto_id=None):
                             .eq("projeto_id", proj_id) \
                             .execute()
 
-                    # Formatação de colunas de data para YYYY-MM-DD
+                    # Formatação das colunas de data da planilha para string 'YYYY-MM-DD'
                     for col in ["data_vencimento", "data", "parcial_data"]:
                         if col in df.columns:
-                            df[col] = pd.to_datetime(df[col], errors="coerce").dt.strftime("%Y-%m-%d")
+                            df[col] = df[col].apply(format_date_str)
 
                     # Se for MODO 2 (Atualização inteligente), carrega todos os lançamentos existentes do DB
                     existentes_db = []
@@ -108,7 +117,13 @@ def render_upload(usuario_id=None, projeto_id=None):
                             .eq("usuario_id", usr_id) \
                             .eq("projeto_id", proj_id) \
                             .execute()
-                        existentes_db = res.data or []
+                        
+                        # Normaliza as datas vindas do banco para garantir comparabilidade com string
+                        raw_data = res.data or []
+                        for db_row in raw_data:
+                            db_row["data_vencimento_str"] = format_date_str(db_row.get("data_vencimento") or db_row.get("data"))
+                            db_row["parcial_data_str"] = format_date_str(db_row.get("parcial_data"))
+                            existentes_db.append(db_row)
 
                     records_para_envio = []
 
@@ -124,8 +139,8 @@ def render_upload(usuario_id=None, projeto_id=None):
                         # Resgate dos campos chave da linha
                         descricao = str(sanitize_val(row.get("descricao")) or "").strip()
                         tipo = str(sanitize_val(row.get("tipo")) or "").strip()
-                        data_venc = sanitize_val(row.get("data_vencimento")) or sanitize_val(row.get("data"))
-                        parcial_data = sanitize_val(row.get("parcial_data"))
+                        data_venc = format_date_str(sanitize_val(row.get("data_vencimento")) or sanitize_val(row.get("data")))
+                        parcial_data = format_date_str(sanitize_val(row.get("parcial_data")))
 
                         # Resgate de valores planejados e realizados
                         val_orig = sanitize_val(row.get("valor"))
@@ -169,7 +184,7 @@ def render_upload(usuario_id=None, projeto_id=None):
                             if not permite_parcial and parcial_real > 0:
                                 for db_item in existentes_db:
                                     if (str(db_item.get("descricao", "")).strip() == descricao and 
-                                        str(db_item.get("parcial_data", "")) == str(parcial_data)):
+                                        db_item.get("parcial_data_str", "") == parcial_data):
                                         match_id = db_item.get("id")
                                         break
                                 if match_id:
@@ -180,7 +195,7 @@ def render_upload(usuario_id=None, projeto_id=None):
                             elif permite_parcial:
                                 for db_item in existentes_db:
                                     if (str(db_item.get("descricao", "")).strip() == descricao and 
-                                        str(db_item.get("data_vencimento", db_item.get("data", ""))) == str(data_venc) and 
+                                        db_item.get("data_vencimento_str", "") == data_venc and 
                                         str(db_item.get("tipo", "")).strip() == tipo):
                                         match_id = db_item.get("id")
                                         break
@@ -194,7 +209,7 @@ def render_upload(usuario_id=None, projeto_id=None):
                             else:
                                 for db_item in existentes_db:
                                     if (str(db_item.get("descricao", "")).strip() == descricao and 
-                                        str(db_item.get("data_vencimento", db_item.get("data", ""))) == str(data_venc) and 
+                                        db_item.get("data_vencimento_str", "") == data_venc and 
                                         str(db_item.get("tipo", "")).strip() == tipo):
                                         match_id = db_item.get("id")
                                         break
