@@ -42,18 +42,25 @@ def format_date_str(val):
         return ""
 
     try:
-        # 1. Trata número serial do Excel (ex: 46263 ou "46263")
-        if isinstance(val, (int, float)) or (isinstance(val, str) and val.strip().isdigit()):
+        # 1. Se já for um Timestamp ou datetime do Pandas, formata direto
+        if isinstance(val, (pd.Timestamp, pd.DatetimeIndex)):
+            return val.strftime("%Y-%m-%d")
+
+        # 2. Trata número serial do Excel (ex: 46263 ou 46263.0)
+        if isinstance(val, (int, float)):
+            if val > 30000:
+                return pd.to_datetime(val, unit="D", origin="1899-12-30").strftime("%Y-%m-%d")
+        elif isinstance(val, str) and val.strip().replace(".", "", 1).isdigit():
             num_val = float(val)
-            if num_val > 30000: # Faixa de datas válidas no Excel
+            if num_val > 30000:
                 return pd.to_datetime(num_val, unit="D", origin="1899-12-30").strftime("%Y-%m-%d")
 
-        # 2. Tenta conversão genérica do Pandas (com suporte a dayfirst para dd/mm/yyyy)
+        # 3. Tenta conversão genérica do Pandas (suporta datas em formato BR dd/mm/yyyy)
         parsed_dt = pd.to_datetime(val, dayfirst=True, errors="coerce")
         if not pd.isna(parsed_dt):
             return parsed_dt.strftime("%Y-%m-%d")
 
-        # 3. Fallback: limpa string se já vier no formato YYYY-MM-DD
+        # 4. Fallback
         val_str = str(val).strip().split(" ")[0]
         return val_str
     except Exception:
