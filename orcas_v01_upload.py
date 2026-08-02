@@ -6,6 +6,7 @@ from orcas_v01_security import supabase
 BATCH_SIZE = 100
 
 COLUNAS_VALIDAS_BANCO = {
+    "id",
     "usuario_id",
     "projeto_id",
     "descricao",
@@ -85,7 +86,7 @@ def render_upload(usuario_id=None, projeto_id=None):
                         st.warning("A planilha enviada está vazia.")
                         return
 
-                    # Limpa registros antigos se a opção 1 for escolhida
+                    # MODO 1: Apagar dados existentes antes do envio
                     if modo_importacao == "Apague todos os dados do DB e suba todo o conteúdo da planilha":
                         st.toast("Limpando lançamentos anteriores do projeto...", icon="🗑️")
                         supabase.table("lancamentos") \
@@ -94,67 +95,119 @@ def render_upload(usuario_id=None, projeto_id=None):
                             .eq("projeto_id", proj_id) \
                             .execute()
 
-                    # Formatação de datas
+                    # Formatação de colunas de data para YYYY-MM-DD
                     for col in ["data_vencimento", "data", "parcial_data"]:
                         if col in df.columns:
                             df[col] = pd.to_datetime(df[col], errors="coerce").dt.strftime("%Y-%m-%d")
 
-                    records = []
-                    for _, row in df.iterrows():
-                        parcial_real = sanitize_val(row.get("parcial_real")) or 0.0
+                    # Se for MODO 2 (Atualização inteligente), carrega todos os lançamentos existentes do DB
+                    existentes_db = []
+                    if modo_importacao == "Lançamentos novos serão cadastrados, e os já existentes serão atualizados":
+                        res = supabase.table("lancamentos") \
+                            .select("*") \
+                            .eq("usuario_id", usr_id) \
+                            .eq("projeto_id", proj_id) \
+                            .execute()
+                        existentes_db = res.data or []
 
-                        # --- MODO 3: REGRA DE DESCARTE DE PARCIAIS REALIZADAS ---
+                    records_para_envio = []
+
+                    for _, row in df.iterrows():
+                        parcial_real = float(sanitize_val(row.get("parcial_real")) or 0.0)
+                        permite_parcial = bool(sanitize_val(row.get("permite_parcial")) or False)
+
+                        # --- MODO 3: Descartar parciais realizadas ---
                         if modo_importacao == "Suba todos os Lançamentos e seus Planejamentos, mas zere todos os Realizados":
-                            # Se for uma linha exclusiva de parcial realizada, ignora e NÃO inclui no banco
-                            if float(parcial_real) > 0:
+                            if parcial_real > 0:
                                 continue
 
-                        item = {}
+                        # Resgate dos campos chave da linha
+                        descricao = str(sanitize_val(row.get("descricao")) or "").strip()
+                        tipo = str(sanitize_val(row.get("tipo")) or "").strip()
+                        data_venc = sanitize_val(row.get("data_vencimento")) or sanitize_val(row.get("data"))
+                        parcial_data = sanitize_val(row.get("parcial_data"))
 
-                        # Resgate e conversão dos valores
+                        # Resgate de valores planejados e realizados
                         val_orig = sanitize_val(row.get("valor"))
                         val_plan = sanitize_val(row.get("valor_plan"))
                         val_real = sanitize_val(row.get("valor_real"))
                         val_realizado = sanitize_val(row.get("valor_realizado"))
 
-                        final_plan = val_plan if val_plan is not None else val_orig
-                        if final_plan is None:
-                            final_plan = 0.0
+                        final_plan = float(val_plan if val_plan is not None else (val_orig or 0.0))
+                        final_real = float(val_real if val_real is not None else (val_realizado or parcial_real or 0.0))
 
-                        final_real = val_real
-                        if final_real is None:
-                            final_real = val_realizado if val_realizado is not None else parcial_real
-                        if final_real is None:
-                            final_real = 0.0
+                        # Objeto base para montagem
+                        item = {
+                            "usuario_id": usr_id,
+                            "projeto_id": proj_id,
+                            "descricao": descricao,
+                            "tipo": tipo,
+                            "valor_plan": final_plan,
+                            "valor_real": final_real
+                        }
 
-                        # MODO 3: Zerar Realizados nos Lançamentos Principais
-                        if modo_importacao == "Suba todos os Lançamentos e seus Planejamentos, mas zere todos os Realizados":
-                            final_real = 0.0
-                            item["realizado"] = False
-                            item["parcial_real"] = 0.0
-
-                        item["valor_plan"] = float(final_plan)
-                        item["valor_real"] = float(final_real)
-
-                        # Copia as demais colunas válidas
+                        # Copia colunas válidas restantes
                         for col in df.columns:
-                            if col in COLUNAS_VALIDAS_BANCO and col not in ["valor_plan", "valor_real"]:
+                            if col in COLUNAS_VALIDAS_BANCO and col not in ["valor_plan", "valor_real", "id"]:
                                 val = sanitize_val(row[col])
-
                                 if col in ["realizado", "recorrente", "permite_parcial", "usar_media"]:
                                     if val is not None:
                                         val = bool(val)
-
                                 item[col] = val
 
-                        item["usuario_id"] = usr_id
-                        item["projeto_id"] = proj_id
+                        # Ajustes do Modo 3 (Zerar realizados)
+                        if modo_importacao == "Suba todos os Lançamentos e seus Planejamentos, mas zere todos os Realizados":
+                            item["valor_real"] = 0.0
+                            item["realizado"] = False
+                            item["parcial_real"] = 0.0
 
-                        records.append(item)
+                        # --- MODO 2: LÓGICA DE ATUALIZAÇÃO SEM DUPLICAÇÃO ---
+                        if modo_importacao == "Lançamentos novos serão cadastrados, e os já existentes serão atualizados":
+                            match_id = None
 
-                    # Envio em lotes
+                            # CENÁRIO 3: Lançamento Filho Parcial (permite_parcial == False e parcial_real > 0)
+                            if not permite_parcial and parcial_real > 0:
+                                for db_item in existentes_db:
+                                    if (str(db_item.get("descricao", "")).strip() == descricao and 
+                                        str(db_item.get("parcial_data", "")) == str(parcial_data)):
+                                        match_id = db_item.get("id")
+                                        break
+                                if match_id:
+                                    item["id"] = match_id
+                                    item["parcial_real"] = parcial_real
+
+                            # CENÁRIO 2: Lançamento Pai (permite_parcial == True)
+                            elif permite_parcial:
+                                for db_item in existentes_db:
+                                    if (str(db_item.get("descricao", "")).strip() == descricao and 
+                                        str(db_item.get("data_vencimento", db_item.get("data", ""))) == str(data_venc) and 
+                                        str(db_item.get("tipo", "")).strip() == tipo):
+                                        match_id = db_item.get("id")
+                                        break
+                                if match_id:
+                                    item["id"] = match_id
+                                    item["valor_plan"] = final_plan
+                                    # Não altera valor_real no Pai de Parcial
+                                    item.pop("valor_real", None)
+
+                            # CENÁRIO 1: Lançamento Normal (permite_parcial == False e parcial_real == 0)
+                            else:
+                                for db_item in existentes_db:
+                                    if (str(db_item.get("descricao", "")).strip() == descricao and 
+                                        str(db_item.get("data_vencimento", db_item.get("data", ""))) == str(data_venc) and 
+                                        str(db_item.get("tipo", "")).strip() == tipo):
+                                        match_id = db_item.get("id")
+                                        break
+                                if match_id:
+                                    item["id"] = match_id
+                                    item["valor_plan"] = final_plan
+                                    item["valor_real"] = final_real
+
+                        records_para_envio.append(item)
+
+                    # Envio em lotes (Batches)
                     progress_bar = st.progress(0)
-                    total = len(records)
+                    total = len(records_para_envio)
                     uploaded_count = 0
 
                     if total == 0:
@@ -162,7 +215,7 @@ def render_upload(usuario_id=None, projeto_id=None):
                         return
 
                     for i in range(0, total, BATCH_SIZE):
-                        batch = records[i:i + BATCH_SIZE]
+                        batch = records_para_envio[i:i + BATCH_SIZE]
                         supabase.table("lancamentos").upsert(batch).execute()
                         uploaded_count += len(batch)
                         progress_bar.progress(uploaded_count / total)
