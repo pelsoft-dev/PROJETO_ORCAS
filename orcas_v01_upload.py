@@ -1,3 +1,4 @@
+import re
 import math
 import datetime
 import pandas as pd
@@ -38,37 +39,53 @@ def sanitize_val(val):
     return val
 
 def format_date_str(val):
-    """Converte qualquer formato de data (Excel Serial, ISO, BR, Timestamp, datetime) para 'YYYY-MM-DD'."""
-    if pd.isna(val) or val is None or val == "":
-        return ""
+    """
+    Normaliza QUALQUER formato de data inserido pelo usuário final 
+    para o formato ISO 'YYYY-MM-DD' exigido pelo Supabase.
+    """
+    if pd.isna(val) or val is None:
+        return None
+    
+    val_str = str(val).strip()
+    if not val_str or val_str.lower() in ["none", "nan", "nat", "null"]:
+        return None
+
+    val_str = val_str.split(" ")[0].strip()
 
     try:
-        # 1. Se já for um objeto de data/hora (Timestamp, datetime, date) que possui strftime
+        # 1. Objeto Date / Datetime / Timestamp
         if hasattr(val, "strftime") and callable(getattr(val, "strftime")):
-            try:
-                return val.strftime("%Y-%m-%d")
-            except Exception:
-                pass
+            return val.strftime("%Y-%m-%d")
 
-        # 2. Trata número serial do Excel (ex: 46263 ou 46263.0)
-        if isinstance(val, (int, float)):
-            if val > 30000:  # Faixa de datas válidas no Excel
-                return pd.to_datetime(val, unit="D", origin="1899-12-30").strftime("%Y-%m-%d")
-        elif isinstance(val, str) and val.strip().replace(".", "", 1).isdigit():
+        # 2. Número Serial do Excel (ex: 46263 ou 46263.0)
+        if isinstance(val, (int, float)) or val_str.replace(".", "", 1).isdigit():
             num_val = float(val)
             if num_val > 30000:
                 return pd.to_datetime(num_val, unit="D", origin="1899-12-30").strftime("%Y-%m-%d")
 
-        # 3. Tenta conversão genérica do Pandas (suporta datas em formato BR dd/mm/yyyy)
-        parsed_dt = pd.to_datetime(val, dayfirst=True, errors="coerce")
-        if not pd.isna(parsed_dt):
-            return parsed_dt.strftime("%Y-%m-%d")
+        # 3. String em formato ISO YYYY-MM-DD
+        match_iso = re.match(r"^(\d{4})[-/. ](\d{1,2})[-/. ](\d{1,2})$", val_str)
+        if match_iso:
+            ano, mes, dia = match_iso.groups()
+            return f"{int(ano):04d}-{int(mes):02d}-{int(dia):02d}"
 
-        # 4. Fallback: limpa string se já vier no formato YYYY-MM-DD
-        val_str = str(val).strip().split(" ")[0]
-        return val_str
+        # 4. String em formato BR DD/MM/YYYY
+        match_br = re.match(r"^(\d{1,2})[-/. ](\d{1,2})[-/. ](\d{2,4})$", val_str)
+        if match_br:
+            dia, mes, ano = match_br.groups()
+            if len(ano) == 2:
+                ano = "20" + ano
+            return f"{int(ano):04d}-{int(mes):02d}-{int(dia):02d}"
+
+        # 5. Parsing genérico via Pandas
+        dt_parsed = pd.to_datetime(val_str, dayfirst=True, errors="coerce")
+        if not pd.isna(dt_parsed):
+            return dt_parsed.strftime("%Y-%m-%d")
+
     except Exception:
-        return str(val).strip()
+        pass
+
+    return None
 
 def render_upload(usuario_id=None, projeto_id=None):
     st.subheader("📤 Importar Lançamentos via Excel")
@@ -129,7 +146,7 @@ def render_upload(usuario_id=None, projeto_id=None):
                             .eq("projeto_id", proj_id) \
                             .execute()
 
-                    # Formatação universal de colunas de data
+                    # Formatação universal de colunas de data na planilha
                     for col in ["data_vencimento", "data", "parcial_data"]:
                         if col in df.columns:
                             df[col] = df[col].apply(format_date_str)
@@ -173,6 +190,7 @@ def render_upload(usuario_id=None, projeto_id=None):
                         # Resgate dos campos chave da linha
                         descricao = str(sanitize_val(row.get("descricao")) or "").strip()
                         tipo = str(sanitize_val(row.get("tipo")) or "").strip()
+                        
                         data_venc = format_date_str(sanitize_val(row.get("data_vencimento")) or sanitize_val(row.get("data")))
                         parcial_data = format_date_str(sanitize_val(row.get("parcial_data")))
 
@@ -200,7 +218,7 @@ def render_upload(usuario_id=None, projeto_id=None):
                         if parcial_data:
                             item["parcial_data"] = parcial_data
 
-                        # Copia colunas válidas restantes
+                        # Copia colunas válidas restantes garantindo sanitização
                         for col in df.columns:
                             if col in COLUNAS_VALIDAS_BANCO and col not in ["valor_plan", "valor_real", "id", "data_vencimento", "data", "parcial_data"]:
                                 val = sanitize_val(row[col])
