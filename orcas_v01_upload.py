@@ -1,6 +1,5 @@
 import re
 import math
-import datetime
 import pandas as pd
 import streamlit as st
 from orcas_v01_security import supabase
@@ -54,7 +53,6 @@ def parse_float_val(val):
     if not val_str:
         return 0.0
     
-    # Tratamento de string no formato PT-BR "1.234,56"
     try:
         val_str = val_str.replace(".", "").replace(",", ".")
         return float(val_str)
@@ -101,7 +99,7 @@ def format_date_str(val):
             ano, mes, dia = match_iso.groups()
             return f"{int(ano):04d}-{int(mes):02d}-{int(dia):02d}"
 
-        # 5. Parsing genérico via Pandas (forçando dia primeiro)
+        # 5. Parsing genérico via Pandas
         dt_parsed = pd.to_datetime(val_str, dayfirst=True, errors="coerce")
         if not pd.isna(dt_parsed):
             return dt_parsed.strftime("%Y-%m-%d")
@@ -175,7 +173,7 @@ def render_upload(usuario_id=None, projeto_id=None):
                         if col in df.columns:
                             df[col] = df[col].apply(format_date_str)
 
-                    # Dicionários de índice rápido para o MODO 2
+                    # Dicionários de busca rápida para o MODO 2
                     lookup_normais = {}    # Chave: (descricao, data, tipo) -> id
                     lookup_parciais = {}   # Chave: (descricao, parcial_data) -> id
 
@@ -203,7 +201,7 @@ def render_upload(usuario_id=None, projeto_id=None):
                     records_para_envio = []
 
                     for _, row in df.iterrows():
-                        # --- INICIALIZAÇÃO E LEITURA ANTECIPADA DE TODAS AS VARIÁVEIS BASE ---
+                        # --- LEITURA E SANITIZAÇÃO DOS CAMPOS BASE ---
                         descricao = str(sanitize_val(row.get("descricao")) or "").strip()
                         tipo = str(sanitize_val(row.get("tipo")) or "").strip()
                         data_venc = format_date_str(sanitize_val(row.get("data_vencimento")) or sanitize_val(row.get("data")))
@@ -260,45 +258,53 @@ def render_upload(usuario_id=None, projeto_id=None):
                             item["realizado"] = False
                             item["parcial_real"] = 0.0
 
-                        # --- MODO 2: ATUALIZAÇÃO SEM DUPLICAÇÃO ---
+                        # --- MODO 2: ATUALIZAÇÃO SEM DUPLICAÇÃO DE ID ---
                         if modo_importacao == "Lançamentos novos serão cadastrados, e os já existentes serão atualizados":
                             
-                            # CENÁRIO 3: Lançamento Filho Parcial
+                            # Usa `.pop()` para garantir que o mesmo ID do banco NUNCA seja atribuído a mais de uma linha no mesmo lote
                             if not permite_parcial and parcial_real > 0:
-                                match_id = lookup_parciais.get((descricao, parcial_data))
-                                if match_id:
+                                match_id = lookup_parciais.pop((descricao, parcial_data), None)
+                                if match_id is not None:
                                     item["id"] = match_id
                                     item["parcial_real"] = parcial_real
 
-                            # CENÁRIO 2: Lançamento Pai
                             elif permite_parcial:
-                                match_id = lookup_normais.get((descricao, data_venc, tipo))
-                                if match_id:
+                                match_id = lookup_normais.pop((descricao, data_venc, tipo), None)
+                                if match_id is not None:
                                     item["id"] = match_id
                                     item["valor_plan"] = final_plan
                                     item.pop("valor_real", None)
 
-                            # CENÁRIO 1: Lançamento Normal
                             else:
-                                match_id = lookup_normais.get((descricao, data_venc, tipo))
-                                if match_id:
+                                match_id = lookup_normais.pop((descricao, data_venc, tipo), None)
+                                if match_id is not None:
                                     item["id"] = match_id
                                     item["valor_plan"] = final_plan
                                     item["valor_real"] = final_real
 
+                        # BLINDAGEM CONTRA O ERRO 23502: Se 'id' não existir ou for None/Null, remove a chave do dicionário
+                        if "id" in item and (item["id"] is None or pd.isna(item["id"])):
+                            del item["id"]
+
                         records_para_envio.append(item)
 
-                    # Envio em lotes (Batches)
+                    if not records_para_envio:
+                        st.warning("Nenhum lançamento válido para importar após a filtragem.")
+                        return
+
+                    # Envio em lotes (Batches) para evitar estouro de requisição no Supabase
                     progress_bar = st.progress(0)
                     total = len(records_para_envio)
                     uploaded_count = 0
 
-                    if total == 0:
-                        st.warning("Nenhum lançamento válido para importar após a filtragem.")
-                        return
-
                     for i in range(0, total, BATCH_SIZE):
                         batch = records_para_envio[i:i + BATCH_SIZE]
+                        
+                        # Garantia extra: remove qualquer 'id' residual que seja None antes de disparar o upsert
+                        for b_item in batch:
+                            if "id" in b_item and (b_item["id"] is None or pd.isna(b_item["id"])):
+                                del b_item["id"]
+
                         supabase.table("lancamentos").upsert(batch).execute()
                         uploaded_count += len(batch)
                         progress_bar.progress(uploaded_count / total)
