@@ -37,8 +37,8 @@ def sanitize_val(val):
     return val
 
 def format_date_str(val):
-    """Converte qualquer tipo de data para string 'YYYY-MM-DD'."""
-    if pd.isna(val) or val is None:
+    """Converte qualquer tipo de data para string 'YYYY-MM-DD' de forma ultra segura."""
+    if pd.isna(val) or val is None or val == "":
         return ""
     try:
         return pd.to_datetime(val).strftime("%Y-%m-%d")
@@ -122,17 +122,18 @@ def render_upload(usuario_id=None, projeto_id=None):
                         
                         raw_data = res.data or []
                         for db_row in raw_data:
-                            desc = str(db_row.get("descricao", "")).strip()
-                            tp = str(db_row.get("tipo", "")).strip()
+                            desc = str(db_row.get("descricao") or "").strip()
+                            tp = str(db_row.get("tipo") or "").strip()
                             dt = format_date_str(db_row.get("data_vencimento") or db_row.get("data"))
                             p_dt = format_date_str(db_row.get("parcial_data"))
                             db_id = db_row.get("id")
 
-                            # Popula mapas de busca rápida
-                            if desc and dt and tp:
-                                lookup_normais[(desc, dt, tp)] = db_id
-                            if desc and p_dt:
-                                lookup_parciais[(desc, p_dt)] = db_id
+                            if db_id is not None:
+                                # Popula os mapas de busca sem risco de KeyError
+                                if desc and dt and tp:
+                                    lookup_normais[(desc, dt, tp)] = db_id
+                                if desc and p_dt:
+                                    lookup_parciais[(desc, p_dt)] = db_id
 
                     records_para_envio = []
 
