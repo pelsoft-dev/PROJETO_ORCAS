@@ -164,22 +164,30 @@ def render_upload(usuario_id=None, projeto_id=None):
                         
                         raw_data = res.data or []
                         for db_row in raw_data:
-                            desc = str(db_row.get("descricao") or "").strip()
-                            tp = str(db_row.get("tipo") or "").strip()
-                            dt = format_date_str(db_row.get("data_vencimento") or db_row.get("data"))
-                            p_dt = format_date_str(db_row.get("parcial_data"))
+                            d_desc = str(db_row.get("descricao") or "").strip()
+                            d_tp = str(db_row.get("tipo") or "").strip()
+                            d_dt = format_date_str(db_row.get("data_vencimento") or db_row.get("data"))
+                            d_p_dt = format_date_str(db_row.get("parcial_data"))
                             db_id = db_row.get("id")
 
                             if db_id is not None:
-                                if desc and dt and tp:
-                                    lookup_normais[(desc, dt, tp)] = db_id
-                                if desc and p_dt:
-                                    lookup_parciais[(desc, p_dt)] = db_id
+                                if d_desc and d_dt and d_tp:
+                                    lookup_normais[(d_desc, d_dt, d_tp)] = db_id
+                                if d_desc and d_p_dt:
+                                    lookup_parciais[(d_desc, d_p_dt)] = db_id
 
                     records_para_envio = []
 
                     for _, row in df.iterrows():
-                        # --- 1. EXTRAÇÃO E INICIALIZAÇÃO DE TODAS AS VARIÁVEIS BASE ---
+                        # --- INICIALIZAÇÃO OBRIGATÓRIA E ABSOLUTA DE TODAS AS VARIÁVEIS NO INÍCIO DO LOOP ---
+                        descricao = ""
+                        tipo = ""
+                        data_venc = None
+                        parcial_data = None
+                        parcial_real = 0.0
+                        permite_parcial = False
+
+                        # Atribuição dos valores extraídos
                         descricao = str(sanitize_val(row.get("descricao")) or "").strip()
                         tipo = str(sanitize_val(row.get("tipo")) or "").strip()
                         data_venc = format_date_str(sanitize_val(row.get("data_vencimento")) or sanitize_val(row.get("data")))
@@ -188,7 +196,7 @@ def render_upload(usuario_id=None, projeto_id=None):
                         parcial_real = float(sanitize_val(row.get("parcial_real")) or 0.0)
                         permite_parcial = bool(sanitize_val(row.get("permite_parcial")) or False)
 
-                        # --- 2. FILTRO DO MODO 3 ---
+                        # MODO 3: Ignora linhas de parciais realizadas
                         if modo_importacao == "Suba todos os Lançamentos e seus Planejamentos, mas zere todos os Realizados":
                             if parcial_real > 0:
                                 continue
@@ -232,7 +240,7 @@ def render_upload(usuario_id=None, projeto_id=None):
                             item["realizado"] = False
                             item["parcial_real"] = 0.0
 
-                        # --- 3. MODO 2: ATUALIZAÇÃO SEM DUPLICAÇÃO ---
+                        # --- MODO 2: ATUALIZAÇÃO SEM DUPLICAÇÃO ---
                         if modo_importacao == "Lançamentos novos serão cadastrados, e os já existentes serão atualizados":
                             
                             # CENÁRIO 3: Lançamento Filho Parcial
