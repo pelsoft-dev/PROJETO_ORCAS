@@ -187,7 +187,7 @@ def render_upload(usuario_id=None, projeto_id=None):
                         raw_real = val_real if sanitize_val(val_real) is not None else val_realizado
                         final_real = parse_float_val(raw_real) if sanitize_val(raw_real) is not None else parcial_real
 
-                        # Monta objeto limpo sem chave 'id'
+                        # Monta objeto base
                         item = {
                             "usuario_id": usr_id,
                             "projeto_id": proj_id,
@@ -213,12 +213,17 @@ def render_upload(usuario_id=None, projeto_id=None):
                                     val = parse_float_val(val)
                                 item[col] = val
 
-                        # Ajustes específicos se for o modo de zerar os realizados
+                        # Regra específica para o modo de zerar os realizados
                         if modo_importacao == "Suba todos os Lançamentos e seus Planejamentos, mas zere todos os Realizados":
                             item["valor_real"] = 0.0
                             item["realizado"] = False
                             item["parcial_real"] = 0.0
                             item["status"] = "PLAN"
+
+                        # REGRA DE SEGURANÇA GERAL: Se o valor realizado for 0 ou realizado == False, força o status para PLAN
+                        if item.get("valor_real", 0.0) == 0.0 or not item.get("realizado", False):
+                            item["status"] = "PLAN"
+                            item["realizado"] = False
 
                         # Garante por segurança total que 'id' não exista no payload
                         item.pop("id", None)
