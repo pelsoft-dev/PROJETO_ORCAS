@@ -150,14 +150,14 @@ def render_upload(usuario_id=None, projeto_id=None):
                         st.warning("A planilha enviada está vazia.")
                         return
 
-                    # MODO 1: Limpa os lançamentos antigos no banco
-                    if modo_importacao == "Apague todos os dados do DB e suba todo o conteúdo da planilha":
-                        st.toast("Limpando lançamentos anteriores do projeto...", icon="🗑️")
-                        supabase.table("lancamentos") \
-                            .delete() \
-                            .eq("usuario_id", usr_id) \
-                            .eq("projeto_id", proj_id) \
-                            .execute()
+                    # AMBOS OS MODOS agora limpam a base anterior do usuário/projeto
+                    # para evitar registros duplicados no banco de dados.
+                    st.toast("Limpando lançamentos anteriores do projeto...", icon="🗑️")
+                    supabase.table("lancamentos") \
+                        .delete() \
+                        .eq("usuario_id", usr_id) \
+                        .eq("projeto_id", proj_id) \
+                        .execute()
 
                     # Normalização prévia das colunas de data
                     for col in ["data_vencimento", "data", "parcial_data"]:
@@ -174,7 +174,7 @@ def render_upload(usuario_id=None, projeto_id=None):
                         
                         parcial_real = parse_float_val(row.get("parcial_real"))
 
-                        # MODO 2 ("Zerar Realizados"): Ignora linhas de lançamentos filhos/parciais
+                        # MODO 2 ("Zerar Realizados"): Ignora linhas filhas de realizações parciais
                         if modo_importacao == "Suba todos os Lançamentos e seus Planejamentos, mas zere todos os Realizados":
                             if parcial_real > 0:
                                 continue
@@ -230,7 +230,7 @@ def render_upload(usuario_id=None, projeto_id=None):
                         st.warning("Nenhum lançamento válido para importar após a filtragem.")
                         return
 
-                    # Envio direto via .insert() em lotes
+                    # Envio limpo via .insert() em lotes
                     progress_bar = st.progress(0)
                     processed_count = 0
 
@@ -240,6 +240,6 @@ def render_upload(usuario_id=None, projeto_id=None):
                         processed_count += len(batch)
                         progress_bar.progress(processed_count / total_proc)
 
-                    st.success(f"✅ Upload concluído com sucesso! {total_proc} registro(s) inseridos.")
+                    st.success(f"✅ Upload concluído com sucesso! {total_proc} registro(s) inserido(s).")
                 except Exception as e:
                     st.error(f"Erro durante o upload: {e}")
