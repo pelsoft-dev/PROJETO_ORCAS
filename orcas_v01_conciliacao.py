@@ -63,7 +63,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
     if st.session_state.abrir_sem_plan:
         cols_sp = st.columns([2.5, 1, 1.2, 1])
         sp_desc = cols_sp[0].text_input("Descrição", key="sp_desc", placeholder="Ex: Gasto Extra")
-        sp_tipo = cols_sp[1].selectbox("E/S", ["Entrada", "Saída"], key="sp_tipo")
+        sp_tipo = cols_sp[1].selectbox("E/S", ["Saída", "Entrada"], key="sp_tipo")
         sp_valor = cols_sp[2].text_input("Valor Real", key="sp_valor", value="0,00")
         
         with cols_sp[3]:
