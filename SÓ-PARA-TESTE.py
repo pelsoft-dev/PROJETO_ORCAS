@@ -1,184 +1,208 @@
-import math
-import pandas as pd
 import streamlit as st
-from orcas_v01_security import supabase
+import pandas as pd
+from datetime import datetime, timedelta
 
-BATCH_SIZE = 100
+# Importando a ajuda do arquivo dedicado para Conciliação
+from orcas_v01_ajuda_conciliacao import renderizar_ajuda_conciliacao
 
-COLUNAS_VALIDAS_BANCO = {
-    "usuario_id",
-    "projeto_id",
-    "descricao",
-    "complemento",
-    "categoria",
-    "tipo",
-    "valor",
-    "valor_plan",
-    "valor_real",
-    "valor_realizado",
-    "data_vencimento",
-    "data",
-    "realizado",
-    "recorrente",
-    "permite_parcial",
-    "usar_media",
-    "observacao",
-    "parcial_real",
-    "parcial_data",
-    "status"
-}
-
-def sanitize_val(val):
-    if pd.isna(val) or val is None:
-        return None
-    if isinstance(val, float) and math.isnan(val):
-        return None
-    return val
-
-def parse_float_val(val):
-    val_clean = sanitize_val(val)
-    if val_clean is None:
-        return 0.0
-    if isinstance(val_clean, (int, float)):
-        return float(val_clean)
+def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moeda):
+    """
+    Sub-rotina da Tela Conciliação - Layout Compacto e Filtro de Parciais.
+    """
+    # --- CABEÇALHO ALINHADO COM BOTÃO DE AJUDA ---
+    col_titulo, col_ajuda = st.columns([4, 1])
     
-    val_str = str(val_clean).strip()
-    if not val_str:
-        return 0.0
+    with col_titulo:
+        st.markdown(f'<div class="titulo-tela" style="margin-top:0px;">Conciliação: {st.session_state.projeto_ativo}</div>', unsafe_allow_html=True)
+        
+    with col_ajuda:
+        st.markdown("""
+            <style>
+            div.stButton > button:first-child {
+                background-color: #007ba7 !important;
+                color: white !important;
+                border: none !important;
+            }
+            div.stButton > button:first-child:hover {
+                background-color: #005f81 !important;
+                color: white !important;
+            }
+            </style>
+        """, unsafe_allow_html=True)
+        
+        if st.button("AJUDA", type="primary", use_container_width=True):
+            st.session_state["exibir_ajuda_conciliacao"] = not st.session_state.get("exibir_ajuda_conciliacao", False)
+            st.rerun()
+
+    # --- EXIBIÇÃO DA TELA DE AJUDA SE O BOTÃO FOR CLICADO ---
+    if st.session_state.get("exibir_ajuda_conciliacao", False):
+        renderizar_ajuda_conciliacao()
+
+    # INJEÇÃO DE CSS LOCALIZADA - NÃO AFETA A NAVEGAÇÃO DO SISTEMA
+    st.markdown("""
+        <style>
+        /* Redução de altura APENAS para os elementos dentro da conciliação */
+        .block-container {
+            padding-top: 2rem !important;
+        }
+        /* Ajuste fino dos labels dos toggles */
+        [data-testid="stWidgetLabel"] p {
+            font-size: 0.85rem !important;
+            white-space: nowrap !important;
+        }
+        /* Estilização para reduzir o espaço entre as linhas de dados */
+        .stMarkdown div p {
+            margin-bottom: 0px !important;
+        }
+        /* Mantém o divisor discreto */
+        hr {
+            margin-top: 0.5rem !important;
+            margin-bottom: 0.5rem !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
+    hoje_c = datetime.now().date()
+    ini_mes_c = hoje_c.replace(day=1)
     
-    try:
-        val_str = val_str.replace(".", "").replace(",", ".")
-        return float(val_str)
-    except ValueError:
-        return 0.0
+    # AJUSTE: Limite para os últimos 5 dias (hoje + 4 dias atrás)
+    limite_c = hoje_c - timedelta(days=4)
 
-def render_upload(usuario_id=None, projeto_id=None):
-    st.subheader("📤 Importar Lançamentos via Excel")
+    # LINHA DE COMANDO
+    col_aviso, col_tog = st.columns([4, 3])
+    
+    col_aviso.markdown('<div style="font-size: 0.8rem; color: #555; margin-top: 10px;">📱🔄 SE USANDO O CELULAR, TRABALHE COM ELE NA HORIZONTAL</div>', unsafe_allow_html=True)
+    
+    # Toggles de Controle
+    abrir_sem_plan = col_tog.toggle("Lançar sem Planejamento", value=st.session_state.get('abrir_sem_plan', False))
+    st.session_state.abrir_sem_plan = abrir_sem_plan
+    
+    listar_todos_mes = col_tog.toggle("Listar todos Lançamentos do mês", value=st.session_state.get('listar_todos_mes', False))
+    st.session_state.listar_todos_mes = listar_todos_mes
+    
+    st.divider()
 
-    usr_id = (
-        usuario_id 
-        or st.session_state.get("user_id") 
-        or st.session_state.get("usuario_id") 
-        or st.session_state.get("usuario")
-    )
-    proj_id = (
-        projeto_id 
-        or st.session_state.get("projeto_ativo") 
-        or st.session_state.get("projeto") 
-        or st.session_state.get("plano_ativo")
-    )
+    if st.session_state.abrir_sem_plan:
+        cols_sp = st.columns([2.5, 1, 1.2, 1])
+        sp_desc = cols_sp[0].text_input("Descrição", key="sp_desc", placeholder="Ex: Gasto Extra")
+        sp_tipo = cols_sp[1].selectbox("E/S", ["Entrada", "Saída"], key="sp_tipo")
+        sp_valor = cols_sp[2].text_input("Valor Real", key="sp_valor", value="0,00")
+        
+        with cols_sp[3]:
+            st.markdown('<div style="margin-top: 28px;"></div>', unsafe_allow_html=True)
+            btn_confirmar = st.button("Ok", key="btn_sp_conf", use_container_width=True)
+        
+        if btn_confirmar:
+            v_sp = parse_moeda(sp_valor)
+            if sp_desc and v_sp > 0:
+                supabase.table("lancamentos").insert({
+                    "projeto_id": str(st.session_state.projeto_ativo),
+                    "usuario_id": str(ID_USUARIO_LOGADO),
+                    "descricao": sp_desc,
+                    "data": hoje_c.strftime('%Y-%m-%d'),
+                    "data_vencimento": hoje_c.strftime('%Y-%m-%d'),
+                    "tipo": sp_tipo,
+                    "valor_plan": 0, "valor_real": v_sp,
+                    "status": "Realizado", "parcial_real": 0, "permite_parcial": False
+                }).execute()
+                st.session_state.abrir_sem_plan = False
+                st.rerun()
+        st.divider()
 
-    if not usr_id or not proj_id:
-        st.error("⚠️ Usuário ou Projeto Ativo não identificados na sessão. Efetue o login novamente.")
-        return
+    df_c = df.copy()
+    if not df_c.empty:
+        df_c['dt_obj'] = pd.to_datetime(df_c['data']).dt.date
+        
+        # ⚠️ REGRA CRÍTICA: EXCLUI DA LISTA PRINCIPAL QUALQUER LINHA FILHA DE PARCIAL
+        # Parciais gravadas servem apenas para somar o V.Real acumulado, não para virar linhas de exibição
+        df_c = df_c[(df_c['parcial_real'].fillna(0) == 0) & (df_c['status'] != 'Parcial')].copy()
+        
+        # LÓGICA DE FILTRO DA TELA
+        if st.session_state.listar_todos_mes:
+            proximo_mes = (ini_mes_c + timedelta(days=32)).replace(day=1)
+            fim_mes_c = proximo_mes - timedelta(days=1)
+            df_f = df_c[(df_c['dt_obj'] >= ini_mes_c) & (df_c['dt_obj'] <= fim_mes_c)].copy()
+        else:
+            df_f = df_c[
+                (df_c['dt_obj'] >= ini_mes_c) & 
+                (df_c['dt_obj'] <= hoje_c) & 
+                (
+                    (df_c['status'] == 'Planejado') | 
+                    ((df_c['status'] == 'Realizado') & (df_c['dt_obj'] >= limite_c)) | 
+                    ((df_c['valor_plan'] == 0) & (df_c['valor_real'] > 0))
+                )
+            ].copy()
+        
+        parciais_topo = df_f[(df_f['permite_parcial'] == True) & (df_f['dt_obj'] >= ini_mes_c)]
+        demais_itens = df_f[~df_f.index.isin(parciais_topo.index)].sort_values('dt_obj', ascending=False)
+        df_final_concilia = pd.concat([parciais_topo, demais_itens])
 
-    st.info(f"📌 **Vinculará os dados importados a:** Usuário `{usr_id}` | Projeto `{proj_id}`")
+        # CABEÇALHO - LARGURAS: [2.2, 0.5, 1.1, 1.1, 1.1, 0.5]
+        h1, h2, h3, h4, h5, h6 = st.columns([2.2, 0.5, 1.1, 1.1, 1.1, 0.5])
+        h1.write("**Data - Descrição**")
+        h2.write("**E/S**")
+        h3.write("**V. Plan.**")
+        h4.write("**V. Real**")
+        h5.write("**Valor Parcial**")
+        h6.write("**Ação**")
+        st.divider()
 
-    st.markdown("### Selecione o modo de importação:")
-    modo_importacao = st.radio(
-        "Escolha como o sistema deve tratar os dados da planilha em relação ao banco de dados:",
-        options=[
-            "Apague todos os dados do DB e suba todo o conteúdo da planilha",
-            "Suba todos os Lançamentos e seus Planejamentos, mas zere todos os Realizados"
-        ],
-        index=None,
-        key="modo_importacao_radio"
-    )
-
-    if not modo_importacao:
-        st.warning("⚠️ Selecione um modo de importação acima para habilitar o envio do arquivo.")
-        return
-
-    uploaded_file = st.file_uploader("Selecione a planilha Excel (.xlsx)", type=["xlsx"])
-
-    if uploaded_file is not None:
-        if st.button("Iniciar Upload para o Supabase", type="primary", use_container_width=True):
-            with st.spinner("Lendo e tratando dados da planilha..."):
-                try:
-                    df = pd.read_excel(uploaded_file, engine="openpyxl")
-
-                    if df.empty:
-                        st.warning("A planilha enviada está vazia.")
-                        return
-
-                    # AMBAS AS OPÇÕES LIMAPM TODOS OS DADOS ANTERIORES DO BANCO DE DADOS
-                    st.toast("Limpando lançamentos anteriores do projeto...", icon="🗑️")
-                    supabase.table("lancamentos") \
-                        .delete() \
-                        .eq("usuario_id", usr_id) \
-                        .eq("projeto_id", proj_id) \
-                        .execute()
-
-                    # Formatação prévia de datas
-                    for col in ["data_vencimento", "data", "parcial_data"]:
-                        if col in df.columns:
-                            df[col] = pd.to_datetime(df[col], errors="coerce").dt.strftime("%Y-%m-%d")
-
-                    records = []
-                    for _, row in df.iterrows():
-                        parcial_real = parse_float_val(row.get("parcial_real"))
-
-                        # OPÇÃO 2: Se tiver parcial_real > 0, descarta o lançamento
-                        if modo_importacao == "Suba todos os Lançamentos e seus Planejamentos, mas zere todos os Realizados":
-                            if parcial_real > 0:
-                                continue
-
-                        item = {}
-
-                        # Leitura de Valores
-                        val_orig = parse_float_val(row.get("valor"))
-                        val_plan = row.get("valor_plan")
-                        val_real = row.get("valor_real")
-                        val_realizado = row.get("valor_realizado")
-
-                        final_plan = parse_float_val(val_plan) if sanitize_val(val_plan) is not None else val_orig
-                        raw_real = val_real if sanitize_val(val_real) is not None else val_realizado
-                        final_real = parse_float_val(raw_real) if sanitize_val(raw_real) is not None else parcial_real
-
-                        item["valor_plan"] = final_plan
-                        item["valor_real"] = final_real
-
-                        # Copia colunas válidas da planilha
-                        for col in df.columns:
-                            if col in COLUNAS_VALIDAS_BANCO and col not in ["valor_plan", "valor_real"]:
-                                val = sanitize_val(row[col])
-
-                                if col in ["realizado", "recorrente", "permite_parcial", "usar_media"]:
-                                    if val is not None:
-                                        val = bool(val)
-
-                                item[col] = val
-
-                        # APLICAÇÃO ESTRITA DA OPÇÃO 2 (ZERAR REALIZADOS)
-                        if modo_importacao == "Suba todos os Lançamentos e seus Planejamentos, mas zere todos os Realizados":
-                            item["valor_real"] = 0.0
-                            item["parcial_real"] = 0.0
-                            item["realizado"] = False
-                            item["status"] = "PLAN"
-
-                        item["usuario_id"] = usr_id
-                        item["projeto_id"] = proj_id
-
-                        # Remove ID se porventura vier na planilha
-                        item.pop("id", None)
-
-                        records.append(item)
-
-                    total = len(records)
-                    if total == 0:
-                        st.warning("Nenhum lançamento válido para importar após a filtragem.")
-                        return
-
-                    # Envio em lotes
-                    progress_bar = st.progress(0)
-                    uploaded_count = 0
-
-                    for i in range(0, total, BATCH_SIZE):
-                        batch = records[i:i + BATCH_SIZE]
-                        supabase.table("lancamentos").insert(batch).execute()
-                        uploaded_count += len(batch)
-                        progress_bar.progress(uploaded_count / total)
-
-                    st.success(f"✅ Upload concluído com sucesso! {total} registro(s) processado(s).")
-                except Exception as e:
-                    st.error(f"Erro durante o upload: {e}")
+        for _, row in df_final_concilia.iterrows():
+            # Soma acumulada considerando todas as parciais lançadas para a mesma descrição
+            v_acumulado_desc = df[df['descricao'] == row['descricao']]['parcial_real'].sum()
+            cor_txt = "red" if (row['valor_plan'] > 0 and v_acumulado_desc > row['valor_plan']) else "black"
+            
+            st.markdown('<div style="margin-bottom: -32px;"></div>', unsafe_allow_html=True)
+            
+            c1, c2, c3, c4, c5, c6 = st.columns([2.2, 0.5, 1.1, 1.1, 1.1, 0.5])
+            
+            c1.markdown(f"<span style='color:{cor_txt}; font-weight: 500;'>{row['dt_obj'].strftime('%d/%m/%Y')} - {row['descricao']}</span>", unsafe_allow_html=True)
+            cor_tipo = 'red' if row['tipo'] == 'Saída' else 'blue'
+            c2.markdown(f"<span style='color:{cor_tipo}'>{row['tipo'][0]}</span>", unsafe_allow_html=True)
+            
+            if row['permite_parcial']:
+                c3.markdown(f"<span style='color:{cor_txt}'>{format_moeda(row['valor_plan'])}</span>", unsafe_allow_html=True)
+                c4.markdown(f"<span style='color:{cor_txt}'>{format_moeda(v_acumulado_desc)}</span>", unsafe_allow_html=True)
+                
+                v_key = f"v_p_{row['id']}"
+                if v_key not in st.session_state: 
+                    st.session_state[v_key] = 0
+                
+                v_parc_in = c5.text_input("", key=f"p_{row['id']}_{st.session_state[v_key]}", value="0,00", label_visibility="collapsed")
+                
+                if c6.button("Ok", key=f"btn_p_{row['id']}", use_container_width=True):
+                    v_dig = parse_moeda(v_parc_in)
+                    if v_dig > 0:
+                        # GRAVA O FILHO PARCIAL COM STATUS 'Parcial' (NÃO MAIS 'Realizado')
+                        supabase.table("lancamentos").insert({
+                            "projeto_id": str(st.session_state.projeto_ativo),
+                            "usuario_id": str(ID_USUARIO_LOGADO), 
+                            "descricao": row['descricao'], 
+                            "data": ini_mes_c.strftime('%Y-%m-%d'), 
+                            "data_vencimento": ini_mes_c.strftime('%Y-%m-%d'), 
+                            "tipo": row['tipo'],
+                            "valor_plan": 0, 
+                            "valor_real": 0, 
+                            "status": "Parcial",
+                            "parcial_real": v_dig, 
+                            "parcial_data": hoje_c.strftime('%Y-%m-%d'), 
+                            "permite_parcial": False
+                        }).execute()
+                        st.session_state[v_key] += 1
+                        st.rerun()
+            else:
+                c3.write(format_moeda(row['valor_plan']))
+                if row['status'] == 'Realizado':
+                    c4.write(format_moeda(row['valor_real']))
+                    c6.write("✅")
+                else:
+                    v_norm_in = c4.text_input("", key=f"n_{row['id']}", value="0,00", label_visibility="collapsed")
+                    if c6.button("Ok", key=f"btn_n_{row['id']}", use_container_width=True):
+                        v_para_gravar = parse_moeda(v_norm_in)
+                        if v_para_gravar == 0: 
+                            v_para_gravar = row['valor_plan']
+                        supabase.table("lancamentos").update({"valor_real": v_para_gravar, "status": "Realizado"}).eq("id", row['id']).execute()
+                        st.rerun()
+            st.divider()
+    else:
+        st.info("Nenhum lançamento pendente para conciliação.")
