@@ -6,31 +6,7 @@ from orcas_v01_security import supabase
 
 BATCH_SIZE = 100
 
-COLUNAS_VALIDAS_BANCO = {
-    "usuario_id",
-    "projeto_id",
-    "descricao",
-    "complemento",
-    "categoria",
-    "tipo",
-    "valor",
-    "valor_plan",
-    "valor_real",
-    "valor_realizado",
-    "data_vencimento",
-    "data",
-    "realizado",
-    "recorrente",
-    "permite_parcial",
-    "usar_media",
-    "observacao",
-    "parcial_real",
-    "parcial_data",
-    "status"
-}
-
 def sanitize_val(val):
-    """Sanitiza valores vindos do Pandas/Excel."""
     if pd.isna(val) or val is None:
         return None
     if isinstance(val, float) and math.isnan(val):
@@ -38,7 +14,6 @@ def sanitize_val(val):
     return val
 
 def parse_float_val(val):
-    """Converte valores numéricos para float, tratando formatações PT-BR."""
     val_clean = sanitize_val(val)
     if val_clean is None:
         return 0.0
@@ -56,7 +31,6 @@ def parse_float_val(val):
         return 0.0
 
 def format_date_str(val):
-    """Normaliza datas do Excel para YYYY-MM-DD."""
     if pd.isna(val) or val is None:
         return None
     
@@ -82,22 +56,16 @@ def format_date_str(val):
                 ano = "20" + ano
             return f"{int(ano):04d}-{int(mes):02d}-{int(dia):02d}"
 
-        match_iso = re.match(r"^(\d{4})[-/. ](\d{1,2})[-/. ](\d{1,2})$", val_str)
-        if match_iso:
-            ano, mes, dia = match_iso.groups()
-            return f"{int(ano):04d}-{int(mes):02d}-{int(dia):02d}"
-
         dt_parsed = pd.to_datetime(val_str, dayfirst=True, errors="coerce")
         if not pd.isna(dt_parsed):
             return dt_parsed.strftime("%Y-%m-%d")
-
     except Exception:
         pass
 
     return None
 
 def render_upload(usuario_id=None, projeto_id=None):
-    st.subheader("📤 Importar Lançamentos via Excel")
+    st.subheader("📤 Importar Planejamento via Excel")
 
     usr_id = (
         usuario_id 
@@ -113,31 +81,16 @@ def render_upload(usuario_id=None, projeto_id=None):
     )
 
     if not usr_id or not proj_id:
-        st.error("⚠️ Usuário ou Projeto Ativo não identificados na sessão. Efetue o login novamente.")
+        st.error("⚠️ Usuário ou Projeto Ativo não identificados na sessão.")
         return
 
-    st.info(f"📌 **Vinculará os dados importados a:** Usuário `{usr_id}` | Projeto `{proj_id}`")
+    st.info(f"📌 **Projeto Ativo:** `{proj_id}` | **Usuário:** `{usr_id}`")
 
-    st.markdown("### Selecione o modo de importação:")
-    modo_importacao = st.radio(
-        "Escolha como o sistema deve tratar os dados da planilha em relação ao banco de dados:",
-        options=[
-            "Apague todos os dados do DB e suba todo o conteúdo da planilha",
-            "Suba todos os Lançamentos e seus Planejamentos, mas zere todos os Realizados"
-        ],
-        index=None,
-        key="modo_importacao_radio"
-    )
-
-    if not modo_importacao:
-        st.warning("⚠️ Selecione um modo de importação acima para habilitar o envio do arquivo.")
-        return
-
-    uploaded_file = st.file_uploader("Selecione a planilha Excel (.xlsx)", type=["xlsx"])
+    uploaded_file = st.file_uploader("Selecione a planilha com o Planejamento (.xlsx)", type=["xlsx"])
 
     if uploaded_file is not None:
-        if st.button("Iniciar Upload para o Supabase", type="primary", use_container_width=True):
-            with st.spinner("Lendo e tratando dados da planilha..."):
+        if st.button("Subir Planejamento", type="primary", use_container_width=True):
+            with st.spinner("Processando e enviando dados..."):
                 try:
                     df = pd.read_excel(uploaded_file, engine="openpyxl")
 
@@ -145,7 +98,19 @@ def render_upload(usuario_id=None, projeto_id=None):
                         st.warning("A planilha enviada está vazia.")
                         return
 
-                    # Limpa a base anterior do usuário/projeto antes de inserir os novos dados
+                    # Normaliza nomes de colunas da planilha (minúsculas e sem acentos)
+                    df.columns = (
+                        df.columns.astype(str)
+                        .str.strip()
+                        .str.lower()
+                        .str.replace(" ", "_")
+                        .str.replace("á", "a").str.replace("ã", "a")
+                        .str.replace("é", "e").str.replace("ê", "e")
+                        .str.replace("í", "i").str.replace("ó", "o")
+                        .str.replace("ú", "u").str.replace("ç", "c")
+                    )
+
+                    # 1. DELETA TODOS OS LANÇAMENTOS ANTERIORES DO BANCO (PAIS E FILHOS)
                     st.toast("Limpando lançamentos anteriores do projeto...", icon="🗑️")
                     supabase.table("lancamentos") \
                         .delete() \
@@ -153,91 +118,67 @@ def render_upload(usuario_id=None, projeto_id=None):
                         .eq("projeto_id", proj_id) \
                         .execute()
 
-                    # Normalização prévia das colunas de data
-                    for col in ["data_vencimento", "data", "parcial_data"]:
-                        if col in df.columns:
-                            df[col] = df[col].apply(format_date_str)
-
                     records_para_envio = []
-                    
-                    zerar_realizados = "zere" in modo_importacao.lower() or "realizados" in modo_importacao.lower()
 
                     for _, row in df.iterrows():
-                        descricao = str(sanitize_val(row.get("descricao")) or "").strip()
-                        tipo = str(sanitize_val(row.get("tipo")) or "").strip()
-                        data_venc = format_date_str(sanitize_val(row.get("data_vencimento")) or sanitize_val(row.get("data")))
-                        parcial_data = format_date_str(sanitize_val(row.get("parcial_data")))
-                        
-                        parcial_real = parse_float_val(row.get("parcial_real"))
-
-                        # Se for o modo de zerar os realizados, ignora linhas filhas de pagamentos parciais
-                        if zerar_realizados and parcial_real > 0:
+                        # REGRA RÍGIDA: Se tiver parcial_real > 0 na planilha, deleta/ignora o lançamento
+                        p_real = parse_float_val(row.get("parcial_real"))
+                        if p_real > 0:
                             continue
 
-                        val_orig = parse_float_val(row.get("valor"))
+                        descricao = str(sanitize_val(row.get("descricao")) or "").strip()
+                        if not descricao:
+                            continue  # ignora linhas em branco
+
+                        tipo = str(sanitize_val(row.get("tipo")) or "").strip()
+                        data_venc = format_date_str(sanitize_val(row.get("data_vencimento")) or sanitize_val(row.get("data")))
+
+                        # Valor Planejado
                         val_plan = row.get("valor_plan")
-                        val_real = row.get("valor_real")
-                        val_realizado = row.get("valor_realizado")
+                        if sanitize_val(val_plan) is None:
+                            val_plan = row.get("valor")
+                        final_plan = parse_float_val(val_plan)
 
-                        final_plan = parse_float_val(val_plan) if sanitize_val(val_plan) is not None else val_orig
-                        raw_real = val_real if sanitize_val(val_real) is not None else val_realizado
-                        final_real = parse_float_val(raw_real) if sanitize_val(raw_real) is not None else parcial_real
+                        permite_parcial = bool(sanitize_val(row.get("permite_parcial")) or False)
+                        recorrente = bool(sanitize_val(row.get("recorrente")) or False)
+                        categoria = sanitize_val(row.get("categoria"))
+                        complemento = sanitize_val(row.get("complemento"))
+                        observacao = sanitize_val(row.get("observacao"))
 
-                        # Monta objeto base
+                        # APENAS O PLANEJAMENTO É MONTADO E GRAVADO
                         item = {
                             "usuario_id": usr_id,
                             "projeto_id": proj_id,
                             "descricao": descricao,
                             "tipo": tipo,
-                            "valor_plan": final_plan,
                             "data_vencimento": data_venc,
-                            "data": data_venc
+                            "data": data_venc,
+                            "valor_plan": final_plan,
+                            "valor": final_plan,
+                            "permite_parcial": permite_parcial,
+                            "recorrente": recorrente,
+                            # DEFINIDOS RIGOROSAMENTE COMO PLANEJADO:
+                            "valor_real": 0.0,
+                            "parcial_real": 0.0,
+                            "realizado": False,
+                            "status": "PLAN"
                         }
 
-                        if parcial_data:
-                            item["parcial_data"] = parcial_data
-
-                        # Copia demais colunas válidas (EXCLUINDO 'status' e 'realizado' para tratar explicitamente)
-                        for col in df.columns:
-                            if col in COLUNAS_VALIDAS_BANCO and col not in [
-                                "valor_plan", "valor_real", "id", "data_vencimento", 
-                                "data", "parcial_data", "status", "realizado"
-                            ]:
-                                val = sanitize_val(row[col])
-                                if col in ["recorrente", "permite_parcial", "usar_media"]:
-                                    if val is not None:
-                                        val = bool(val)
-                                elif col in ["valor", "valor_realizado", "parcial_real", "correcao_valor"]:
-                                    val = parse_float_val(val)
-                                item[col] = val
-
-                        # ATRIBUIÇÃO EXPLÍCITA E REGRA DE NEGÓCIO DE STATUS/REALIZADO
-                        if zerar_realizados:
-                            item["valor_real"] = 0.0
-                            item["parcial_real"] = 0.0
-                            item["realizado"] = False
-                            item["status"] = "PLAN"
-                        else:
-                            if final_real > 0:
-                                item["valor_real"] = final_real
-                                item["realizado"] = True
-                                item["status"] = "REAL"
-                            else:
-                                item["valor_real"] = 0.0
-                                item["realizado"] = False
-                                item["status"] = "PLAN"
-
-                        # Garante por segurança total que 'id' não exista no payload
-                        item.pop("id", None)
+                        if categoria:
+                            item["categoria"] = categoria
+                        if complemento:
+                            item["complemento"] = complemento
+                        if observacao:
+                            item["observacao"] = observacao
 
                         records_para_envio.append(item)
 
                     total_proc = len(records_para_envio)
                     if total_proc == 0:
-                        st.warning("Nenhum lançamento válido para importar após a filtragem.")
+                        st.warning("Nenhum lançamento de planejamento válido encontrado na planilha.")
                         return
 
-                    # Envio em lotes via .insert()
+                    # Inserção em lotes no Supabase
                     progress_bar = st.progress(0)
                     processed_count = 0
 
@@ -247,6 +188,6 @@ def render_upload(usuario_id=None, projeto_id=None):
                         processed_count += len(batch)
                         progress_bar.progress(processed_count / total_proc)
 
-                    st.success(f"✅ Upload concluído com sucesso! {total_proc} registro(s) inserido(s).")
+                    st.success(f"✅ Sucesso! {total_proc} lançamento(s) de planejamento importado(s) com status 'PLAN'. Registros de realização/parciais foram completamente descartados.")
                 except Exception as e:
-                    st.error(f"Erro durante o upload: {e}")
+                    st.error(f"Erro durante o envio: {e}")
