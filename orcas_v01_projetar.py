@@ -109,7 +109,7 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
         usar_corrc = col_c1.checkbox("Corrigir este valor?", key=f"pj_cor_{v}")
         c_quando = col_c2.selectbox("Quando:", ["Todo mês", "Todo ano"], key=f"pj_qdo_{v}")
         c_base = col_c3.selectbox("Com base em:", ["Média dos Realizados", "Percentual Fixo (%)", "IGPM"], key=f"pj_base_{v}")
-        c_val_fixo = st.text_input("Valor do Percentual (se fixo)", "", key=f"pj_vfixo_{v}", label_visibility="collapsed")
+        c_val_fixo = st.text_input("Valor do Percentual (se fixo)", "0,00", key=f"pj_vfixo_{v}")
 
         st.divider()
         st.markdown("**Realizações Parciais e Resíduos**")
