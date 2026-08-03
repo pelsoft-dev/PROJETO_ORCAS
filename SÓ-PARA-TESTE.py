@@ -2,12 +2,11 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
 
-# Importando a ajuda do arquivo dedicado para Conciliação
 from orcas_v01_ajuda_conciliacao import renderizar_ajuda_conciliacao
 
 def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moeda):
     """
-    Sub-rotina da Tela Conciliação - Layout Compacto e Filtro de Parciais.
+    Sub-rotina da Tela Conciliação - Solução Visual sem alterar regras do Banco de Dados.
     """
     # --- CABEÇALHO ALINHADO COM BOTÃO DE AJUDA ---
     col_titulo, col_ajuda = st.columns([4, 1])
@@ -34,46 +33,25 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
             st.session_state["exibir_ajuda_conciliacao"] = not st.session_state.get("exibir_ajuda_conciliacao", False)
             st.rerun()
 
-    # --- EXIBIÇÃO DA TELA DE AJUDA SE O BOTÃO FOR CLICADO ---
     if st.session_state.get("exibir_ajuda_conciliacao", False):
         renderizar_ajuda_conciliacao()
 
-    # INJEÇÃO DE CSS LOCALIZADA - NÃO AFETA A NAVEGAÇÃO DO SISTEMA
     st.markdown("""
         <style>
-        /* Redução de altura APENAS para os elementos dentro da conciliação */
-        .block-container {
-            padding-top: 2rem !important;
-        }
-        /* Ajuste fino dos labels dos toggles */
-        [data-testid="stWidgetLabel"] p {
-            font-size: 0.85rem !important;
-            white-space: nowrap !important;
-        }
-        /* Estilização para reduzir o espaço entre as linhas de dados */
-        .stMarkdown div p {
-            margin-bottom: 0px !important;
-        }
-        /* Mantém o divisor discreto */
-        hr {
-            margin-top: 0.5rem !important;
-            margin-bottom: 0.5rem !important;
-        }
+        .block-container { padding-top: 2rem !important; }
+        [data-testid="stWidgetLabel"] p { font-size: 0.85rem !important; white-space: nowrap !important; }
+        .stMarkdown div p { margin-bottom: 0px !important; }
+        hr { margin-top: 0.5rem !important; margin-bottom: 0.5rem !important; }
         </style>
     """, unsafe_allow_html=True)
 
     hoje_c = datetime.now().date()
     ini_mes_c = hoje_c.replace(day=1)
-    
-    # AJUSTE: Limite para os últimos 5 dias (hoje + 4 dias atrás)
     limite_c = hoje_c - timedelta(days=4)
 
-    # LINHA DE COMANDO
     col_aviso, col_tog = st.columns([4, 3])
-    
     col_aviso.markdown('<div style="font-size: 0.8rem; color: #555; margin-top: 10px;">📱🔄 SE USANDO O CELULAR, TRABALHE COM ELE NA HORIZONTAL</div>', unsafe_allow_html=True)
     
-    # Toggles de Controle
     abrir_sem_plan = col_tog.toggle("Lançar sem Planejamento", value=st.session_state.get('abrir_sem_plan', False))
     st.session_state.abrir_sem_plan = abrir_sem_plan
     
@@ -113,11 +91,11 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
     if not df_c.empty:
         df_c['dt_obj'] = pd.to_datetime(df_c['data']).dt.date
         
-        # ⚠️ REGRA CRÍTICA: EXCLUI DA LISTA PRINCIPAL QUALQUER LINHA FILHA DE PARCIAL
-        # Parciais gravadas servem apenas para somar o V.Real acumulado, não para virar linhas de exibição
-        df_c = df_c[(df_c['parcial_real'].fillna(0) == 0) & (df_c['status'] != 'Parcial')].copy()
+        # 🔑 SOLUÇÃO VISUAL: OCULTA QUALQUER LINHA QUE TENHA PARCIAL_REAL > 0 DA EXIBIÇÃO
+        # (Elas só existem para somar no V.Real da linha principal e não devem virar linhas na tabela)
+        df_c = df_c[df_c['parcial_real'].fillna(0) == 0].copy()
         
-        # LÓGICA DE FILTRO DA TELA
+        # FILTROS DE TELA
         if st.session_state.listar_todos_mes:
             proximo_mes = (ini_mes_c + timedelta(days=32)).replace(day=1)
             fim_mes_c = proximo_mes - timedelta(days=1)
@@ -127,8 +105,8 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                 (df_c['dt_obj'] >= ini_mes_c) & 
                 (df_c['dt_obj'] <= hoje_c) & 
                 (
-                    (df_c['status'] == 'Planejado') | 
-                    ((df_c['status'] == 'Realizado') & (df_c['dt_obj'] >= limite_c)) | 
+                    (df_c['status'].isin(['Planejado', 'PLAN'])) | 
+                    ((df_c['status'].isin(['Realizado', 'REAL'])) & (df_c['dt_obj'] >= limite_c)) | 
                     ((df_c['valor_plan'] == 0) & (df_c['valor_real'] > 0))
                 )
             ].copy()
@@ -137,7 +115,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
         demais_itens = df_f[~df_f.index.isin(parciais_topo.index)].sort_values('dt_obj', ascending=False)
         df_final_concilia = pd.concat([parciais_topo, demais_itens])
 
-        # CABEÇALHO - LARGURAS: [2.2, 0.5, 1.1, 1.1, 1.1, 0.5]
+        # CABEÇALHO
         h1, h2, h3, h4, h5, h6 = st.columns([2.2, 0.5, 1.1, 1.1, 1.1, 0.5])
         h1.write("**Data - Descrição**")
         h2.write("**E/S**")
@@ -148,7 +126,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
         st.divider()
 
         for _, row in df_final_concilia.iterrows():
-            # Soma acumulada considerando todas as parciais lançadas para a mesma descrição
+            # Soma todas as parciais daquela descrição usando o Dataframe completo original (df)
             v_acumulado_desc = df[df['descricao'] == row['descricao']]['parcial_real'].sum()
             cor_txt = "red" if (row['valor_plan'] > 0 and v_acumulado_desc > row['valor_plan']) else "black"
             
@@ -173,7 +151,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                 if c6.button("Ok", key=f"btn_p_{row['id']}", use_container_width=True):
                     v_dig = parse_moeda(v_parc_in)
                     if v_dig > 0:
-                        # GRAVA O FILHO PARCIAL COM STATUS 'Parcial' (NÃO MAIS 'Realizado')
+                        # USA O STATUS QUE O BANCO JÁ ACEITA
                         supabase.table("lancamentos").insert({
                             "projeto_id": str(st.session_state.projeto_ativo),
                             "usuario_id": str(ID_USUARIO_LOGADO), 
@@ -183,7 +161,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                             "tipo": row['tipo'],
                             "valor_plan": 0, 
                             "valor_real": 0, 
-                            "status": "Parcial",
+                            "status": "Planejado",
                             "parcial_real": v_dig, 
                             "parcial_data": hoje_c.strftime('%Y-%m-%d'), 
                             "permite_parcial": False
@@ -192,7 +170,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                         st.rerun()
             else:
                 c3.write(format_moeda(row['valor_plan']))
-                if row['status'] == 'Realizado':
+                if row['status'] in ['Realizado', 'REAL']:
                     c4.write(format_moeda(row['valor_real']))
                     c6.write("✅")
                 else:
