@@ -67,17 +67,14 @@ def format_date_str(val):
     val_str = val_str.split(" ")[0].strip()
 
     try:
-        # 1. Objeto Date / Datetime / Timestamp
         if hasattr(val, "strftime") and callable(getattr(val, "strftime")):
             return val.strftime("%Y-%m-%d")
 
-        # 2. Número Serial do Excel (ex: 46263 ou 46263.0)
         if isinstance(val, (int, float)) or val_str.replace(".", "", 1).isdigit():
             num_val = float(val)
             if num_val > 30000:
                 return pd.to_datetime(num_val, unit="D", origin="1899-12-30").strftime("%Y-%m-%d")
 
-        # 3. String em formato BR DD/MM/YYYY ou DD-MM-YYYY
         match_br = re.match(r"^(\d{1,2})[-/. ](\d{1,2})[-/. ](\d{2,4})$", val_str)
         if match_br:
             dia, mes, ano = match_br.groups()
@@ -85,13 +82,11 @@ def format_date_str(val):
                 ano = "20" + ano
             return f"{int(ano):04d}-{int(mes):02d}-{int(dia):02d}"
 
-        # 4. String em formato ISO YYYY-MM-DD
         match_iso = re.match(r"^(\d{4})[-/. ](\d{1,2})[-/. ](\d{1,2})$", val_str)
         if match_iso:
             ano, mes, dia = match_iso.groups()
             return f"{int(ano):04d}-{int(mes):02d}-{int(dia):02d}"
 
-        # 5. Parsing genérico via Pandas
         dt_parsed = pd.to_datetime(val_str, dayfirst=True, errors="coerce")
         if not pd.isna(dt_parsed):
             return dt_parsed.strftime("%Y-%m-%d")
@@ -164,6 +159,8 @@ def render_upload(usuario_id=None, projeto_id=None):
                             df[col] = df[col].apply(format_date_str)
 
                     records_para_envio = []
+                    
+                    zerar_realizados = "zere" in modo_importacao.lower() or "realizados" in modo_importacao.lower()
 
                     for _, row in df.iterrows():
                         descricao = str(sanitize_val(row.get("descricao")) or "").strip()
@@ -173,10 +170,9 @@ def render_upload(usuario_id=None, projeto_id=None):
                         
                         parcial_real = parse_float_val(row.get("parcial_real"))
 
-                        # MODO 2 ("Zerar Realizados"): Ignora linhas filhas de realizações parciais
-                        if modo_importacao == "Suba todos os Lançamentos e seus Planejamentos, mas zere todos os Realizados":
-                            if parcial_real > 0:
-                                continue
+                        # Se for o modo de zerar os realizados, ignora linhas filhas de pagamentos parciais
+                        if zerar_realizados and parcial_real > 0:
+                            continue
 
                         val_orig = parse_float_val(row.get("valor"))
                         val_plan = row.get("valor_plan")
@@ -194,7 +190,6 @@ def render_upload(usuario_id=None, projeto_id=None):
                             "descricao": descricao,
                             "tipo": tipo,
                             "valor_plan": final_plan,
-                            "valor_real": final_real,
                             "data_vencimento": data_venc,
                             "data": data_venc
                         }
@@ -202,28 +197,35 @@ def render_upload(usuario_id=None, projeto_id=None):
                         if parcial_data:
                             item["parcial_data"] = parcial_data
 
-                        # Copia colunas válidas
+                        # Copia demais colunas válidas (EXCLUINDO 'status' e 'realizado' para tratar explicitamente)
                         for col in df.columns:
-                            if col in COLUNAS_VALIDAS_BANCO and col not in ["valor_plan", "valor_real", "id", "data_vencimento", "data", "parcial_data"]:
+                            if col in COLUNAS_VALIDAS_BANCO and col not in [
+                                "valor_plan", "valor_real", "id", "data_vencimento", 
+                                "data", "parcial_data", "status", "realizado"
+                            ]:
                                 val = sanitize_val(row[col])
-                                if col in ["realizado", "recorrente", "permite_parcial", "usar_media"]:
+                                if col in ["recorrente", "permite_parcial", "usar_media"]:
                                     if val is not None:
                                         val = bool(val)
                                 elif col in ["valor", "valor_realizado", "parcial_real", "correcao_valor"]:
                                     val = parse_float_val(val)
                                 item[col] = val
 
-                        # Regra específica para o modo de zerar os realizados
-                        if modo_importacao == "Suba todos os Lançamentos e seus Planejamentos, mas zere todos os Realizados":
+                        # ATRIBUIÇÃO EXPLÍCITA E REGRA DE NEGÓCIO DE STATUS/REALIZADO
+                        if zerar_realizados:
                             item["valor_real"] = 0.0
-                            item["realizado"] = False
                             item["parcial_real"] = 0.0
-                            item["status"] = "PLAN"
-
-                        # REGRA DE SEGURANÇA GERAL: Se o valor realizado for 0 ou realizado == False, força o status para PLAN
-                        if item.get("valor_real", 0.0) == 0.0 or not item.get("realizado", False):
-                            item["status"] = "PLAN"
                             item["realizado"] = False
+                            item["status"] = "PLAN"
+                        else:
+                            if final_real > 0:
+                                item["valor_real"] = final_real
+                                item["realizado"] = True
+                                item["status"] = "REAL"
+                            else:
+                                item["valor_real"] = 0.0
+                                item["realizado"] = False
+                                item["status"] = "PLAN"
 
                         # Garante por segurança total que 'id' não exista no payload
                         item.pop("id", None)
@@ -235,7 +237,7 @@ def render_upload(usuario_id=None, projeto_id=None):
                         st.warning("Nenhum lançamento válido para importar após a filtragem.")
                         return
 
-                    # Envio limpo via .insert() em lotes
+                    # Envio em lotes via .insert()
                     progress_bar = st.progress(0)
                     processed_count = 0
 
