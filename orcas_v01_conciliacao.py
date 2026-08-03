@@ -6,7 +6,7 @@ from orcas_v01_ajuda_conciliacao import renderizar_ajuda_conciliacao
 
 def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moeda):
     """
-    Sub-rotina da Tela Conciliação - Solução Visual sem alterar regras do Banco de Dados.
+    Sub-rotina da Tela Conciliação - Solução Estrita de Filtragem de Parciais.
     """
     # --- CABEÇALHO ALINHADO COM BOTÃO DE AJUDA ---
     col_titulo, col_ajuda = st.columns([4, 1])
@@ -90,24 +90,25 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
     df_c = df.copy()
     if not df_c.empty:
         df_c['dt_obj'] = pd.to_datetime(df_c['data']).dt.date
+        df_c['parcial_real'] = pd.to_numeric(df_c['parcial_real'], errors='coerce').fillna(0)
         
-        # 🔑 SOLUÇÃO VISUAL: OCULTA QUALQUER LINHA QUE TENHA PARCIAL_REAL > 0 DA EXIBIÇÃO
-        # (Elas só existem para somar no V.Real da linha principal e não devem virar linhas na tabela)
-        df_c = df_c[df_c['parcial_real'].fillna(0) == 0].copy()
+        # 🟢 REGRA CRÍTICA: SEPARA TOTALMENTE OS REGISTROS DE PARCIAL DA LISTA PRINCIPAL
+        # 1. 'df_apenas_parciais': Guarda o histórico de parciais para somar no V.Real
+        # 2. 'df_base_tela': Guarda APENAS os lançamentos originais (pais) para renderizar na tela
+        df_base_tela = df_c[df_c['parcial_real'] == 0].copy()
         
-        # FILTROS DE TELA
         if st.session_state.listar_todos_mes:
             proximo_mes = (ini_mes_c + timedelta(days=32)).replace(day=1)
             fim_mes_c = proximo_mes - timedelta(days=1)
-            df_f = df_c[(df_c['dt_obj'] >= ini_mes_c) & (df_c['dt_obj'] <= fim_mes_c)].copy()
+            df_f = df_base_tela[(df_base_tela['dt_obj'] >= ini_mes_c) & (df_base_tela['dt_obj'] <= fim_mes_c)].copy()
         else:
-            df_f = df_c[
-                (df_c['dt_obj'] >= ini_mes_c) & 
-                (df_c['dt_obj'] <= hoje_c) & 
+            df_f = df_base_tela[
+                (df_base_tela['dt_obj'] >= ini_mes_c) & 
+                (df_base_tela['dt_obj'] <= hoje_c) & 
                 (
-                    (df_c['status'].isin(['Planejado', 'PLAN'])) | 
-                    ((df_c['status'].isin(['Realizado', 'REAL'])) & (df_c['dt_obj'] >= limite_c)) | 
-                    ((df_c['valor_plan'] == 0) & (df_c['valor_real'] > 0))
+                    (df_base_tela['status'].isin(['Planejado', 'PLAN'])) | 
+                    ((df_base_tela['status'].isin(['Realizado', 'REAL'])) & (df_base_tela['dt_obj'] >= limite_c)) | 
+                    ((df_base_tela['valor_plan'] == 0) & (df_base_tela['valor_real'] > 0))
                 )
             ].copy()
         
@@ -126,8 +127,8 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
         st.divider()
 
         for _, row in df_final_concilia.iterrows():
-            # Soma todas as parciais daquela descrição usando o Dataframe completo original (df)
-            v_acumulado_desc = df[df['descricao'] == row['descricao']]['parcial_real'].sum()
+            # Soma todas as parciais diretamente no DataFrame 'df' original
+            v_acumulado_desc = df[df['descricao'] == row['descricao']]['parcial_real'].fillna(0).sum()
             cor_txt = "red" if (row['valor_plan'] > 0 and v_acumulado_desc > row['valor_plan']) else "black"
             
             st.markdown('<div style="margin-bottom: -32px;"></div>', unsafe_allow_html=True)
@@ -151,7 +152,6 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                 if c6.button("Ok", key=f"btn_p_{row['id']}", use_container_width=True):
                     v_dig = parse_moeda(v_parc_in)
                     if v_dig > 0:
-                        # USA O STATUS QUE O BANCO JÁ ACEITA
                         supabase.table("lancamentos").insert({
                             "projeto_id": str(st.session_state.projeto_ativo),
                             "usuario_id": str(ID_USUARIO_LOGADO), 
