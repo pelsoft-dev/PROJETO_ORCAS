@@ -150,8 +150,7 @@ def render_upload(usuario_id=None, projeto_id=None):
                         st.warning("A planilha enviada está vazia.")
                         return
 
-                    # AMBOS OS MODOS agora limpam a base anterior do usuário/projeto
-                    # para evitar registros duplicados no banco de dados.
+                    # Limpa a base anterior do usuário/projeto antes de inserir os novos dados
                     st.toast("Limpando lançamentos anteriores do projeto...", icon="🗑️")
                     supabase.table("lancamentos") \
                         .delete() \
@@ -219,6 +218,7 @@ def render_upload(usuario_id=None, projeto_id=None):
                             item["valor_real"] = 0.0
                             item["realizado"] = False
                             item["parcial_real"] = 0.0
+                            item["status"] = "PLAN"
 
                         # Garante por segurança total que 'id' não exista no payload
                         item.pop("id", None)
