@@ -7,7 +7,6 @@ from orcas_v01_security import supabase
 BATCH_SIZE = 100
 
 COLUNAS_VALIDAS_BANCO = {
-    "id",
     "usuario_id",
     "projeto_id",
     "descricao",
@@ -68,14 +67,17 @@ def format_date_str(val):
     val_str = val_str.split(" ")[0].strip()
 
     try:
+        # 1. Objeto Date / Datetime / Timestamp
         if hasattr(val, "strftime") and callable(getattr(val, "strftime")):
             return val.strftime("%Y-%m-%d")
 
+        # 2. Número Serial do Excel (ex: 46263 ou 46263.0)
         if isinstance(val, (int, float)) or val_str.replace(".", "", 1).isdigit():
             num_val = float(val)
             if num_val > 30000:
                 return pd.to_datetime(num_val, unit="D", origin="1899-12-30").strftime("%Y-%m-%d")
 
+        # 3. String em formato BR DD/MM/YYYY ou DD-MM-YYYY
         match_br = re.match(r"^(\d{1,2})[-/. ](\d{1,2})[-/. ](\d{2,4})$", val_str)
         if match_br:
             dia, mes, ano = match_br.groups()
@@ -83,11 +85,13 @@ def format_date_str(val):
                 ano = "20" + ano
             return f"{int(ano):04d}-{int(mes):02d}-{int(dia):02d}"
 
+        # 4. String em formato ISO YYYY-MM-DD
         match_iso = re.match(r"^(\d{4})[-/. ](\d{1,2})[-/. ](\d{1,2})$", val_str)
         if match_iso:
             ano, mes, dia = match_iso.groups()
             return f"{int(ano):04d}-{int(mes):02d}-{int(dia):02d}"
 
+        # 5. Parsing genérico via Pandas
         dt_parsed = pd.to_datetime(val_str, dayfirst=True, errors="coerce")
         if not pd.isna(dt_parsed):
             return dt_parsed.strftime("%Y-%m-%d")
@@ -124,7 +128,6 @@ def render_upload(usuario_id=None, projeto_id=None):
         "Escolha como o sistema deve tratar os dados da planilha em relação ao banco de dados:",
         options=[
             "Apague todos os dados do DB e suba todo o conteúdo da planilha",
-            "Lançamentos novos serão cadastrados, e os já existentes serão atualizados",
             "Suba todos os Lançamentos e seus Planejamentos, mas zere todos os Realizados"
         ],
         index=None,
@@ -147,7 +150,7 @@ def render_upload(usuario_id=None, projeto_id=None):
                         st.warning("A planilha enviada está vazia.")
                         return
 
-                    # MODO 1: Apagar dados existentes antes do envio
+                    # MODO 1: Limpa os lançamentos antigos no banco
                     if modo_importacao == "Apague todos os dados do DB e suba todo o conteúdo da planilha":
                         st.toast("Limpando lançamentos anteriores do projeto...", icon="🗑️")
                         supabase.table("lancamentos") \
@@ -156,38 +159,12 @@ def render_upload(usuario_id=None, projeto_id=None):
                             .eq("projeto_id", proj_id) \
                             .execute()
 
-                    # Formatação universal de colunas de data na planilha
+                    # Normalização prévia das colunas de data
                     for col in ["data_vencimento", "data", "parcial_data"]:
                         if col in df.columns:
                             df[col] = df[col].apply(format_date_str)
 
-                    # Dicionários de busca rápida para o MODO 2
-                    lookup_normais = {}    # Chave: (descricao, data, tipo) -> id
-                    lookup_parciais = {}   # Chave: (descricao, parcial_data) -> id
-
-                    if modo_importacao == "Lançamentos novos serão cadastrados, e os já existentes serão atualizados":
-                        res = supabase.table("lancamentos") \
-                            .select("*") \
-                            .eq("usuario_id", usr_id) \
-                            .eq("projeto_id", proj_id) \
-                            .execute()
-                        
-                        raw_data = res.data or []
-                        for db_row in raw_data:
-                            d_desc = str(db_row.get("descricao") or "").strip()
-                            d_tp = str(db_row.get("tipo") or "").strip()
-                            d_dt = format_date_str(db_row.get("data_vencimento") or db_row.get("data"))
-                            d_p_dt = format_date_str(db_row.get("parcial_data"))
-                            db_id = db_row.get("id")
-
-                            if db_id is not None:
-                                if d_desc and d_dt and d_tp:
-                                    lookup_normais[(d_desc, d_dt, d_tp)] = db_id
-                                if d_desc and d_p_dt:
-                                    lookup_parciais[(d_desc, d_p_dt)] = db_id
-
-                    records_novos = []       # Registros SEM ID -> Usam .insert()
-                    records_existentes = []  # Registros COM ID -> Usam .upsert()
+                    records_para_envio = []
 
                     for _, row in df.iterrows():
                         descricao = str(sanitize_val(row.get("descricao")) or "").strip()
@@ -196,9 +173,8 @@ def render_upload(usuario_id=None, projeto_id=None):
                         parcial_data = format_date_str(sanitize_val(row.get("parcial_data")))
                         
                         parcial_real = parse_float_val(row.get("parcial_real"))
-                        permite_parcial = bool(sanitize_val(row.get("permite_parcial")) or False)
 
-                        # MODO 3: Ignora linhas de parciais realizadas
+                        # MODO 2 ("Zerar Realizados"): Ignora linhas de lançamentos filhos/parciais
                         if modo_importacao == "Suba todos os Lançamentos e seus Planejamentos, mas zere todos os Realizados":
                             if parcial_real > 0:
                                 continue
@@ -212,6 +188,7 @@ def render_upload(usuario_id=None, projeto_id=None):
                         raw_real = val_real if sanitize_val(val_real) is not None else val_realizado
                         final_real = parse_float_val(raw_real) if sanitize_val(raw_real) is not None else parcial_real
 
+                        # Monta objeto limpo sem chave 'id'
                         item = {
                             "usuario_id": usr_id,
                             "projeto_id": proj_id,
@@ -226,6 +203,7 @@ def render_upload(usuario_id=None, projeto_id=None):
                         if parcial_data:
                             item["parcial_data"] = parcial_data
 
+                        # Copia colunas válidas
                         for col in df.columns:
                             if col in COLUNAS_VALIDAS_BANCO and col not in ["valor_plan", "valor_real", "id", "data_vencimento", "data", "parcial_data"]:
                                 val = sanitize_val(row[col])
@@ -236,64 +214,32 @@ def render_upload(usuario_id=None, projeto_id=None):
                                     val = parse_float_val(val)
                                 item[col] = val
 
+                        # Ajustes específicos se for o modo de zerar os realizados
                         if modo_importacao == "Suba todos os Lançamentos e seus Planejamentos, mas zere todos os Realizados":
                             item["valor_real"] = 0.0
                             item["realizado"] = False
                             item["parcial_real"] = 0.0
 
-                        # MODO 2: ATRIBUIÇÃO DE ID
-                        assigned_id = None
-                        if modo_importacao == "Lançamentos novos serão cadastrados, e os já existentes serão atualizados":
-                            if not permite_parcial and parcial_real > 0:
-                                assigned_id = lookup_parciais.pop((descricao, parcial_data), None)
-                                if assigned_id is not None:
-                                    item["parcial_real"] = parcial_real
+                        # Garante por segurança total que 'id' não exista no payload
+                        item.pop("id", None)
 
-                            elif permite_parcial:
-                                assigned_id = lookup_normais.pop((descricao, data_venc, tipo), None)
-                                if assigned_id is not None:
-                                    item["valor_plan"] = final_plan
-                                    item.pop("valor_real", None)
+                        records_para_envio.append(item)
 
-                            else:
-                                assigned_id = lookup_normais.pop((descricao, data_venc, tipo), None)
-                                if assigned_id is not None:
-                                    item["valor_plan"] = final_plan
-                                    item["valor_real"] = final_real
-
-                        # SEPARAÇÃO CRÍTICA ENTRE NOVOS E EXISTENTES
-                        if assigned_id is not None and not pd.isna(assigned_id):
-                            item["id"] = assigned_id
-                            records_existentes.append(item)
-                        else:
-                            # Garante que NENHUMA chave "id" exista no dicionário de novos
-                            item.pop("id", None)
-                            records_novos.append(item)
-
-                    total_proc = len(records_novos) + len(records_existentes)
+                    total_proc = len(records_para_envio)
                     if total_proc == 0:
                         st.warning("Nenhum lançamento válido para importar após a filtragem.")
                         return
 
+                    # Envio direto via .insert() em lotes
                     progress_bar = st.progress(0)
                     processed_count = 0
 
-                    # 1. ENVIO DOS REGISTROS NOVOS (INSERT SEM ID)
-                    if records_novos:
-                        for i in range(0, len(records_novos), BATCH_SIZE):
-                            batch = records_novos[i:i + BATCH_SIZE]
-                            supabase.table("lancamentos").insert(batch).execute()
-                            processed_count += len(batch)
-                            progress_bar.progress(processed_count / total_proc)
+                    for i in range(0, total_proc, BATCH_SIZE):
+                        batch = records_para_envio[i:i + BATCH_SIZE]
+                        supabase.table("lancamentos").insert(batch).execute()
+                        processed_count += len(batch)
+                        progress_bar.progress(processed_count / total_proc)
 
-                    # 2. ENVIO DOS REGISTROS EXISTENTES (UPSERT COM ID)
-                    if records_existentes:
-                        for i in range(0, len(records_existentes), BATCH_SIZE):
-                            batch = records_existentes[i:i + BATCH_SIZE]
-                            supabase.table("lancamentos").upsert(batch).execute()
-                            processed_count += len(batch)
-                            progress_bar.progress(processed_count / total_proc)
-
-                    st.success(f"✅ Upload concluído com sucesso! {total_proc} registro(s) processado(s) ({len(records_novos)} novos inseridos e {len(records_existentes)} atualizados).")
+                    st.success(f"✅ Upload concluído com sucesso! {total_proc} registro(s) inseridos.")
                 except Exception as e:
                     st.error(f"Erro durante o upload: {e}")
