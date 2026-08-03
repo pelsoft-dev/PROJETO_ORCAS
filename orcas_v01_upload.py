@@ -154,7 +154,7 @@ def render_upload(usuario_id=None, projeto_id=None):
                             item["valor_real"] = 0.0
                             item["parcial_real"] = 0.0
                             item["realizado"] = False
-                            item["status"] = "PLAN"
+                            item["status"] = "Planejado"
 
                         item["usuario_id"] = usr_id
                         item["projeto_id"] = proj_id
