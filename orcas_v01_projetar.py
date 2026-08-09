@@ -104,27 +104,6 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
         f_p = c_f.date_input("Até", value=d_fim_db if d_fim_db else hoje_br, format="DD/MM/YYYY", key=f"pj_data_fim_{v}")
 
     with st.expander("Projeção Avançada", expanded=False):
-        # --- NOVO BLOCO: CONFIGURAÇÃO DE CARTÃO DE CRÉDITO ---
-        st.markdown("**Configuração de Cartão de Crédito**")
-        usar_cartao = st.checkbox("É Cartão de Crédito?", key=f"pj_cc_{v}")
-        cc_venc = 10
-        cc_corte = 31
-        
-        if usar_cartao:
-            col_cc1, col_cc2 = st.columns(2)
-            cc_venc = col_cc1.number_input(
-                "Dia do Vencimento da Fatura:", 
-                min_value=1, max_value=31, value=10, step=1, 
-                key=f"pj_cc_venc_{v}"
-            )
-            cc_corte = col_cc2.number_input(
-                "A partir deste dia, as despesas são lançadas na próxima fatura:", 
-                min_value=1, max_value=31, value=31, step=1, 
-                key=f"pj_cc_corte_{v}",
-                help="Mantendo 31 (padrão), assume o último dia do mês corrente."
-            )
-        
-        st.divider()
         st.markdown("**Regras de Correção Automática**")
         col_c1, col_c2, col_c3 = st.columns([2, 2, 3])
         usar_corrc = col_c1.checkbox("Corrigir este valor?", key=f"pj_cor_{v}")
@@ -151,16 +130,13 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
             st.error("PARA INCLUIR OU EXCLUIR É OBRIGATÓRIO ENTRAR COM UMA DESCRIÇÃO")
         else:
             d_m_final = d_m
-            
-            # Se for cartão de crédito, o lançamento consolidador é fixado no dia de vencimento
-            if usar_cartao:
-                d_m_final = str(int(cc_venc))
-            elif permitir_parcial:
+            if permitir_parcial:
                 d_m_final = "1"
 
             # TRAVA 1: O loop começa na data de Início (i_p).
+            # Se for parcial, forçamos o início do loop para o dia 01 do mês de i_p para não pular o mês atual.
             curr = i_p
-            if permitir_parcial and not usar_cartao:
+            if permitir_parcial:
                 curr = curr.replace(day=1)
 
             uid_local = st.session_state.get('CHAVE_MESTRA_UUID')
@@ -214,8 +190,10 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
                 if (d_e is None or curr == d_e) and match_dm and (d_s == "" or curr.weekday() == d_map[d_s]):
                     
                     # TRAVA 2: Só processa se curr estiver estritamente dentro do intervalo de validade
+                    # Para parciais, validamos apenas se o mês/ano de curr é >= ao mês/ano de i_p
                     processar = False
-                    if permitir_parcial and not usar_cartao:
+                    if permitir_parcial:
+                        # Se permitir parcial, o dia de curr é sempre 1. Validamos se esse dia 1 está no período.
                         dt_ref_parcial = curr.replace(day=1)
                         if i_p.replace(day=1) <= dt_ref_parcial <= f_p:
                             processar = True
@@ -225,24 +203,25 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
 
                     if processar:
                         dt_f = curr
-                        if permitir_parcial and not usar_cartao:
+                        if permitir_parcial:
                             dt_f = dt_f.replace(day=1)
                         elif fds != "Manter" and dt_f.weekday() >= 5: 
                             if fds == "Posterga":
                                 dt_f += timedelta(days=(2 if dt_f.weekday()==5 else 1))
                             elif fds == "Antecipa":
+                                # Ajuste: Se domingo (6), volta 2 dias para sexta. Se sábado (5), volta 1 dia para sexta.
                                 dt_f -= timedelta(days=(1 if dt_f.weekday()==5 else 2))
                         
-                        # TRAVA 3: Valida novamente após ajuste de FDS
-                        if (permitir_parcial and not usar_cartao) or (i_p <= dt_f <= f_p):
+                        # TRAVA 3: Valida novamente após ajuste de FDS (apenas para não parciais)
+                        if permitir_parcial or (i_p <= dt_f <= f_p):
+                            # Gera o texto do complemento para este item
                             comp_gerado = comp_txt
                             if num_atual is not None:
                                 comp_gerado = f"{str(num_atual + gerados).zfill(zeros)}{sufixo}"
 
                             nome_final = f"{desc} {comp_gerado}".strip() if comp_gerado else desc
                             
-                            # Registro a ser inserido no banco de dados
-                            item_dict = {
+                            lista_bulk.append({
                                 "projeto_id": st.session_state.projeto_ativo, 
                                 "usuario_id": uid_local, 
                                 "data": dt_f.strftime('%Y-%m-%d'), 
@@ -252,18 +231,13 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
                                 "valor_real": 0.0, 
                                 "tipo": tipo, 
                                 "status": 'Planejado', 
-                                "permite_parcial": bool(permitir_parcial and not usar_cartao),
+                                "permite_parcial": bool(permitir_parcial),
                                 "usar_media": bool(usar_corrc and c_base == "Média dos Realizados"),
                                 "complemento_texto": comp_gerado if comp_gerado else None,
                                 "correcao_freq": c_quando if usar_corrc else None,
                                 "correcao_valor": float(v_pct) if c_base == "Percentual Fixo (%)" else 0.0,
-                                "regra_parcial": str(p_depois),
-                                "tipo_cc": "$CCP" if usar_cartao else None,
-                                "cc_vencimento": int(cc_venc) if usar_cartao else None,
-                                "cc_corte": int(cc_corte) if usar_cartao else None
-                            }
-                            
-                            lista_bulk.append(item_dict)
+                                "regra_parcial": str(p_depois)
+                            })
                             gerados += 1
                             if usar_corrc and c_quando == "Todo mês" and c_base == "Percentual Fixo (%)": v_calc *= (1 + v_pct)
 
