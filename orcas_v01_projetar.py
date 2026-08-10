@@ -104,6 +104,19 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
         f_p = c_f.date_input("Até", value=d_fim_db if d_fim_db else hoje_br, format="DD/MM/YYYY", key=f"pj_data_fim_{v}")
 
     with st.expander("Projeção Avançada", expanded=False):
+        # --- ÁREA DE CARTÃO DE CRÉDITO ---
+        st.markdown("**Cartão de Crédito**")
+        col_cc1, col_cc2 = st.columns([2, 5])
+        is_cartao = col_cc1.checkbox("Cartão de Crédito", key=f"pj_is_cc_{v}")
+        
+        # Padrão para o dia de corte da fatura: Último dia do mês atual
+        ult_dia_mes_atual = calendar.monthrange(hoje_br.year, hoje_br.month)[1]
+        dia_corte = col_cc2.number_input(
+            "A partir deste dia, as despesas serão lançadas na próxima fatura:", 
+            min_value=1, max_value=31, value=ult_dia_mes_atual, step=1, key=f"pj_corte_cc_{v}"
+        )
+        
+        st.divider()
         st.markdown("**Regras de Correção Automática**")
         col_c1, col_c2, col_c3 = st.columns([2, 2, 3])
         usar_corrc = col_c1.checkbox("Corrigir este valor?", key=f"pj_cor_{v}")
@@ -236,7 +249,8 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
                                 "complemento_texto": comp_gerado if comp_gerado else None,
                                 "correcao_freq": c_quando if usar_corrc else None,
                                 "correcao_valor": float(v_pct) if c_base == "Percentual Fixo (%)" else 0.0,
-                                "regra_parcial": str(p_depois)
+                                "regra_parcial": str(p_depois),
+                                "tipo_cc": "$CCP" if is_cartao else None
                             })
                             gerados += 1
                             if usar_corrc and c_quando == "Todo mês" and c_base == "Percentual Fixo (%)": v_calc *= (1 + v_pct)
