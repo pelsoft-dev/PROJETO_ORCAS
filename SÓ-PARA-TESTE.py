@@ -8,7 +8,7 @@ from orcas_v01_ajuda_conciliacao import renderizar_ajuda_conciliacao
 def calcular_vencimento_fatura(data_compra, dia_corte=15, dia_vencimento=20):
     """
     Calcula a data de vencimento da 1ª parcela de acordo com o dia de corte.
-    Exemplo: Corte dia 15, Vencimento dia 20.
+    Ex: Corte 15, Vencimento 20.
     - Compra até dia 15 -> Vence no dia 20 do MÊS ATUAL.
     - Compra após dia 15 -> Vence no dia 20 do MÊS SEGUINTE.
     """
@@ -16,13 +16,11 @@ def calcular_vencimento_fatura(data_compra, dia_corte=15, dia_vencimento=20):
     mes = data_compra.month
 
     if data_compra.day > dia_corte:
-        # Pula para o próximo mês
         mes += 1
         if mes > 12:
             mes = 1
             ano += 1
 
-    # Ajusta o dia de vencimento para o limite de dias do mês (ex: fev)
     dia_final = min(dia_vencimento, calendar.monthrange(ano, mes)[1])
     return datetime(ano, mes, dia_final).date()
 
@@ -35,7 +33,7 @@ def somar_meses_data(data_base, qtd_meses):
 
 def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moeda):
     """
-    Sub-rotina da Tela Conciliação - Solução Estrita de Filtragem de Parciais e Cartão.
+    Sub-rotina da Tela Conciliação - Com suporte a Cartão e Parcelas na conciliação normal.
     """
     # --- CABEÇALHO ALINHADO COM BOTÃO DE AJUDA ---
     col_titulo, col_ajuda = st.columns([4, 1])
@@ -108,8 +106,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                 is_cc = bool(sp_cartao.strip())
                 qtd_p = int(sp_parc) if is_cc else 0
 
-                # 1. LANÇAMENTO ORIGINAL (LOU)
-                # Recebe $CCL para ser neutralizado do total do mês se for feito no cartão
+                # LOU: recebe $CCL para ser neutralizado do mês
                 supabase.table("lancamentos").insert({
                     "projeto_id": str(st.session_state.projeto_ativo),
                     "usuario_id": str(ID_USUARIO_LOGADO),
@@ -126,7 +123,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                     "cc_qtd_parcelas": qtd_p
                 }).execute()
 
-                # 2. LANÇAMENTOS DO CARTÃO DE CRÉDITO (LCL)
+                # LCLs: Criados para compor as faturas do cartão
                 if is_cc:
                     v_parcela = round(v_sp / (qtd_p if qtd_p > 0 else 1), 2)
                     dt_primeiro_venc = calcular_vencimento_fatura(hoje_c, dia_corte=15, dia_vencimento=20)
@@ -143,7 +140,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                             "valor_plan": 0,
                             "valor_real": v_parcela,
                             "status": "Realizado",
-                            "cc_tipo": None,  # Este LCL É considerado no total do mês
+                            "cc_tipo": None,
                             "cc_qtd_parcelas": 0
                         }).execute()
 
@@ -156,7 +153,6 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
         df_c['dt_obj'] = pd.to_datetime(df_c['data']).dt.date
         df_c['parcial_real'] = pd.to_numeric(df_c['parcial_real'], errors='coerce').fillna(0)
         
-        # 🟢 REGRA CRÍTICA: SEPARA TOTALMENTE OS REGISTROS DE PARCIAL DA LISTA PRINCIPAL
         df_base_tela = df_c[df_c['parcial_real'] == 0].copy()
         
         if st.session_state.listar_todos_mes:
@@ -179,23 +175,24 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
         df_final_concilia = pd.concat([parciais_topo, demais_itens])
 
         # CABEÇALHO DA TABELA
-        h1, h2, h3, h4, h5, h6 = st.columns([2.2, 0.5, 1.1, 1.1, 1.1, 0.5])
+        h1, h2, h3, h4, h5, h6, h7, h8 = st.columns([1.8, 0.4, 0.9, 0.9, 0.9, 1.0, 0.5, 0.4])
         h1.write("**Data - Descrição**")
         h2.write("**E/S**")
         h3.write("**V. Plan.**")
         h4.write("**V. Real**")
-        h5.write("**Valor Parcial**")
-        h6.write("**Ação**")
+        h5.write("**V. Parcial**")
+        h6.write("**Cartão**")
+        h7.write("**Parc.**")
+        h8.write("**Ação**")
         st.divider()
 
         for _, row in df_final_concilia.iterrows():
-            # Soma todas as parciais diretamente no DataFrame 'df' original
             v_acumulado_desc = df[df['descricao'] == row['descricao']]['parcial_real'].fillna(0).sum()
             cor_txt = "red" if (row['valor_plan'] > 0 and v_acumulado_desc > row['valor_plan']) else "black"
             
             st.markdown('<div style="margin-bottom: -32px;"></div>', unsafe_allow_html=True)
             
-            c1, c2, c3, c4, c5, c6 = st.columns([2.2, 0.5, 1.1, 1.1, 1.1, 0.5])
+            c1, c2, c3, c4, c5, c6, c7, c8 = st.columns([1.8, 0.4, 0.9, 0.9, 0.9, 1.0, 0.5, 0.4])
             
             c1.markdown(f"<span style='color:{cor_txt}; font-weight: 500;'>{row['dt_obj'].strftime('%d/%m/%Y')} - {row['descricao']}</span>", unsafe_allow_html=True)
             cor_tipo = 'red' if row['tipo'] == 'Saída' else 'blue'
@@ -210,11 +207,16 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                     st.session_state[v_key] = 0
                 
                 v_parc_in = c5.text_input("", key=f"p_{row['id']}_{st.session_state[v_key]}", value="0,00", label_visibility="collapsed")
-                
-                if c6.button("Ok", key=f"btn_p_{row['id']}", use_container_width=True):
+                cc_parc_in = c6.text_input("", key=f"cc_p_{row['id']}", placeholder="Cartão", label_visibility="collapsed")
+                qtd_parc_in = c7.number_input("", min_value=1, max_value=12, value=1, step=1, key=f"q_p_{row['id']}", label_visibility="collapsed")
+
+                if c8.button("Ok", key=f"btn_p_{row['id']}", use_container_width=True):
                     v_dig = parse_moeda(v_parc_in)
                     if v_dig > 0:
-                        # Grava o LPR (Lançamento Parcial)
+                        is_cc = bool(cc_parc_in.strip())
+                        qtd_p = int(qtd_parc_in) if is_cc else 0
+
+                        # LPR: Grava com $CCL se tiver cartão
                         supabase.table("lancamentos").insert({
                             "projeto_id": str(st.session_state.projeto_ativo),
                             "usuario_id": str(ID_USUARIO_LOGADO), 
@@ -227,26 +229,84 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                             "status": "Planejado",
                             "parcial_real": v_dig, 
                             "parcial_data": hoje_c.strftime('%Y-%m-%d'), 
-                            "permite_parcial": False
+                            "permite_parcial": False,
+                            "cc_tipo": "$CCL" if is_cc else None,
+                            "cc_qtd_parcelas": qtd_p
                         }).execute()
+
+                        # Cria os LCLs para as faturas
+                        if is_cc:
+                            v_parcela = round(v_dig / (qtd_p if qtd_p > 0 else 1), 2)
+                            dt_primeiro_venc = calcular_vencimento_fatura(hoje_c, dia_corte=15, dia_vencimento=20)
+                            for i in range(max(1, qtd_p)):
+                                dt_venc_parc = somar_meses_data(dt_primeiro_venc, i)
+                                supabase.table("lancamentos").insert({
+                                    "projeto_id": str(st.session_state.projeto_ativo),
+                                    "usuario_id": str(ID_USUARIO_LOGADO),
+                                    "descricao": f"{row['descricao']} ({i+1}/{qtd_p}) - {cc_parc_in.strip()}",
+                                    "data": dt_venc_parc.strftime('%Y-%m-%d'),
+                                    "data_vencimento": dt_venc_parc.strftime('%Y-%m-%d'),
+                                    "tipo": "Saída",
+                                    "valor_plan": 0,
+                                    "valor_real": v_parcela,
+                                    "status": "Realizado",
+                                    "cc_tipo": None,
+                                    "cc_qtd_parcelas": 0
+                                }).execute()
+
                         st.session_state[v_key] += 1
                         st.rerun()
             else:
                 c3.write(format_moeda(row['valor_plan']))
                 if row['status'] in ['Realizado', 'REAL']:
                     c4.write(format_moeda(row['valor_real']))
-                    c6.write("✅")
+                    c5.write("-")
+                    c6.write("-")
+                    c7.write("-")
+                    c8.write("✅")
                 else:
                     v_norm_in = c4.text_input("", key=f"n_{row['id']}", value="0,00", label_visibility="collapsed")
-                    if c6.button("Ok", key=f"btn_n_{row['id']}", use_container_width=True):
+                    c5.write("-")
+                    cc_norm_in = c6.text_input("", key=f"cc_n_{row['id']}", placeholder="Cartão", label_visibility="collapsed")
+                    qtd_norm_in = c7.number_input("", min_value=1, max_value=12, value=1, step=1, key=f"q_n_{row['id']}", label_visibility="collapsed")
+
+                    if c8.button("Ok", key=f"btn_n_{row['id']}", use_container_width=True):
                         v_para_gravar = parse_moeda(v_norm_in)
                         if v_para_gravar == 0: 
                             v_para_gravar = row['valor_plan']
                         
+                        is_cc = bool(cc_norm_in.strip())
+                        qtd_p = int(qtd_norm_in) if is_cc else 0
+
+                        # Atualiza o LOU com $CCL se foi feito no cartão
                         supabase.table("lancamentos").update({
                             "valor_real": v_para_gravar, 
-                            "status": "Realizado"
+                            "status": "Realizado",
+                            "cc_tipo": "$CCL" if is_cc else None,
+                            "cc_qtd_parcelas": qtd_p
                         }).eq("id", row['id']).execute()
+
+                        # Lança os LCLs correspondentes nas faturas
+                        if is_cc:
+                            v_parcela = round(v_para_gravar / (qtd_p if qtd_p > 0 else 1), 2)
+                            dt_primeiro_venc = calcular_vencimento_fatura(row['dt_obj'], dia_corte=15, dia_vencimento=20)
+
+                            for i in range(max(1, qtd_p)):
+                                dt_venc_parc = somar_meses_data(dt_primeiro_venc, i)
+                                supabase.table("lancamentos").insert({
+                                    "projeto_id": str(st.session_state.projeto_ativo),
+                                    "usuario_id": str(ID_USUARIO_LOGADO),
+                                    "descricao": f"{row['descricao']} ({i+1}/{qtd_p}) - {cc_norm_in.strip()}",
+                                    "data": dt_venc_parc.strftime('%Y-%m-%d'),
+                                    "data_vencimento": dt_venc_parc.strftime('%Y-%m-%d'),
+                                    "tipo": "Saída",
+                                    "valor_plan": 0,
+                                    "valor_real": v_parcela,
+                                    "status": "Realizado",
+                                    "cc_tipo": None,
+                                    "cc_qtd_parcelas": 0
+                                }).execute()
+
                         st.rerun()
             st.divider()
     else:
