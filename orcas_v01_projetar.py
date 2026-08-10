@@ -250,7 +250,8 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
                                 "correcao_freq": c_quando if usar_corrc else None,
                                 "correcao_valor": float(v_pct) if c_base == "Percentual Fixo (%)" else 0.0,
                                 "regra_parcial": str(p_depois),
-                                "tipo_cc": "$CCP" if is_cartao else None
+                                "cc_tipo": "$CCP" if is_cartao else None,
+                                "cc_dia_corte": int(dia_corte) if is_cartao else None
                             })
                             gerados += 1
                             if usar_corrc and c_quando == "Todo mês" and c_base == "Percentual Fixo (%)": v_calc *= (1 + v_pct)
