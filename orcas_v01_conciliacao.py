@@ -1,12 +1,20 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
+import calendar
 
 from orcas_v01_ajuda_conciliacao import renderizar_ajuda_conciliacao
 
+def somar_meses(data_base, qtd_meses):
+    """Auxiliar para avançar N meses mantendo o dia coerente."""
+    ano = data_base.year + ((data_base.month + qtd_meses - 1) // 12)
+    mes = ((data_base.month + qtd_meses - 1) % 12) + 1
+    dia = min(data_base.day, calendar.monthrange(ano, mes)[1])
+    return datetime(ano, mes, dia).date()
+
 def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moeda):
     """
-    Sub-rotina da Tela Conciliação - Solução Estrita de Filtragem de Parciais.
+    Sub-rotina da Tela Conciliação - Suporte Completo a Cartão de Crédito e Parcelamento.
     """
     # --- CABEÇALHO ALINHADO COM BOTÃO DE AJUDA ---
     col_titulo, col_ajuda = st.columns([4, 1])
@@ -60,29 +68,59 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
     
     st.divider()
 
+    # --- LANÇAR SEM PLANEJAMENTO ---
     if st.session_state.abrir_sem_plan:
-        cols_sp = st.columns([2.5, 1, 1.2, 1])
-        sp_desc = cols_sp[0].text_input("Descrição", key="sp_desc", placeholder="Ex: Gasto Extra")
+        cols_sp = st.columns([2, 1, 1, 1.5, 1, 0.8])
+        sp_desc = cols_sp[0].text_input("Descrição", key="sp_desc", placeholder="Ex: Sapato")
         sp_tipo = cols_sp[1].selectbox("E/S", ["Saída", "Entrada"], key="sp_tipo")
-        sp_valor = cols_sp[2].text_input("Valor Real", key="sp_valor", value="0,00")
+        sp_valor = cols_sp[2].text_input("Valor Total", key="sp_valor", value="0,00")
+        sp_cartao = cols_sp[3].text_input("Cartão de Crédito", key="sp_cartao", placeholder="Ex: Itaú Visa")
+        sp_parc = cols_sp[4].number_input("Qtd Parcelas", min_value=1, max_value=12, value=1, step=1, key="sp_parc")
         
-        with cols_sp[3]:
+        with cols_sp[5]:
             st.markdown('<div style="margin-top: 28px;"></div>', unsafe_allow_html=True)
             btn_confirmar = st.button("Ok", key="btn_sp_conf", use_container_width=True)
         
         if btn_confirmar:
-            v_sp = parse_moeda(sp_valor)
-            if sp_desc and v_sp > 0:
-                supabase.table("lancamentos").insert({
-                    "projeto_id": str(st.session_state.projeto_ativo),
-                    "usuario_id": str(ID_USUARIO_LOGADO),
-                    "descricao": sp_desc,
-                    "data": hoje_c.strftime('%Y-%m-%d'),
-                    "data_vencimento": hoje_c.strftime('%Y-%m-%d'),
-                    "tipo": sp_tipo,
-                    "valor_plan": 0, "valor_real": v_sp,
-                    "status": "Realizado", "parcial_real": 0, "permite_parcial": False
-                }).execute()
+            v_sp_total = parse_moeda(sp_valor)
+            if sp_desc and v_sp_total > 0:
+                qtd_p = int(sp_parc) if sp_cartao.strip() else 1
+                v_parcela = round(v_sp_total / qtd_p, 2)
+
+                for i in range(qtd_p):
+                    dt_parcela = somar_meses(hoje_c, i)
+                    
+                    # 1. Cria a despesa original (Sapato)
+                    supabase.table("lancamentos").insert({
+                        "projeto_id": str(st.session_state.projeto_ativo),
+                        "usuario_id": str(ID_USUARIO_LOGADO),
+                        "descricao": sp_desc if qtd_p == 1 else f"{sp_desc} ({hoje_c.strftime('%b/%y')} – Parc. {i+1} de {qtd_p})",
+                        "data": dt_parcela.strftime('%Y-%m-%d'),
+                        "data_vencimento": dt_parcela.strftime('%Y-%m-%d'),
+                        "tipo": sp_tipo,
+                        "valor_plan": v_parcela, 
+                        "valor_real": v_parcela,
+                        "status": "Realizado", 
+                        "parcial_real": 0, 
+                        "permite_parcial": False
+                    }).execute()
+
+                    # 2. Se informou cartão, lança o item $CCL correspondente
+                    if sp_cartao.strip():
+                        supabase.table("lancamentos").insert({
+                            "projeto_id": str(st.session_state.projeto_ativo),
+                            "usuario_id": str(ID_USUARIO_LOGADO),
+                            "descricao": f"{sp_desc} ({i+1}/{qtd_p}) - {sp_cartao.strip()}",
+                            "data": dt_parcela.strftime('%Y-%m-%d'),
+                            "data_vencimento": dt_parcela.strftime('%Y-%m-%d'),
+                            "tipo": "Saída",
+                            "valor_plan": 0,
+                            "valor_real": v_parcela,
+                            "status": "Realizado",
+                            "cc_tipo": "$CCL",
+                            "cc_qtd_parcelas": qtd_p
+                        }).execute()
+
                 st.session_state.abrir_sem_plan = False
                 st.rerun()
         st.divider()
@@ -92,9 +130,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
         df_c['dt_obj'] = pd.to_datetime(df_c['data']).dt.date
         df_c['parcial_real'] = pd.to_numeric(df_c['parcial_real'], errors='coerce').fillna(0)
         
-        # 🟢 REGRA CRÍTICA: SEPARA TOTALMENTE OS REGISTROS DE PARCIAL DA LISTA PRINCIPAL
-        # 1. 'df_apenas_parciais': Guarda o histórico de parciais para somar no V.Real
-        # 2. 'df_base_tela': Guarda APENAS os lançamentos originais (pais) para renderizar na tela
+        # 🟢 FILTRAGEM: Separa lançamentos normais dos históricos de parciais
         df_base_tela = df_c[df_c['parcial_real'] == 0].copy()
         
         if st.session_state.listar_todos_mes:
@@ -117,23 +153,24 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
         df_final_concilia = pd.concat([parciais_topo, demais_itens])
 
         # CABEÇALHO
-        h1, h2, h3, h4, h5, h6 = st.columns([2.2, 0.5, 1.1, 1.1, 1.1, 0.5])
+        h1, h2, h3, h4, h5, h6, h7, h8 = st.columns([2.0, 0.4, 0.9, 0.9, 0.9, 1.2, 0.6, 0.4])
         h1.write("**Data - Descrição**")
         h2.write("**E/S**")
         h3.write("**V. Plan.**")
         h4.write("**V. Real**")
-        h5.write("**Valor Parcial**")
-        h6.write("**Ação**")
+        h5.write("**V. Parcial**")
+        h6.write("**Cartão**")
+        h7.write("**Parc.**")
+        h8.write("**Ação**")
         st.divider()
 
         for _, row in df_final_concilia.iterrows():
-            # Soma todas as parciais diretamente no DataFrame 'df' original
             v_acumulado_desc = df[df['descricao'] == row['descricao']]['parcial_real'].fillna(0).sum()
             cor_txt = "red" if (row['valor_plan'] > 0 and v_acumulado_desc > row['valor_plan']) else "black"
             
             st.markdown('<div style="margin-bottom: -32px;"></div>', unsafe_allow_html=True)
             
-            c1, c2, c3, c4, c5, c6 = st.columns([2.2, 0.5, 1.1, 1.1, 1.1, 0.5])
+            c1, c2, c3, c4, c5, c6, c7, c8 = st.columns([2.0, 0.4, 0.9, 0.9, 0.9, 1.2, 0.6, 0.4])
             
             c1.markdown(f"<span style='color:{cor_txt}; font-weight: 500;'>{row['dt_obj'].strftime('%d/%m/%Y')} - {row['descricao']}</span>", unsafe_allow_html=True)
             cor_tipo = 'red' if row['tipo'] == 'Saída' else 'blue'
@@ -148,10 +185,13 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                     st.session_state[v_key] = 0
                 
                 v_parc_in = c5.text_input("", key=f"p_{row['id']}_{st.session_state[v_key]}", value="0,00", label_visibility="collapsed")
-                
-                if c6.button("Ok", key=f"btn_p_{row['id']}", use_container_width=True):
+                cc_parc_in = c6.text_input("", key=f"cc_p_{row['id']}", placeholder="Cartão (opcional)", label_visibility="collapsed")
+                qtd_parc_in = c7.number_input("", min_value=1, max_value=12, value=1, step=1, key=f"q_p_{row['id']}", label_visibility="collapsed")
+
+                if c8.button("Ok", key=f"btn_p_{row['id']}", use_container_width=True):
                     v_dig = parse_moeda(v_parc_in)
                     if v_dig > 0:
+                        # Insere o lançamento de abatimento parcial
                         supabase.table("lancamentos").insert({
                             "projeto_id": str(st.session_state.projeto_ativo),
                             "usuario_id": str(ID_USUARIO_LOGADO), 
@@ -166,20 +206,92 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                             "parcial_data": hoje_c.strftime('%Y-%m-%d'), 
                             "permite_parcial": False
                         }).execute()
+
+                        # Se foi pago no cartão de crédito
+                        if cc_parc_in.strip():
+                            qtd_p = int(qtd_parc_in)
+                            v_parc_cc = round(v_dig / qtd_p, 2)
+                            for i in range(qtd_p):
+                                dt_parc_cc = somar_meses(hoje_c, i)
+                                supabase.table("lancamentos").insert({
+                                    "projeto_id": str(st.session_state.projeto_ativo),
+                                    "usuario_id": str(ID_USUARIO_LOGADO),
+                                    "descricao": f"{row['descricao']} ({i+1}/{qtd_p}) - {cc_parc_in.strip()}",
+                                    "data": dt_parc_cc.strftime('%Y-%m-%d'),
+                                    "data_vencimento": dt_parc_cc.strftime('%Y-%m-%d'),
+                                    "tipo": "Saída",
+                                    "valor_plan": 0,
+                                    "valor_real": v_parc_cc,
+                                    "status": "Realizado",
+                                    "cc_tipo": "$CCL",
+                                    "cc_qtd_parcelas": qtd_p
+                                }).execute()
+
                         st.session_state[v_key] += 1
                         st.rerun()
             else:
                 c3.write(format_moeda(row['valor_plan']))
                 if row['status'] in ['Realizado', 'REAL']:
                     c4.write(format_moeda(row['valor_real']))
-                    c6.write("✅")
+                    c5.write("-")
+                    c6.write(row.get('cc_tipo') or "-")
+                    c7.write("-")
+                    c8.write("✅")
                 else:
                     v_norm_in = c4.text_input("", key=f"n_{row['id']}", value="0,00", label_visibility="collapsed")
-                    if c6.button("Ok", key=f"btn_n_{row['id']}", use_container_width=True):
+                    c5.write("-")
+                    cc_norm_in = c6.text_input("", key=f"cc_n_{row['id']}", placeholder="Cartão (opcional)", label_visibility="collapsed")
+                    qtd_norm_in = c7.number_input("", min_value=1, max_value=12, value=1, step=1, key=f"q_n_{row['id']}", label_visibility="collapsed")
+
+                    if c8.button("Ok", key=f"btn_n_{row['id']}", use_container_width=True):
                         v_para_gravar = parse_moeda(v_norm_in)
                         if v_para_gravar == 0: 
                             v_para_gravar = row['valor_plan']
-                        supabase.table("lancamentos").update({"valor_real": v_para_gravar, "status": "Realizado"}).eq("id", row['id']).execute()
+                        
+                        qtd_p = int(qtd_norm_in) if cc_norm_in.strip() else 1
+                        v_parcela = round(v_para_gravar / qtd_p, 2)
+
+                        # Atualiza o registro atual do mês
+                        supabase.table("lancamentos").update({
+                            "valor_real": v_parcela, 
+                            "status": "Realizado"
+                        }).eq("id", row['id']).execute()
+
+                        if cc_norm_in.strip():
+                            # Replicar para os meses seguintes se for parcelado (Cenário C: ex: Curso de Inglês)
+                            for i in range(qtd_p):
+                                dt_fatura = somar_meses(row['dt_obj'], i)
+
+                                # Lança o $CCL no cartão para cada mês
+                                supabase.table("lancamentos").insert({
+                                    "projeto_id": str(st.session_state.projeto_ativo),
+                                    "usuario_id": str(ID_USUARIO_LOGADO),
+                                    "descricao": f"{row['descricao']} ({i+1}/{qtd_p}) - {cc_norm_in.strip()}",
+                                    "data": dt_fatura.strftime('%Y-%m-%d'),
+                                    "data_vencimento": dt_fatura.strftime('%Y-%m-%d'),
+                                    "tipo": "Saída",
+                                    "valor_plan": 0,
+                                    "valor_real": v_parcela,
+                                    "status": "Realizado",
+                                    "cc_tipo": "$CCL",
+                                    "cc_qtd_parcelas": qtd_p
+                                }).execute()
+
+                                # Se i > 0, cria a despesa correspondente nos meses subsequentes
+                                if i > 0:
+                                    sufixo_parc = f"({row['dt_obj'].strftime('%b/%y')} – Parc. {i+1} de {qtd_p})"
+                                    supabase.table("lancamentos").insert({
+                                        "projeto_id": str(st.session_state.projeto_ativo),
+                                        "usuario_id": str(ID_USUARIO_LOGADO),
+                                        "descricao": f"{row['descricao']} {sufixo_parc}",
+                                        "data": dt_fatura.strftime('%Y-%m-%d'),
+                                        "data_vencimento": dt_fatura.strftime('%Y-%m-%d'),
+                                        "tipo": row['tipo'],
+                                        "valor_plan": v_parcela,
+                                        "valor_real": v_parcela,
+                                        "status": "Realizado"
+                                    }).execute()
+
                         st.rerun()
             st.divider()
     else:
