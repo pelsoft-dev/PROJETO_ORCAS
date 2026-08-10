@@ -5,8 +5,22 @@ import calendar
 
 from orcas_v01_ajuda_conciliacao import renderizar_ajuda_conciliacao
 
+def buscar_dados_cartao(df, nome_cartao):
+    """
+    Busca o dia de corte e o dia de vencimento do cartão ($CCP).
+    Retorna (dia_corte, dia_vencimento). Se não achar, usa (15, 20) como fallback.
+    """
+    if not df.empty and 'cc_tipo' in df.columns:
+        df_ccp = df[(df['cc_tipo'].isin(['$CCP', 'CCP'])) & (df['descricao'].str.upper() == nome_cartao.upper())]
+        if not df_ccp.empty:
+            row_c = df_ccp.iloc[0]
+            corte = int(row_c.get('cc_dia_corte', 15)) if pd.notnull(row_c.get('cc_dia_corte')) else 15
+            venc = int(row_c.get('cc_dia_vencimento', 20)) if pd.notnull(row_c.get('cc_dia_vencimento')) else 20
+            return corte, venc
+    return 15, 20
+
 def calcular_vencimento_fatura(data_compra, dia_corte=15, dia_vencimento=20):
-    """Calcula a data de vencimento da 1ª parcela conforme o dia de corte."""
+    """Calcula a data de vencimento da 1ª parcela conforme o dia de corte real do cartão."""
     ano = data_compra.year
     mes = data_compra.month
 
@@ -19,37 +33,60 @@ def calcular_vencimento_fatura(data_compra, dia_corte=15, dia_vencimento=20):
     dia_final = min(dia_vencimento, calendar.monthrange(ano, mes)[1])
     return datetime(ano, mes, dia_final).date()
 
-def somar_meses_data(data_base, qtd_meses):
-    """Avança N meses mantendo a coerência de dias do mês."""
+def somar_meses_data(data_base, qtd_meses, dia_vencimento=20):
+    """Avança N meses mantendo a coerência do dia de vencimento do cartão."""
     ano = data_base.year + ((data_base.month + qtd_meses - 1) // 12)
     mes = ((data_base.month + qtd_meses - 1) % 12) + 1
-    dia = min(data_base.day, calendar.monthrange(ano, mes)[1])
+    dia = min(dia_vencimento, calendar.monthrange(ano, mes)[1])
     return datetime(ano, mes, dia).date()
 
-def buscar_cartoes_ccp(df):
-    """Busca no DataFrame os cartões cadastrados ($CCP / CCP)."""
+def buscar_cartoes_lcp(df):
+    """
+    Busca no DataFrame de lançamentos os registros de cartões cadastrados 
+    filtrando pela tag $CCP / CCP.
+    """
     cartoes_ccp = []
     if not df.empty and 'cc_tipo' in df.columns:
+        # Filtra estritamente os lançamentos identificados como $CCP ou CCP
         df_ccp = df[df['cc_tipo'].isin(['$CCP', 'CCP'])]
         if not df_ccp.empty and 'descricao' in df_ccp.columns:
             cartoes_ccp = df_ccp['descricao'].dropna().unique().tolist()
             cartoes_ccp = sorted(list(set([c.strip().upper() for c in cartoes_ccp if c.strip()])))
     
-    return ["Nenhum"] + cartoes_ccp + ["+ Outro Cartão..."]
+    opcoes = ["Nenhum"] + cartoes_ccp + ["+ Outro Cartão..."]
+    return opcoes
 
 def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moeda):
-    """Sub-rotina da Tela Conciliação com fluxo LOU, LPR, LCL e Visão Cartão."""
-    
-    # Controle de Reset para limpar inputs após o OK
+    """
+    Sub-rotina da Tela Conciliação - Regras estritas de LOU, LPR e LCL com cartões $CCP.
+    """
+    # Controle para resetar os campos de formulário após o Ok
     if "reset_count" not in st.session_state:
         st.session_state.reset_count = 0
 
-    # --- CABEÇALHO ---
+    reset_key = st.session_state.reset_count
+
+    # --- CABEÇALHO ALINHADO COM BOTÃO DE AJUDA ---
     col_titulo, col_ajuda = st.columns([4, 1])
+    
     with col_titulo:
         st.markdown(f'<div class="titulo-tela" style="margin-top:0px;">Conciliação: {st.session_state.projeto_ativo}</div>', unsafe_allow_html=True)
         
     with col_ajuda:
+        st.markdown("""
+            <style>
+            div.stButton > button:first-child {
+                background-color: #007ba7 !important;
+                color: white !important;
+                border: none !important;
+            }
+            div.stButton > button:first-child:hover {
+                background-color: #005f81 !important;
+                color: white !important;
+            }
+            </style>
+        """, unsafe_allow_html=True)
+        
         if st.button("AJUDA", type="primary", use_container_width=True):
             st.session_state["exibir_ajuda_conciliacao"] = not st.session_state.get("exibir_ajuda_conciliacao", False)
             st.rerun()
@@ -81,8 +118,8 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
     
     st.divider()
 
-    lista_cartoes_ccp = buscar_cartoes_ccp(df)
-    reset_key = st.session_state.reset_count
+    # Busca os cartões cadastrados com cc_tipo = $CCP
+    lista_cartoes_ccp = buscar_cartoes_lcp(df)
 
     # --- ÁREA: LANÇAR SEM PLANEJAMENTO ---
     if st.session_state.abrir_sem_plan:
@@ -96,7 +133,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
         
         sp_cartao_manual = ""
         if sp_cartao_sel == "+ Outro Cartão...":
-            sp_cartao_manual = st.text_input("Nome do Cartão", key=f"sp_cartao_manual_{reset_key}", placeholder="Ex: ITAÚ MASTER")
+            sp_cartao_manual = st.text_input("Nome do Cartão", key=f"sp_cartao_manual_input_{reset_key}", placeholder="Ex: ITAÚ MASTER")
 
         with cols_sp[5]:
             st.markdown('<div style="margin-top: 28px;"></div>', unsafe_allow_html=True)
@@ -106,10 +143,11 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
             v_sp = parse_moeda(sp_valor)
             if sp_desc and v_sp > 0:
                 nome_cartao_final = sp_cartao_manual.strip().upper() if sp_cartao_sel == "+ Outro Cartão..." else sp_cartao_sel
+                
                 is_cc = bool(nome_cartao_final) and nome_cartao_final != "NENHUM" and int(sp_parc) > 0
                 qtd_p = int(sp_parc) if is_cc else 0
 
-                # (2) LOU (Lançamento Sem Planejamento)
+                # Grava o LOU Original
                 supabase.table("lancamentos").insert({
                     "projeto_id": str(st.session_state.projeto_ativo),
                     "usuario_id": str(ID_USUARIO_LOGADO),
@@ -126,13 +164,14 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                     "cc_qtd_parcelas": qtd_p
                 }).execute()
 
-                # (2) Gerando as LCLs estritas
+                # Gerando os LCLs com vencimentos reais do cartão
                 if is_cc:
+                    corte, venc = buscar_dados_cartao(df, nome_cartao_final)
                     v_parcela = round(v_sp / qtd_p, 2)
-                    dt_primeiro_venc = calcular_vencimento_fatura(hoje_c, dia_corte=15, dia_vencimento=20)
+                    dt_primeiro_venc = calcular_vencimento_fatura(hoje_c, dia_corte=corte, dia_vencimento=venc)
 
                     for i in range(qtd_p):
-                        dt_venc_parc = somar_meses_data(dt_primeiro_venc, i)
+                        dt_venc_parc = somar_meses_data(dt_primeiro_venc, i, dia_vencimento=venc)
                         parc_str = f"{i+1:02d}/{qtd_p:02d}"
                         
                         supabase.table("lancamentos").insert({
@@ -160,7 +199,8 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
         df_c['dt_obj'] = pd.to_datetime(df_c['data']).dt.date
         df_c['parcial_real'] = pd.to_numeric(df_c['parcial_real'], errors='coerce').fillna(0)
         
-        df_base_tela = df_c[df_c['parcial_real'] == 0].copy()
+        # FILTRO: Oculta parcelas LCL da visualização principal da conciliação
+        df_base_tela = df_c[(df_c['parcial_real'] == 0) & (df_c['cc_tipo'] != 'LCL')].copy()
         
         if st.session_state.listar_todos_mes:
             proximo_mes = (ini_mes_c + timedelta(days=32)).replace(day=1)
@@ -181,8 +221,8 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
         demais_itens = df_f[~df_f.index.isin(parciais_topo.index)].sort_values('dt_obj', ascending=False)
         df_final_concilia = pd.concat([parciais_topo, demais_itens])
 
-        # CABEÇALHO COM A COLUNA VISÃO CARTÃO (3)
-        h1, h2, h3, h4, h5, h6, h7, h8, h9 = st.columns([1.7, 0.4, 0.8, 0.8, 0.8, 1.1, 0.5, 0.4, 0.4])
+        # CABEÇALHO DA TABELA (Exatamente as 8 colunas originais)
+        h1, h2, h3, h4, h5, h6, h7, h8 = st.columns([1.8, 0.4, 0.9, 0.9, 0.9, 1.2, 0.5, 0.4])
         h1.write("**Data - Descrição**")
         h2.write("**E/S**")
         h3.write("**V. Plan.**")
@@ -191,7 +231,6 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
         h6.write("**Cartão**")
         h7.write("**Parc.**")
         h8.write("**Ação**")
-        h9.write("**Visão**")
         st.divider()
 
         for _, row in df_final_concilia.iterrows():
@@ -200,12 +239,21 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
             
             st.markdown('<div style="margin-bottom: -32px;"></div>', unsafe_allow_html=True)
             
-            c1, c2, c3, c4, c5, c6, c7, c8, c9 = st.columns([1.7, 0.4, 0.8, 0.8, 0.8, 1.1, 0.5, 0.4, 0.4])
+            c1, c2, c3, c4, c5, c6, c7, c8 = st.columns([1.8, 0.4, 0.9, 0.9, 0.9, 1.2, 0.5, 0.4])
             
             c1.markdown(f"<span style='color:{cor_txt}; font-weight: 500;'>{row['dt_obj'].strftime('%d/%m/%Y')} - {row['descricao']}</span>", unsafe_allow_html=True)
             cor_tipo = 'red' if row['tipo'] == 'Saída' else 'blue'
             c2.markdown(f"<span style='color:{cor_tipo}'>{row['tipo'][0]}</span>", unsafe_allow_html=True)
             
+            # Cálculo dinâmico para exibição da fatura do cartão $CCP
+            valor_exibicao_real = row['valor_real']
+            if row.get('cc_tipo') in ['$CCP', 'CCP']:
+                soma_lcls = df[(df['cc_tipo'] == 'LCL') & 
+                               (df['descricao'].str.upper() == str(row['descricao']).upper()) & 
+                               (pd.to_datetime(df['data_vencimento']).dt.month == row['dt_obj'].month) &
+                               (pd.to_datetime(df['data_vencimento']).dt.year == row['dt_obj'].year)]['valor_real'].sum()
+                valor_exibicao_real = soma_lcls
+
             if row['permite_parcial']:
                 c3.markdown(f"<span style='color:{cor_txt}'>{format_moeda(row['valor_plan'])}</span>", unsafe_allow_html=True)
                 c4.markdown(f"<span style='color:{cor_txt}'>{format_moeda(v_acumulado_desc)}</span>", unsafe_allow_html=True)
@@ -216,7 +264,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                 
                 v_parc_in = c5.text_input("", key=f"p_{row['id']}_{reset_key}_{st.session_state[v_key]}", value="0,00", label_visibility="collapsed")
                 
-                # (1) Dropdown e Inputs vinculados à reset_key
+                # Dropdown alimentada pelos cartões $CCP
                 cc_sel = c6.selectbox("", lista_cartoes_ccp, key=f"cc_p_sel_{row['id']}_{reset_key}", label_visibility="collapsed")
                 qtd_parc_in = c7.number_input("", min_value=0, max_value=12, value=0, step=1, key=f"q_p_{row['id']}_{reset_key}", label_visibility="collapsed")
 
@@ -231,6 +279,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                         is_cc = bool(nome_cartao_final) and nome_cartao_final != "NENHUM" and int(qtd_parc_in) > 0
                         qtd_p = int(qtd_parc_in) if is_cc else 0
 
+                        # LPR: Grava com $CCL se for cartão
                         supabase.table("lancamentos").insert({
                             "projeto_id": str(st.session_state.projeto_ativo),
                             "usuario_id": str(ID_USUARIO_LOGADO), 
@@ -248,20 +297,21 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                             "cc_qtd_parcelas": qtd_p
                         }).execute()
 
-                        # (2) Gravando LCLs
+                        # Criação das LCLs
                         if is_cc:
+                            corte, venc = buscar_dados_cartao(df, nome_cartao_final)
                             v_parcela = round(v_dig / qtd_p, 2)
-                            dt_primeiro_venc = calcular_vencimento_fatura(hoje_c, dia_corte=15, dia_vencimento=20)
+                            dt_primeiro_venc = calcular_vencimento_fatura(hoje_c, dia_corte=corte, dia_vencimento=venc)
                             
                             for i in range(qtd_p):
-                                dt_venc_parc = somar_meses_data(dt_primeiro_venc, i)
+                                dt_venc_parc = somar_meses_data(dt_primeiro_venc, i, dia_vencimento=venc)
                                 parc_str = f"{i+1:02d}/{qtd_p:02d}"
                                 
                                 supabase.table("lancamentos").insert({
                                     "projeto_id": str(st.session_state.projeto_ativo),
                                     "usuario_id": str(ID_USUARIO_LOGADO),
-                                    "descricao": nome_cartao_final,
-                                    "cc_descricao": f"{row['descricao']} ({parc_str})",
+                                    "descricao": nome_cartao_final,                      # Nome do Cartão
+                                    "cc_descricao": f"{row['descricao']} ({parc_str})",   # Ex: Combustível (01/03)
                                     "data": dt_venc_parc.strftime('%Y-%m-%d'),
                                     "data_vencimento": dt_venc_parc.strftime('%Y-%m-%d'),
                                     "tipo": "Saída",
@@ -272,14 +322,13 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                                     "cc_qtd_parcelas": 0
                                 }).execute()
 
-                        # (1) Incrementa para limpar os campos no rerun
                         st.session_state.reset_count += 1
                         st.session_state[v_key] += 1
                         st.rerun()
             else:
                 c3.write(format_moeda(row['valor_plan']))
                 if row['status'] in ['Realizado', 'REAL']:
-                    c4.write(format_moeda(row['valor_real']))
+                    c4.write(format_moeda(valor_exibicao_real))
                     c5.write("-")
                     c6.write("-")
                     c7.write("-")
@@ -288,7 +337,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                     v_norm_in = c4.text_input("", key=f"n_{row['id']}_{reset_key}", value="0,00", label_visibility="collapsed")
                     c5.write("-")
                     
-                    # (1) Dropdown e Inputs vinculados à reset_key
+                    # Dropdown alimentada pelos cartões $CCP
                     cc_norm_sel = c6.selectbox("", lista_cartoes_ccp, key=f"cc_n_sel_{row['id']}_{reset_key}", label_visibility="collapsed")
                     qtd_norm_in = c7.number_input("", min_value=0, max_value=12, value=0, step=1, key=f"q_n_{row['id']}_{reset_key}", label_visibility="collapsed")
 
@@ -313,20 +362,21 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                             "cc_qtd_parcelas": qtd_p
                         }).eq("id", row['id']).execute()
 
-                        # (2) Gerando as LCLs
+                        # Gerando os LCLs das parcelas com datas dinâmicas por cartão
                         if is_cc:
+                            corte, venc = buscar_dados_cartao(df, nome_cartao_final)
                             v_parcela = round(v_para_gravar / qtd_p, 2)
-                            dt_primeiro_venc = calcular_vencimento_fatura(row['dt_obj'], dia_corte=15, dia_vencimento=20)
+                            dt_primeiro_venc = calcular_vencimento_fatura(row['dt_obj'], dia_corte=corte, dia_vencimento=venc)
 
                             for i in range(qtd_p):
-                                dt_venc_parc = somar_meses_data(dt_primeiro_venc, i)
+                                dt_venc_parc = somar_meses_data(dt_primeiro_venc, i, dia_vencimento=venc)
                                 parc_str = f"{i+1:02d}/{qtd_p:02d}"
                                 
                                 supabase.table("lancamentos").insert({
                                     "projeto_id": str(st.session_state.projeto_ativo),
                                     "usuario_id": str(ID_USUARIO_LOGADO),
-                                    "descricao": nome_cartao_final,
-                                    "cc_descricao": f"{row['descricao']} ({parc_str})",
+                                    "descricao": nome_cartao_final,                      # Nome do Cartão CCP
+                                    "cc_descricao": f"{row['descricao']} ({parc_str})",   # Ex: Combustível (01/03)
                                     "data": dt_venc_parc.strftime('%Y-%m-%d'),
                                     "data_vencimento": dt_venc_parc.strftime('%Y-%m-%d'),
                                     "tipo": "Saída",
@@ -337,36 +387,8 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                                     "cc_qtd_parcelas": 0
                                 }).execute()
 
-                        # (1) Incrementa para limpar os campos no rerun
                         st.session_state.reset_count += 1
                         st.rerun()
-
-            # (3) BOTÃO "VISÃO CARTÃO" NA 9ª COLUNA
-            if row.get('cc_tipo') == '$CCL':
-                if c9.button("💳", key=f"btn_v_cc_{row['id']}", help="Visão Cartão / Parcelas"):
-                    st.session_state[f"exp_cc_{row['id']}"] = not st.session_state.get(f"exp_cc_{row['id']}", False)
-
-            # (3) Exibição dos lançamentos da fatura (LCLs) associados ao item
-            if st.session_state.get(f"exp_cc_{row['id']}", False):
-                with st.expander(f"📌 Detalhes das Parcelas da Fatura - {row['descricao']}", expanded=True):
-                    # Filtra os LCLs referentes a esta compra no DataFrame geral
-                    df_lcls = df[(df['cc_tipo'] == 'LCL') & (df['cc_descricao'].str.startswith(str(row['descricao'])))]
-                    if not df_lcls.empty:
-                        st.dataframe(
-                            df_lcls[['data_vencimento', 'descricao', 'cc_descricao', 'valor_real', 'status']],
-                            column_config={
-                                "data_vencimento": "Vencimento",
-                                "descricao": "Cartão",
-                                "cc_descricao": "Parcela / Item",
-                                "valor_real": "Valor Parcela",
-                                "status": "Status"
-                            },
-                            hide_index=True,
-                            use_container_width=True
-                        )
-                    else:
-                        st.info("Nenhuma parcela (LCL) localizada para este item.")
-
             st.divider()
     else:
         st.info("Nenhum lançamento pendente para conciliação.")
