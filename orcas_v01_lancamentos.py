@@ -7,8 +7,16 @@ from orcas_v01_ajuda_lancamentos import renderizar_ajuda_lancamentos
 
 # --- MODAL / JANELA VISÃO CARTÃO ---
 @st.dialog("Visão Cartão - Detalhamento das Faturas")
-def abrir_visao_cartao(desc_cartao, df_mes_cartao, format_moeda):
-    st.subheader(f"💳 {desc_cartao}")
+def abrir_visao_cartao(desc_cartao, df_mes_cartao, format_moeda, data_vencimento=None):
+    # Formatação da data de vencimento para o subtítulo
+    dt_venc_str = ""
+    if data_vencimento:
+        try:
+            dt_venc_str = f" — **Vencimento:** {pd.to_datetime(data_vencimento).strftime('%d/%m/%Y')}"
+        except Exception:
+            dt_venc_str = ""
+
+    st.markdown(f"### 💳 {desc_cartao}{dt_venc_str}")
     
     # Filtra os lançamentos LCL vinculados a este cartão no mês
     mask_lcls = (
@@ -18,10 +26,17 @@ def abrir_visao_cartao(desc_cartao, df_mes_cartao, format_moeda):
     df_lcls = df_mes_cartao[mask_lcls].copy()
     
     if not df_lcls.empty:
+        # Identifica a coluna correta para a data da compra (cc_data_compra, data_compra ou data)
+        col_data_compra = 'data'
+        if 'cc_data_compra' in df_lcls.columns and df_lcls['cc_data_compra'].notna().any():
+            col_data_compra = 'cc_data_compra'
+        elif 'data_compra' in df_lcls.columns and df_lcls['data_compra'].notna().any():
+            col_data_compra = 'data_compra'
+
         # Tabela formatada dos lançamentos LCL
         df_exibir_modal = pd.DataFrame({
-            'Descrição': df_lcls['cc_descricao'],
-            'Data': pd.to_datetime(df_lcls['data']).dt.strftime('%d/%m/%Y'),
+            'Descrição': df_lcls['cc_descricao'] if 'cc_descricao' in df_lcls.columns else df_lcls['descricao'],
+            'Data da Compra': pd.to_datetime(df_lcls[col_data_compra]).dt.strftime('%d/%m/%Y'),
             'Valor (R$)': df_lcls['valor_real'].apply(lambda v: format_moeda(v))
         })
         st.dataframe(df_exibir_modal, use_container_width=True, hide_index=True)
@@ -36,21 +51,6 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
     """
     Sub-rotina da Tela Lançamentos - Integridade total da lógica de meses e saldos.
     """
-    # CSS focado especificamente nos botões das colunas da tabela
-    # Mantém o tamanho compacto fixo e não reseta durante o rerun do modal
-    st.markdown("""
-        <style>
-        div[data-testid="stColumn"] div.stButton > button {
-            padding: 0px 6px !important;
-            font-size: 11px !important;
-            height: 24px !important;
-            min-height: 24px !important;
-            line-height: 24px !important;
-            margin: 0px !important;
-            border-radius: 4px !important;
-        }
-        </style>
-    """, unsafe_allow_html=True)
 
     # Verificação de segurança para evitar os erros de AttributeError
     if 'msg_sucesso' not in st.session_state: 
@@ -65,12 +65,16 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
     with col_ajuda:
         st.markdown("""
             <style>
-            div.stButton > button:first-child {
+            /* Estilo isolado exclusivamente para o botão de AJUDA */
+            div.stButton > button[kind="primary"] {
                 background-color: #007ba7 !important;
                 color: white !important;
                 border: none !important;
+                height: 38px !important;
+                font-size: 14px !important;
+                font-weight: bold !important;
             }
-            div.stButton > button:first-child:hover {
+            div.stButton > button[kind="primary"]:hover {
                 background-color: #005f81 !important;
                 color: white !important;
             }
@@ -246,25 +250,27 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         h_row += '</div></div>'
 
                         if eh_cartao_ccp:
-                            c_linha, c_btn = st.columns([5, 1], vertical_alignment="center")
+                            c_linha, c_btn = st.columns([4.5, 1.5], vertical_alignment="center")
                             with c_linha:
                                 st.write(h_row, unsafe_allow_html=True)
                             with c_btn:
+                                # Estilo contido apenas dentro do container do botão "Visão Cartão"
                                 st.markdown("""
                                     <style>
-                                    div[data-testid="stColumn"] div.stButton > button {
-                                        padding: 0px 4px !important;
+                                    div[data-testid="stColumn"]:nth-of-type(2) div.stButton > button {
+                                        padding: 2px 8px !important;
                                         font-size: 11px !important;
-                                        height: 24px !important;
-                                        min-height: 24px !important;
+                                        height: 28px !important;
+                                        min-height: 28px !important;
                                         line-height: 24px !important;
                                         margin: 0px !important;
                                         white-space: nowrap !important;
+                                        border-radius: 4px !important;
                                     }
                                     </style>
                                 """, unsafe_allow_html=True)
                                 if st.button("Visão Cartão", key=f"btn_vc_{mes_str}_{idx}"):
-                                    abrir_visao_cartao(str(row['descricao']), df_mes, format_moeda)
+                                    abrir_visao_cartao(str(row['descricao']), df_mes, format_moeda, data_vencimento=row['data'])
                         else:
                             st.write(h_row, unsafe_allow_html=True)
                 else:
