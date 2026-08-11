@@ -1,17 +1,66 @@
 import streamlit as st
-from datetime import datetime, timedelta, timezone
-import re
-import calendar
+import pandas as pd
+from datetime import datetime
 
-# Importando a ajuda do arquivo dedicado para Projetar
-from orcas_v01_ajuda_projetar import renderizar_ajuda_projetar
+# Importando a ajuda do arquivo dedicado para Lançamentos
+from orcas_v01_ajuda_lancamentos import renderizar_ajuda_lancamentos
 
-def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, parse_moeda):
+# --- MODAL / JANELA VISÃO CARTÃO ---
+@st.dialog("Visão Cartão - Detalhamento das Faturas")
+def abrir_visao_cartao(desc_cartao, df_mes_cartao, format_moeda):
+    st.subheader(f"💳 {desc_cartao}")
+    
+    # Filtra os lançamentos LCL vinculados a este cartão no mês
+    mask_lcls = (
+        (df_mes_cartao['cc_tipo'].fillna('').astype(str).str.strip().str.upper() == 'LCL') &
+        (df_mes_cartao['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_cartao.upper())
+    )
+    df_lcls = df_mes_cartao[mask_lcls].copy()
+    
+    if not df_lcls.empty:
+        # Tabela formatada dos lançamentos LCL
+        df_exibir_modal = pd.DataFrame({
+            'Descrição': df_lcls['cc_descricao'],
+            'Data': pd.to_datetime(df_lcls['data']).dt.strftime('%d/%m/%Y'),
+            'Valor (R$)': df_lcls['valor_real'].apply(lambda v: format_moeda(v))
+        })
+        st.dataframe(df_exibir_modal, use_container_width=True, hide_index=True)
+        
+        total_fatura = df_lcls['valor_real'].sum()
+        st.markdown(f"**Total da Fatura:** R$ {format_moeda(total_fatura)}")
+    else:
+        st.info("Nenhum lançamento (LCL) encontrado para este cartão neste mês.")
+
+
+def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db, format_moeda, ir_para_o_topo):
+    """
+    Sub-rotina da Tela Lançamentos - Integridade total da lógica de meses e saldos.
+    """
+    # CSS focado especificamente nos botões das colunas da tabela
+    # Mantém o tamanho compacto fixo e não reseta durante o rerun do modal
+    st.markdown("""
+        <style>
+        div[data-testid="stColumn"] div.stButton > button {
+            padding: 0px 6px !important;
+            font-size: 11px !important;
+            height: 24px !important;
+            min-height: 24px !important;
+            line-height: 24px !important;
+            margin: 0px !important;
+            border-radius: 4px !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
+    # Verificação de segurança para evitar os erros de AttributeError
+    if 'msg_sucesso' not in st.session_state: 
+        st.session_state.msg_sucesso = False
+
     # --- CABEÇALHO ALINHADO COM BOTÃO DE AJUDA ---
     col_titulo, col_ajuda = st.columns([4, 1])
     
     with col_titulo:
-        st.markdown(f'<div class="titulo-tela" style="margin-top:0px;">Projetar: {st.session_state.projeto_ativo}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="titulo-tela" style="margin-top:0px;">Lançamentos: {st.session_state.projeto_ativo}</div>', unsafe_allow_html=True)
         
     with col_ajuda:
         st.markdown("""
@@ -29,302 +78,186 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, parse_m
         """, unsafe_allow_html=True)
         
         if st.button("AJUDA", type="primary", use_container_width=True):
-            st.session_state["exibir_ajuda_projetar"] = not st.session_state.get("exibir_ajuda_projetar", False)
+            st.session_state["exibir_ajuda_lancamentos"] = not st.session_state.get("exibir_ajuda_lancamentos", False)
             st.rerun()
 
     # --- EXIBIÇÃO DA TELA DE AJUDA SE O BOTÃO FOR CLICADO ---
-    if st.session_state.get("exibir_ajuda_projetar", False):
-        renderizar_ajuda_projetar()
+    if st.session_state.get("exibir_ajuda_lancamentos", False):
+        renderizar_ajuda_lancamentos()
 
-    # --- TRATAMENTO SEGURO DE DATAS VINDAS DO BANCO (d_ini_db e d_fim_db) ---
-    def converter_para_date(val):
-        if isinstance(val, str):
-            try:
-                return datetime.strptime(val[:10], '%Y-%m-%d').date()
-            except:
-                return None
-        elif isinstance(val, datetime):
-            return val.date()
-        return val
-
-    dt_ini_valida = converter_para_date(d_ini_db)
-    dt_fim_valida = converter_para_date(d_fim_db)
-
-    # Ajuste de Fuso Horário para Jundiaí/Brasília (UTC-3)
-    fuso_br = timezone(timedelta(hours=-3))
-    hoje_br = datetime.now(fuso_br).date()
-    
-    # Define a data de início padrão para o dia 01 do mês corrente
-    inicio_padrao = hoje_br.replace(day=1)
-
-    if 'limpar_cont' not in st.session_state:
-        st.session_state.limpar_cont = 0
-    if 'bloqueio_excludente' not in st.session_state:
-        st.session_state.bloqueio_excludente = False
-
-    # Busca segura da mensagem de sucesso
-    if st.session_state.get('msg_sucesso'): 
-        st.success(st.session_state['msg_sucesso'])
-        st.session_state['msg_sucesso'] = None
-
-    # --- (1) TRAVA DE SEGURANÇA EXCLUDENTE ---
-    if st.session_state.bloqueio_excludente:
-        st.error("AS OPÇÕES (DIA DO MÊS, DIA DA SEMANA E DIA ESPECÍFICO) SÃO EXCLUDENTES E PORTANTO O ORCAS ACEITARÁ APENAS UMA DELAS")
-        if st.button("OK", key="btn_ok_erro"):
-            st.session_state.bloqueio_excludente = False
-            st.session_state.limpar_cont += 1
-            st.rerun()
-        st.stop()
-
-    v = st.session_state.limpar_cont
-
-    col_d1, col_d2 = st.columns([4, 2])
-    desc = col_d1.text_input("Descrição", key=f"pj_d_{v}")
-    comp_txt = col_d2.text_input("Complemento", key=f"pj_comp_{v}")
-    
-    col_v, col_t = st.columns(2)
-    v_t = col_v.text_input("Valor", "0,00", key=f"pj_val_{v}")
-    tipo = col_t.selectbox("Tipo", ["Saída", "Entrada"], key=f"pj_tipo_{v}")
-
-    with st.expander("Recorrência e Datas"):
-        c1, c2, c3 = st.columns(3)
-        d_m = c1.text_input("Dia (1-31, DD/MM ou *)", "", key=f"pj_dm_{v}")
-        d_s = c2.selectbox("Dia da Semana", ["", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"], key=f"pj_ds_{v}")
-        d_e = c3.date_input("Dia Específico", value=None, format="DD/MM/YYYY", key=f"pj_de_{v}")
+    if d_ini_db and d_fim_db:
+        meses_periodo = []
+        data_atual_loop = d_ini_db.replace(day=1)
+        while data_atual_loop <= d_fim_db:
+            meses_periodo.append(data_atual_loop.strftime('%Y-%m'))
+            if data_atual_loop.month == 12: 
+                data_atual_loop = data_atual_loop.replace(year=data_atual_loop.year + 1, month=1)
+            else: 
+                data_atual_loop = data_atual_loop.replace(month=data_atual_loop.month + 1)
         
-        op_preenchidas = 0
-        if d_m != "": op_preenchidas += 1
-        if d_s != "": op_preenchidas += 1
-        if d_e is not None: op_preenchidas += 1
+        saldo_acumulado_mes = s_db
+        mes_hoje_str = datetime.now().strftime('%Y-%m')
         
-        if op_preenchidas > 1:
-            st.session_state.bloqueio_excludente = True
-            st.rerun()
+        for mes_str in meses_periodo:
+            mask_mes = pd.to_datetime(df['data']).dt.strftime('%Y-%m') == mes_str
+            df_mes = df[mask_mes].copy()
             
-        n_ocorrencias = st.number_input("Nº de Ocorrências (0 = usar Data Até)", min_value=0, step=1, key=f"pj_noc_{v}")
-        
-        col_fds, col_obs = st.columns([1, 1])
-        with col_fds:
-            fds = st.radio("Se cair em Fim de Semana:", ["Manter", "Antecipa", "Posterga"], horizontal=True, key=f"pj_fds_{v}")
-        with col_obs:
-            st.markdown(
-                """
-                <div style="margin-top: 25px; font-size: 11px; color: #555555; line-height: 1.3;">
-                    <i><b>Obs:</b> Se você escolher os dias 29, 30 ou 31 e o mês não possuir essa data, o lançamento será feito no último dia desse mês.</i>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
-        
-        c_i, c_f = st.columns(2)
-        
-        # Ajuste seguro do valor inicial padrão (dia 01) garantindo o intervalo de config_projetos
-        val_i_p = inicio_padrao
-        if dt_ini_valida and val_i_p < dt_ini_valida:
-            val_i_p = dt_ini_valida
-        elif dt_fim_valida and val_i_p > dt_fim_valida:
-            val_i_p = dt_fim_valida
-
-        i_p = c_i.date_input(
-            "Início", 
-            value=val_i_p, 
-            min_value=dt_ini_valida, 
-            max_value=dt_fim_valida, 
-            format="DD/MM/YYYY", 
-            key=f"pj_data_ini_{v}"
-        )
-        
-        val_f_p = dt_fim_valida if dt_fim_valida else hoje_br
-        if dt_ini_valida and val_f_p < dt_ini_valida:
-            val_f_p = dt_ini_valida
-
-        f_p = c_f.date_input(
-            "Até", 
-            value=val_f_p, 
-            min_value=dt_ini_valida, 
-            max_value=dt_fim_valida, 
-            format="DD/MM/YYYY", 
-            key=f"pj_data_fim_{v}"
-        )
-
-    with st.expander("Projeção Avançada", expanded=False):
-        # --- ÁREA DE CARTÃO DE CRÉDITO ---
-        st.markdown("**Cartão de Crédito**")
-        col_cc1, col_cc2 = st.columns([2, 5])
-        is_cartao = col_cc1.checkbox("Cartão de Crédito", key=f"pj_is_cc_{v}")
-        
-        ult_dia_mes_atual = calendar.monthrange(hoje_br.year, hoje_br.month)[1]
-        dia_corte = col_cc2.number_input(
-            "A partir deste dia, as despesas serão lançadas na próxima fatura:", 
-            min_value=1, max_value=31, value=ult_dia_mes_atual, step=1, key=f"pj_corte_cc_{v}"
-        )
-        
-        st.divider()
-        st.markdown("**Regras de Correção Automática**")
-        col_c1, col_c2, col_c3 = st.columns([2, 2, 3])
-        usar_corrc = col_c1.checkbox("Corrigir este valor?", key=f"pj_cor_{v}")
-        c_quando = col_c2.selectbox("Quando:", ["Todo mês", "Todo ano"], key=f"pj_qdo_{v}")
-        c_base = col_c3.selectbox("Com base em:", ["Média dos Realizados", "Percentual Fixo (%)", "IGPM"], key=f"pj_base_{v}")
-        c_val_fixo = st.text_input("Valor do Percentual (se fixo)", "0,00", key=f"pj_vfixo_{v}")
-
-        st.divider()
-        st.markdown("**Realizações Parciais e Resíduos**")
-        col_p1, col_p2 = st.columns([2, 5])
-        permitir_parcial = col_p1.checkbox("Permitir parciais?", key=f"pj_parc_{v}")
-        
-        opcoes_residuo = [
-            "Zera o Realizado", 
-            "Adicione a diferença (P-R) no próximo Planejado", 
-            "Copia a diferença (P-R) no próximo Planejado"
-        ]
-        p_depois = col_p2.selectbox("No último dia do Mês:", opcoes_residuo, index=0, key=f"pj_pdep_{v}")
-
-    btn_col1, btn_col2, _ = st.columns([1, 1, 2])
-
-    if btn_col1.button("Incluir", use_container_width=True):
-        if not desc or desc.strip() == "":
-            st.error("PARA INCLUIR OU EXCLUIR É OBRIGATÓRIO ENTRAR COM UMA DESCRIÇÃO")
-        else:
-            d_m_final = d_m
-            if permitir_parcial:
-                d_m_final = "1"
-
-            curr = i_p
-            if permitir_parcial:
-                curr = curr.replace(day=1)
-
-            uid_local = st.session_state.get('CHAVE_MESTRA_UUID')
-            v_calc = parse_moeda(v_t)
-            v_pct = parse_moeda(c_val_fixo) / 100
-            lista_bulk = [] 
-            gerados = 0
-            d_map = {"Segunda":0,"Terça":1,"Quarta":2,"Quinta":3,"Sexta":4,"Sábado":5,"Domingo":6}
+            # Identifica se é um mês já fechado (anterior ao mês corrente)
+            mes_fechado = mes_str < mes_hoje_str
             
-            comp_base = comp_txt.strip() if comp_txt else ""
-            num_atual = None
-            sufixo = ""
-            zeros = 0
-            
-            if comp_base:
-                match_de = re.search(r'^\s*(\d+)\s+de\s+(\d+)(.*)$', comp_base, re.IGNORECASE)
-                if match_de:
-                    num_str = match_de.group(1)
-                    num_atual = int(num_str)
-                    zeros = len(num_str)
-                    total_tt = int(match_de.group(2))
-                    sufixo = f" de {match_de.group(2)}{match_de.group(3)}"
+            def calcular_total_tipo(df_tipo, e_fechado):
+                total = 0
+                if e_fechado:
+                    # PARA MESES FECHADOS: Soma estritamente apenas os realizados
+                    itens_principais = df_tipo[(df_tipo['valor_plan'] > 0) | ((df_tipo['valor_plan'] == 0) & (df_tipo['valor_real'] > 0))]
                     
-                    if n_ocorrencias == 0 and total_tt >= num_atual:
-                        n_ocorrencias = (total_tt - num_atual) + 1
-                elif comp_base.isdigit():
-                    num_atual = int(comp_base)
-                    zeros = len(comp_base)
-
-            limite_loop = f_p if n_ocorrencias == 0 else i_p + timedelta(days=3650)
-
-            while curr <= limite_loop:
-                match_dm = False
-
-                if "/" in d_m_final:
-                    try:
-                        dia_a, mes_a = map(int, d_m_final.split("/"))
-                        if curr.day == dia_a and curr.month == mes_a: match_dm = True
-                    except: pass
-                elif d_m_final.isdigit():
-                    dia_req = int(d_m_final)
-                    ultimo_dia_mes = calendar.monthrange(curr.year, curr.month)[1]
-                    dia_alvo = min(dia_req, ultimo_dia_mes)
-                    if curr.day == dia_alvo:
-                        match_dm = True
+                    for _, x in itens_principais.iterrows():
+                        if x['permite_parcial']:
+                            # Comparação insensível a case para filhas/parciais
+                            desc_pai = str(x['descricao']).strip().upper()
+                            mask_filhos = (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_pai) & (df_mes['valor_plan'] == 0)
+                            v_parciais = df_mes[mask_filhos]['parcial_real'].sum()
+                            total += v_parciais
+                        else:
+                            if x['status'] == 'Realizado':
+                                # Se for cartão CCP, considera a soma de LCLs
+                                if str(x.get('cc_tipo')).strip().upper() in ['$CCP', 'CCP']:
+                                    desc_cc = str(x['descricao']).strip().upper()
+                                    soma_lcls = df_mes[
+                                        (df_mes['cc_tipo'].fillna('').astype(str).str.strip().str.upper() == 'LCL') & 
+                                        (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_cc)
+                                    ]['valor_real'].sum()
+                                    total += soma_lcls
+                                else:
+                                    total += x['valor_real']
                 else:
-                    match_dm = (d_m_final == "" or d_m_final == "*" or str(curr.day) == d_m_final)
+                    # PARA MÊS CORRENTE E FUTUROS: Mantém lógica original de orçamento/projeção
+                    itens_principais = df_tipo[(df_tipo['valor_plan'] > 0) | ((df_tipo['valor_plan'] == 0) & (df_tipo['valor_real'] > 0))]
+                    for _, x in itens_principais.iterrows():
+                        if x['permite_parcial']:
+                            desc_pai = str(x['descricao']).strip().upper()
+                            mask_filhos = (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_pai) & (df_mes['valor_plan'] == 0)
+                            v_parciais = df_mes[mask_filhos]['parcial_real'].sum()
+                            total += max(x['valor_plan'], v_parciais)
+                        else:
+                            if str(x.get('cc_tipo')).strip().upper() in ['$CCP', 'CCP']:
+                                desc_cc = str(x['descricao']).strip().upper()
+                                soma_lcls = df_mes[
+                                    (df_mes['cc_tipo'].fillna('').astype(str).str.strip().str.upper() == 'LCL') & 
+                                    (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_cc)
+                                ]['valor_real'].sum()
+                                total += soma_lcls if soma_lcls > 0 else x['valor_plan']
+                            else:
+                                total += x['valor_real'] if x['valor_real'] > 0 else x['valor_plan']
+                return total
 
-                if (d_e is None or curr == d_e) and match_dm and (d_s == "" or curr.weekday() == d_map[d_s]):
-                    processar = False
-                    if permitir_parcial:
-                        dt_ref_parcial = curr.replace(day=1)
-                        if i_p.replace(day=1) <= dt_ref_parcial <= f_p:
-                            processar = True
-                    else:
-                        if i_p <= curr <= f_p:
-                            processar = True
+            entradas_mes = calcular_total_tipo(df_mes[df_mes['tipo'] == 'Entrada'], mes_fechado)
+            saidas_mes = calcular_total_tipo(df_mes[df_mes['tipo'] == 'Saída'], mes_fechado)
+            saldo_final_mes = saldo_acumulado_mes + entradas_mes - saidas_mes
+            nome_mes_exibicao = datetime.strptime(mes_str, '%Y-%m').strftime('%m/%Y')
+            
+            with st.expander(f"📅 {nome_mes_exibicao} | Saldo Final: R$ {format_moeda(saldo_final_mes)}"):
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric("Saldo Inicial", f"R$ {format_moeda(saldo_acumulado_mes)}")
+                col2.metric("Entradas (+)", f"R$ {format_moeda(entradas_mes)}")
+                col3.metric("Saídas (-)", f"R$ {format_moeda(saidas_mes)}")
+                col4.metric("Saldo Final", f"R$ {format_moeda(saldo_final_mes)}")
+                st.divider()
 
-                    if processar:
-                        dt_f = curr
-                        if permitir_parcial:
-                            dt_f = dt_f.replace(day=1)
-                        elif fds != "Manter" and dt_f.weekday() >= 5: 
-                            if fds == "Posterga":
-                                dt_f += timedelta(days=(2 if dt_f.weekday()==5 else 1))
-                            elif fds == "Antecipa":
-                                dt_f -= timedelta(days=(1 if dt_f.weekday()==5 else 2))
+                if not df_mes.empty:
+                    st.markdown("""
+                        <style>
+                        .tab-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin-bottom: 10px; }
+                        .tab-body { min-width: 600px; display: flex; flex-direction: column; font-family: sans-serif; }
+                        .tab-row { display: flex; flex-direction: row; align-items: center; padding: 7px 0; border-bottom: 1px solid #eee; }
+                        .tab-hdr { font-weight: bold; background-color: #f8f9fa; border-top: 1px solid #ddd; }
+                        .c-dt { width: 85px; font-size: 13px; flex-shrink: 0; }
+                        .c-ds { width: 240px; font-size: 13px; flex-shrink: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 5px; }
+                        .c-es { width: 35px; font-size: 13px; flex-shrink: 0; text-align: center; }
+                        .c-vl { width: 90px; font-size: 13px; flex-shrink: 0; text-align: right; }
+                        .c-st { width: 55px; font-size: 12px; flex-shrink: 0; text-align: center; font-weight: bold; margin-left: 5px; }
+                        /* Classes de cor forçadas para garantir a exibição */
+                        .linha-alerta-saida { color: #FF0000 !important; font-weight: bold; }
+                        .linha-alerta-entrada { color: #0000FF !important; font-weight: bold; }
+                        </style>
+                    """, unsafe_allow_html=True)
+
+                    # Oculta da lista principal os lançamentos que são LCL
+                    df_exibir = df_mes[
+                        ((df_mes['valor_plan'] > 0) | ((df_mes['valor_plan'] == 0) & (df_mes['valor_real'] > 0))) &
+                        (df_mes['cc_tipo'].fillna('').astype(str).str.strip().str.upper() != 'LCL')
+                    ].sort_values('data')
+                    
+                    # Cabeçalho da tabela HTML
+                    h_hdr = '<div class="tab-scroll"><div class="tab-body">'
+                    h_hdr += '<div class="tab-row tab-hdr"><div class="c-dt">Data</div><div class="c-ds">Descrição</div><div class="c-es">E/S</div><div class="c-vl">V.Plan</div><div class="c-vl">V.Real</div><div class="c-st">Status</div></div>'
+                    h_hdr += '</div></div>'
+                    st.write(h_hdr, unsafe_allow_html=True)
+
+                    for idx, row in df_exibir.iterrows():
+                        desc_row_upper = str(row['descricao']).strip().upper()
                         
-                        if permitir_parcial or (i_p <= dt_f <= f_p):
-                            comp_gerado = comp_txt
-                            if num_atual is not None:
-                                comp_gerado = f"{str(num_atual + gerados).zfill(zeros)}{sufixo}"
+                        # Busca acumulado de parciais (caso exista)
+                        v_ac = df_mes[
+                            df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_row_upper
+                        ]['parcial_real'].sum()
+                        
+                        v_re = v_ac if v_ac > 0 else row['valor_real']
+                        eh_cartao_ccp = str(row.get('cc_tipo')).strip().upper() in ['$CCP', 'CCP']
 
-                            nome_final = f"{desc} {comp_gerado}".strip() if comp_gerado else desc
-                            
-                            lista_bulk.append({
-                                "projeto_id": st.session_state.projeto_ativo, 
-                                "usuario_id": uid_local, 
-                                "data": dt_f.strftime('%Y-%m-%d'), 
-                                "data_vencimento": dt_f.strftime('%Y-%m-%d'),
-                                "descricao": nome_final, 
-                                "valor_plan": float(v_calc), 
-                                "valor_real": 0.0, 
-                                "tipo": tipo, 
-                                "status": 'Planejado', 
-                                "permite_parcial": bool(permitir_parcial),
-                                "usar_media": bool(usar_corrc and c_base == "Média dos Realizados"),
-                                "complemento_texto": comp_gerado if comp_gerado else None,
-                                "correcao_freq": c_quando if usar_corrc else None,
-                                "correcao_valor": float(v_pct) if c_base == "Percentual Fixo (%)" else 0.0,
-                                "regra_parcial": str(p_depois),
-                                "cc_tipo": "$CCP" if is_cartao else None,
-                                "cc_dia_corte": int(dia_corte) if is_cartao else None
-                            })
-                            gerados += 1
-                            if usar_corrc and c_quando == "Todo mês" and c_base == "Percentual Fixo (%)": v_calc *= (1 + v_pct)
+                        # Se for um Cartão Pai ($CCP), o V.Real é a soma de todos os lançamentos LCL vinculados
+                        if eh_cartao_ccp:
+                            soma_lcls = df_mes[
+                                (df_mes['cc_tipo'].fillna('').astype(str).str.strip().str.upper() == 'LCL') & 
+                                (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_row_upper)
+                            ]['valor_real'].sum()
+                            v_re = soma_lcls
 
-                if n_ocorrencias > 0 and gerados >= n_ocorrencias: break
-                curr += timedelta(days=1)
+                        dt_e = pd.to_datetime(row['data']).strftime('%d/%m/%Y')
+                        st_e = 'PLAN' if row['status'] == 'Planejado' else 'REAL'
+                        
+                        # Definição da classe de cor
+                        classe_cor = ""
+                        if v_re > row['valor_plan']:
+                            if row['tipo'] == 'Saída':
+                                classe_cor = " linha-alerta-saida"
+                            elif row['tipo'] == 'Entrada':
+                                classe_cor = " linha-alerta-entrada"
+                        
+                        h_row = '<div class="tab-scroll"><div class="tab-body">'
+                        h_row += f'<div class="tab-row{classe_cor}">'
+                        h_row += f'<div class="c-dt">{dt_e}</div><div class="c-ds">{row["descricao"]}</div><div class="c-es">{row["tipo"][0]}</div>'
+                        h_row += f'<div class="c-vl">{format_moeda(row["valor_plan"])}</div><div class="c-vl">{format_moeda(v_re)}</div><div class="c-st">{st_e}</div>'
+                        h_row += f'</div>'
+
+                        # Busca por filhos/parciais
+                        filhos = df_mes[
+                            (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_row_upper) & 
+                            (df_mes['valor_plan'] == 0) & 
+                            (df_mes['parcial_real'] > 0)
+                        ]
+                        for _, f in filhos.iterrows():
+                            dt_f = pd.to_datetime(f['parcial_data']).strftime('%d/%m/%Y')
+                            h_row += f'<div class="tab-row{classe_cor}" style="font-style: italic; opacity: 0.8;">'
+                            h_row += f'<div class="c-dt"></div><div class="c-ds" style="padding-left:15px;">> {dt_f}</div><div class="c-es">{f["tipo"][0]}</div>'
+                            h_row += f'<div class="c-vl">---</div><div class="c-vl">{format_moeda(f["parcial_real"])}</div><div class="c-st">REAL</div>'
+                            h_row += f'</div>'
+                    
+                        h_row += '</div></div>'
+                        
+                        if eh_cartao_ccp:
+                            c_linha, c_btn = st.columns([5, 1])
+                            with c_linha:
+                                st.write(h_row, unsafe_allow_html=True)
+                            with c_btn:
+                                if st.button("Visão Cartão", key=f"btn_vc_{mes_str}_{idx}"):
+                                    abrir_visao_cartao(str(row['descricao']), df_mes, format_moeda)
+                        else:
+                            st.write(h_row, unsafe_allow_html=True)
+                else:
+                    st.write("ℹ️ Nenhum lançamento para este mês.")
             
-            if lista_bulk:
-                try:
-                    supabase.table("lancamentos").insert(lista_bulk).execute()
-                    st.session_state['msg_sucesso'] = f"Sucesso! {len(lista_bulk)} lançamentos gerados."
-                    st.session_state.limpar_cont += 1
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Erro no Supabase: {e}")
-            else:
-                st.warning("Nenhum lançamento gerado. As datas da regra caem fora do intervalo Início/Até.")
+            saldo_acumulado_mes = saldo_final_mes
 
-    if btn_col2.button("Excluir", use_container_width=True):
-        if not desc or desc.strip() == "": 
-            st.error("PARA INCLUIR OU EXCLUIR É OBRIGATÓRIO ENTRAR COM UMA DESCRIÇÃO")
-        else:
-            st.session_state.confirmar_exclusao_ativa = True
-
-    if st.session_state.get('confirmar_exclusao_ativa', False):
-        nome_busca = f"{desc} {comp_txt}".strip() if comp_txt else desc
-        uid_exec = st.session_state.get('CHAVE_MESTRA_UUID') 
-        msg_confirma = f"VOCÊ DESEJA EXCLUIR O LANÇAMENTO {nome_busca} DO DIA {d_e.strftime('%d/%m/%Y') if d_e else ''}. SIM/NÃO?" if d_e else f"VOCÊ DESEJA EXCLUIR TODOS OS LANÇAMENTOS DE {nome_busca} DO PERÍODO DE {i_p.strftime('%d/%m/%Y')} A {f_p.strftime('%d/%m/%Y')}. SIM/NÃO?"
-        st.warning(msg_confirma)
-        exc_c1, exc_c2 = st.columns(2)
-        if exc_c1.button("SIM", key="btn_conf_sim"):
-            query = supabase.table("lancamentos").delete().eq("projeto_id", st.session_state.projeto_ativo).eq("usuario_id", uid_exec).eq("descricao", nome_busca)
-            if d_e:
-                res_exc = query.eq("data", d_e.strftime('%Y-%m-%d')).execute()
-            else:
-                res_exc = query.gte("data", i_p.strftime('%Y-%m-%d')).lte("data", f_p.strftime('%Y-%m-%d')).execute()
-            
-            qtd_excluidos = len(res_exc.data) if hasattr(res_exc, 'data') else 0
-            st.session_state['msg_sucesso'] = f"Sucesso! {qtd_excluidos} Lançamentos Excluídos."
-            st.session_state.confirmar_exclusao_ativa = False
-            st.rerun()
-        if exc_c2.button("NÃO", key="btn_conf_nao"):
-            st.session_state.confirmar_exclusao_ativa = False
-            st.rerun()
+    if st.button("Voltar ao Topo", key="btn_topo_lanc"): 
+        ir_para_o_topo()

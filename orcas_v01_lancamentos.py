@@ -5,20 +5,6 @@ from datetime import datetime
 # Importando a ajuda do arquivo dedicado para Lançamentos
 from orcas_v01_ajuda_lancamentos import renderizar_ajuda_lancamentos
 
-st.markdown("""
-    <style>
-    /* Reduz tamanho, altura e fonte do botão Visão Cartão */
-    div.stButton > button {
-        padding: 0px 8px !important;
-        font-size: 10px !important;
-        height: 22px !important;
-        min-height: 22px !important;
-        line-height: 22px !important;
-        margin: 0px !important;
-    }
-    </style>
-""", unsafe_allow_html=True)
-
 # --- MODAL / JANELA VISÃO CARTÃO ---
 @st.dialog("Visão Cartão - Detalhamento das Faturas")
 def abrir_visao_cartao(desc_cartao, df_mes_cartao, format_moeda):
@@ -50,6 +36,22 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
     """
     Sub-rotina da Tela Lançamentos - Integridade total da lógica de meses e saldos.
     """
+    # CSS focado especificamente nos botões das colunas da tabela
+    # Mantém o tamanho compacto fixo e não reseta durante o rerun do modal
+    st.markdown("""
+        <style>
+        div[data-testid="stColumn"] div.stButton > button {
+            padding: 0px 6px !important;
+            font-size: 11px !important;
+            height: 24px !important;
+            min-height: 24px !important;
+            line-height: 24px !important;
+            margin: 0px !important;
+            border-radius: 4px !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
     # Verificação de segurança para evitar os erros de AttributeError
     if 'msg_sucesso' not in st.session_state: 
         st.session_state.msg_sucesso = False
