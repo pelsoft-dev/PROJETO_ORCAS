@@ -66,27 +66,46 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                 total = 0
                 if e_fechado:
                     # PARA MESES FECHADOS: Soma estritamente apenas os realizados
-                    # 1. Filtra itens principais (pais ou contas normais)
                     itens_principais = df_tipo[(df_tipo['valor_plan'] > 0) | ((df_tipo['valor_plan'] == 0) & (df_tipo['valor_real'] > 0))]
                     
                     for _, x in itens_principais.iterrows():
                         if x['permite_parcial']:
-                            # SOMA APENAS OS FILHOS (parcial_real): ignora valor_real do pai
-                            v_parciais = df_mes[(df_mes['descricao'] == x['descricao']) & (df_mes['valor_plan'] == 0)]['parcial_real'].sum()
+                            # Comparação insensível a case para filhas/parciais
+                            desc_pai = str(x['descricao']).strip().upper()
+                            mask_filhos = (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_pai) & (df_mes['valor_plan'] == 0)
+                            v_parciais = df_mes[mask_filhos]['parcial_real'].sum()
                             total += v_parciais
                         else:
-                            # Contas normais: soma apenas se estiver Realizado
                             if x['status'] == 'Realizado':
-                                total += x['valor_real']
+                                # Se for cartão CCP, considera a soma de LCLs
+                                if str(x.get('cc_tipo')).strip().upper() in ['$CCP', 'CCP']:
+                                    desc_cc = str(x['descricao']).strip().upper()
+                                    soma_lcls = df_mes[
+                                        (df_mes['cc_tipo'].fillna('').astype(str).str.strip().str.upper() == 'LCL') & 
+                                        (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_cc)
+                                    ]['valor_real'].sum()
+                                    total += soma_lcls
+                                else:
+                                    total += x['valor_real']
                 else:
                     # PARA MÊS CORRENTE E FUTUROS: Mantém lógica original de orçamento/projeção
                     itens_principais = df_tipo[(df_tipo['valor_plan'] > 0) | ((df_tipo['valor_plan'] == 0) & (df_tipo['valor_real'] > 0))]
                     for _, x in itens_principais.iterrows():
                         if x['permite_parcial']:
-                            v_parciais = df_mes[(df_mes['descricao'] == x['descricao']) & (df_mes['valor_plan'] == 0)]['parcial_real'].sum()
+                            desc_pai = str(x['descricao']).strip().upper()
+                            mask_filhos = (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_pai) & (df_mes['valor_plan'] == 0)
+                            v_parciais = df_mes[mask_filhos]['parcial_real'].sum()
                             total += max(x['valor_plan'], v_parciais)
                         else:
-                            total += x['valor_real'] if x['valor_real'] > 0 else x['valor_plan']
+                            if str(x.get('cc_tipo')).strip().upper() in ['$CCP', 'CCP']:
+                                desc_cc = str(x['descricao']).strip().upper()
+                                soma_lcls = df_mes[
+                                    (df_mes['cc_tipo'].fillna('').astype(str).str.strip().str.upper() == 'LCL') & 
+                                    (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_cc)
+                                ]['valor_real'].sum()
+                                total += soma_lcls if soma_lcls > 0 else x['valor_plan']
+                            else:
+                                total += x['valor_real'] if x['valor_real'] > 0 else x['valor_plan']
                 return total
 
             entradas_mes = calcular_total_tipo(df_mes[df_mes['tipo'] == 'Entrada'], mes_fechado)
@@ -123,11 +142,30 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                     h = '<div class="tab-scroll"><div class="tab-body">'
                     h += '<div class="tab-row tab-hdr"><div class="c-dt">Data</div><div class="c-ds">Descrição</div><div class="c-es">E/S</div><div class="c-vl">V.Plan</div><div class="c-vl">V.Real</div><div class="c-st">Status</div></div>'
 
-                    df_exibir = df_mes[(df_mes['valor_plan'] > 0) | ((df_mes['valor_plan'] == 0) & (df_mes['valor_real'] > 0))].sort_values('data')
+                    # Oculta da lista principal os lançamentos que são LCL (pois devem figurar dentro do CCP pai ou separadamente)
+                    df_exibir = df_mes[
+                        ((df_mes['valor_plan'] > 0) | ((df_mes['valor_plan'] == 0) & (df_mes['valor_real'] > 0))) &
+                        (df_mes['cc_tipo'].fillna('').astype(str).str.strip().str.upper() != 'LCL')
+                    ].sort_values('data')
                     
                     for _, row in df_exibir.iterrows():
-                        v_ac = df_mes[df_mes['descricao'] == row['descricao']]['parcial_real'].sum()
+                        desc_row_upper = str(row['descricao']).strip().upper()
+                        
+                        # Busca acumulado de parciais (caso exista) insensível a maiúsculas/minúsculas
+                        v_ac = df_mes[
+                            df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_row_upper
+                        ]['parcial_real'].sum()
+                        
                         v_re = v_ac if v_ac > 0 else row['valor_real']
+
+                        # Se for um Cartão Pai ($CCP), o V.Real é a soma de todos os lançamentos LCL vinculados a ele no mês
+                        if str(row.get('cc_tipo')).strip().upper() in ['$CCP', 'CCP']:
+                            soma_lcls = df_mes[
+                                (df_mes['cc_tipo'].fillna('').astype(str).str.strip().str.upper() == 'LCL') & 
+                                (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_row_upper)
+                            ]['valor_real'].sum()
+                            v_re = soma_lcls
+
                         dt_e = pd.to_datetime(row['data']).strftime('%d/%m/%Y')
                         st_e = 'PLAN' if row['status'] == 'Planejado' else 'REAL'
                         
@@ -144,10 +182,14 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         h += f'<div class="c-vl">{format_moeda(row["valor_plan"])}</div><div class="c-vl">{format_moeda(v_re)}</div><div class="c-st">{st_e}</div>'
                         h += f'</div>'
 
-                        filhos = df_mes[(df_mes['descricao'] == row['descricao']) & (df_mes['valor_plan'] == 0) & (df_mes['parcial_real'] > 0)]
+                        # Busca por filhos/parciais de forma insensível a case
+                        filhos = df_mes[
+                            (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_row_upper) & 
+                            (df_mes['valor_plan'] == 0) & 
+                            (df_mes['parcial_real'] > 0)
+                        ]
                         for _, f in filhos.iterrows():
                             dt_f = pd.to_datetime(f['parcial_data']).strftime('%d/%m/%Y')
-                            # Parciais mantêm a cor se o pai estiver em alerta
                             h += f'<div class="tab-row{classe_cor}" style="font-style: italic; opacity: 0.8;">'
                             h += f'<div class="c-dt"></div><div class="c-ds" style="padding-left:15px;">> {dt_f}</div><div class="c-es">{f["tipo"][0]}</div>'
                             h += f'<div class="c-vl">---</div><div class="c-vl">{format_moeda(f["parcial_real"])}</div><div class="c-st">REAL</div>'
