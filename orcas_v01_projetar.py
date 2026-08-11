@@ -6,7 +6,7 @@ import calendar
 # Importando a ajuda do arquivo dedicado para Projetar
 from orcas_v01_ajuda_projetar import renderizar_ajuda_projetar
 
-def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
+def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, parse_moeda):
     # --- CABEÇALHO ALINHADO COM BOTÃO DE AJUDA ---
     col_titulo, col_ajuda = st.columns([4, 1])
     
@@ -39,6 +39,9 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
     # Ajuste de Fuso Horário para Jundiaí/Brasília (UTC-3)
     fuso_br = timezone(timedelta(hours=-3))
     hoje_br = datetime.now(fuso_br).date()
+    
+    # Define a data de início padrão para o dia 01 do mês corrente
+    inicio_padrao = hoje_br.replace(day=1)
 
     if 'limpar_cont' not in st.session_state:
         st.session_state.limpar_cont = 0
@@ -100,8 +103,35 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda):
             )
         
         c_i, c_f = st.columns(2)
-        i_p = c_i.date_input("Início", value=hoje_br, format="DD/MM/YYYY", key=f"pj_data_ini_{v}")
-        f_p = c_f.date_input("Até", value=d_fim_db if d_fim_db else hoje_br, format="DD/MM/YYYY", key=f"pj_data_fim_{v}")
+        
+        # Ajuste do valor padrão para o dia 01 e trava com min_value e max_value de config_projetos
+        val_i_p = inicio_padrao
+        if d_ini_db and val_i_p < d_ini_db:
+            val_i_p = d_ini_db
+        elif d_fim_db and val_i_p > d_fim_db:
+            val_i_p = d_fim_db
+
+        i_p = c_i.date_input(
+            "Início", 
+            value=val_i_p, 
+            min_value=d_ini_db if d_ini_db else None, 
+            max_value=d_fim_db if d_fim_db else None, 
+            format="DD/MM/YYYY", 
+            key=f"pj_data_ini_{v}"
+        )
+        
+        val_f_p = d_fim_db if d_fim_db else hoje_br
+        if d_ini_db and val_f_p < d_ini_db:
+            val_f_p = d_ini_db
+
+        f_p = c_f.date_input(
+            "Até", 
+            value=val_f_p, 
+            min_value=d_ini_db if d_ini_db else None, 
+            max_value=d_fim_db if d_fim_db else None, 
+            format="DD/MM/YYYY", 
+            key=f"pj_data_fim_{v}"
+        )
 
     with st.expander("Projeção Avançada", expanded=False):
         # --- ÁREA DE CARTÃO DE CRÉDITO ---

@@ -109,7 +109,8 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
         </style>
     """, unsafe_allow_html=True)
 
-    hoje_c = datetime.now().date()
+    # Ajuste para UTC-3 (Horário Oficial do Brasil) para não avançar o dia às 21h (UTC 00:00)
+    hoje_c = (datetime.utcnow() - timedelta(hours=3)).date()
     ini_mes_c = hoje_c.replace(day=1)
     limite_c = hoje_c - timedelta(days=4)
 

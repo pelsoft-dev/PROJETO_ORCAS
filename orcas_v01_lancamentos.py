@@ -5,6 +5,33 @@ from datetime import datetime
 # Importando a ajuda do arquivo dedicado para Lançamentos
 from orcas_v01_ajuda_lancamentos import renderizar_ajuda_lancamentos
 
+# --- MODAL / JANELA VISÃO CARTÃO ---
+@st.dialog("Visão Cartão - Detalhamento das Faturas")
+def abrir_visao_cartao(desc_cartao, df_mes_cartao, format_moeda):
+    st.subheader(f"💳 {desc_cartao}")
+    
+    # Filtra os lançamentos LCL vinculados a este cartão no mês
+    mask_lcls = (
+        (df_mes_cartao['cc_tipo'].fillna('').astype(str).str.strip().str.upper() == 'LCL') &
+        (df_mes_cartao['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_cartao.upper())
+    )
+    df_lcls = df_mes_cartao[mask_lcls].copy()
+    
+    if not df_lcls.empty:
+        # Tabela formatada dos lançamentos LCL
+        df_exibir_modal = pd.DataFrame({
+            'Descrição': df_lcls['cc_descricao'],
+            'Data': pd.to_datetime(df_lcls['data']).dt.strftime('%d/%m/%Y'),
+            'Valor (R$)': df_lcls['valor_real'].apply(lambda v: format_moeda(v))
+        })
+        st.dataframe(df_exibir_modal, use_container_width=True, hide_index=True)
+        
+        total_fatura = df_lcls['valor_real'].sum()
+        st.markdown(f"**Total da Fatura:** R$ {format_moeda(total_fatura)}")
+    else:
+        st.info("Nenhum lançamento (LCL) encontrado para este cartão neste mês.")
+
+
 def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db, format_moeda, ir_para_o_topo):
     """
     Sub-rotina da Tela Lançamentos - Integridade total da lógica de meses e saldos.
@@ -139,27 +166,31 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         </style>
                     """, unsafe_allow_html=True)
 
-                    h = '<div class="tab-scroll"><div class="tab-body">'
-                    h += '<div class="tab-row tab-hdr"><div class="c-dt">Data</div><div class="c-ds">Descrição</div><div class="c-es">E/S</div><div class="c-vl">V.Plan</div><div class="c-vl">V.Real</div><div class="c-st">Status</div></div>'
-
-                    # Oculta da lista principal os lançamentos que são LCL (pois devem figurar dentro do CCP pai ou separadamente)
+                    # Oculta da lista principal os lançamentos que são LCL
                     df_exibir = df_mes[
                         ((df_mes['valor_plan'] > 0) | ((df_mes['valor_plan'] == 0) & (df_mes['valor_real'] > 0))) &
                         (df_mes['cc_tipo'].fillna('').astype(str).str.strip().str.upper() != 'LCL')
                     ].sort_values('data')
                     
-                    for _, row in df_exibir.iterrows():
+                    # Cabeçalho da tabela HTML
+                    h_hdr = '<div class="tab-scroll"><div class="tab-body">'
+                    h_hdr += '<div class="tab-row tab-hdr"><div class="c-dt">Data</div><div class="c-ds">Descrição</div><div class="c-es">E/S</div><div class="c-vl">V.Plan</div><div class="c-vl">V.Real</div><div class="c-st">Status</div></div>'
+                    h_hdr += '</div></div>'
+                    st.write(h_hdr, unsafe_allow_html=True)
+
+                    for idx, row in df_exibir.iterrows():
                         desc_row_upper = str(row['descricao']).strip().upper()
                         
-                        # Busca acumulado de parciais (caso exista) insensível a maiúsculas/minúsculas
+                        # Busca acumulado de parciais (caso exista)
                         v_ac = df_mes[
                             df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_row_upper
                         ]['parcial_real'].sum()
                         
                         v_re = v_ac if v_ac > 0 else row['valor_real']
+                        eh_cartao_ccp = str(row.get('cc_tipo')).strip().upper() in ['$CCP', 'CCP']
 
-                        # Se for um Cartão Pai ($CCP), o V.Real é a soma de todos os lançamentos LCL vinculados a ele no mês
-                        if str(row.get('cc_tipo')).strip().upper() in ['$CCP', 'CCP']:
+                        # Se for um Cartão Pai ($CCP), o V.Real é a soma de todos os lançamentos LCL vinculados
+                        if eh_cartao_ccp:
                             soma_lcls = df_mes[
                                 (df_mes['cc_tipo'].fillna('').astype(str).str.strip().str.upper() == 'LCL') & 
                                 (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_row_upper)
@@ -177,12 +208,13 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                             elif row['tipo'] == 'Entrada':
                                 classe_cor = " linha-alerta-entrada"
                         
-                        h += f'<div class="tab-row{classe_cor}">'
-                        h += f'<div class="c-dt">{dt_e}</div><div class="c-ds">{row["descricao"]}</div><div class="c-es">{row["tipo"][0]}</div>'
-                        h += f'<div class="c-vl">{format_moeda(row["valor_plan"])}</div><div class="c-vl">{format_moeda(v_re)}</div><div class="c-st">{st_e}</div>'
-                        h += f'</div>'
+                        h_row = '<div class="tab-scroll"><div class="tab-body">'
+                        h_row += f'<div class="tab-row{classe_cor}">'
+                        h_row += f'<div class="c-dt">{dt_e}</div><div class="c-ds">{row["descricao"]}</div><div class="c-es">{row["tipo"][0]}</div>'
+                        h_row += f'<div class="c-vl">{format_moeda(row["valor_plan"])}</div><div class="c-vl">{format_moeda(v_re)}</div><div class="c-st">{st_e}</div>'
+                        h_row += f'</div>'
 
-                        # Busca por filhos/parciais de forma insensível a case
+                        # Busca por filhos/parciais
                         filhos = df_mes[
                             (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_row_upper) & 
                             (df_mes['valor_plan'] == 0) & 
@@ -190,13 +222,22 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         ]
                         for _, f in filhos.iterrows():
                             dt_f = pd.to_datetime(f['parcial_data']).strftime('%d/%m/%Y')
-                            h += f'<div class="tab-row{classe_cor}" style="font-style: italic; opacity: 0.8;">'
-                            h += f'<div class="c-dt"></div><div class="c-ds" style="padding-left:15px;">> {dt_f}</div><div class="c-es">{f["tipo"][0]}</div>'
-                            h += f'<div class="c-vl">---</div><div class="c-vl">{format_moeda(f["parcial_real"])}</div><div class="c-st">REAL</div>'
-                            h += f'</div>'
+                            h_row += f'<div class="tab-row{classe_cor}" style="font-style: italic; opacity: 0.8;">'
+                            h_row += f'<div class="c-dt"></div><div class="c-ds" style="padding-left:15px;">> {dt_f}</div><div class="c-es">{f["tipo"][0]}</div>'
+                            h_row += f'<div class="c-vl">---</div><div class="c-vl">{format_moeda(f["parcial_real"])}</div><div class="c-st">REAL</div>'
+                            h_row += f'</div>'
                     
-                    h += '</div></div>'
-                    st.write(h, unsafe_allow_html=True)
+                        h_row += '</div></div>'
+                        
+                        if eh_cartao_ccp:
+                            c_linha, c_btn = st.columns([5, 1])
+                            with c_linha:
+                                st.write(h_row, unsafe_allow_html=True)
+                            with c_btn:
+                                if st.button("Visão Cartão", key=f"btn_vc_{mes_str}_{idx}"):
+                                    abrir_visao_cartao(str(row['descricao']), df_mes, format_moeda)
+                        else:
+                            st.write(h_row, unsafe_allow_html=True)
                 else:
                     st.write("ℹ️ Nenhum lançamento para este mês.")
             
