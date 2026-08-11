@@ -8,7 +8,6 @@ from orcas_v01_ajuda_lancamentos import renderizar_ajuda_lancamentos
 # --- MODAL / JANELA VISÃO CARTÃO ---
 @st.dialog("Visão Cartão - Detalhamento das Faturas")
 def abrir_visao_cartao(desc_cartao, df_mes_cartao, format_moeda, data_vencimento=None):
-    # Formatação da data de vencimento para o subtítulo
     dt_venc_str = ""
     if data_vencimento:
         try:
@@ -26,14 +25,12 @@ def abrir_visao_cartao(desc_cartao, df_mes_cartao, format_moeda, data_vencimento
     df_lcls = df_mes_cartao[mask_lcls].copy()
     
     if not df_lcls.empty:
-        # Identifica a coluna correta para a data da compra (cc_data_compra, data_compra ou data)
         col_data_compra = 'data'
         if 'cc_data_compra' in df_lcls.columns and df_lcls['cc_data_compra'].notna().any():
             col_data_compra = 'cc_data_compra'
         elif 'data_compra' in df_lcls.columns and df_lcls['data_compra'].notna().any():
             col_data_compra = 'data_compra'
 
-        # Tabela formatada dos lançamentos LCL
         df_exibir_modal = pd.DataFrame({
             'Descrição': df_lcls['cc_descricao'] if 'cc_descricao' in df_lcls.columns else df_lcls['descricao'],
             'Data da Compra': pd.to_datetime(df_lcls[col_data_compra]).dt.strftime('%d/%m/%Y'),
@@ -52,7 +49,6 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
     Sub-rotina da Tela Lançamentos - Integridade total da lógica de meses e saldos.
     """
 
-    # Verificação de segurança para evitar os erros de AttributeError
     if 'msg_sucesso' not in st.session_state: 
         st.session_state.msg_sucesso = False
 
@@ -65,7 +61,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
     with col_ajuda:
         st.markdown("""
             <style>
-            /* Estilo isolado exclusivamente para o botão de AJUDA */
+            /* Estilo do botão AJUDA */
             div.stButton > button[kind="primary"] {
                 background-color: #007ba7 !important;
                 color: white !important;
@@ -85,7 +81,6 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
             st.session_state["exibir_ajuda_lancamentos"] = not st.session_state.get("exibir_ajuda_lancamentos", False)
             st.rerun()
 
-    # --- EXIBIÇÃO DA TELA DE AJUDA SE O BOTÃO FOR CLICADO ---
     if st.session_state.get("exibir_ajuda_lancamentos", False):
         renderizar_ajuda_lancamentos()
 
@@ -106,25 +101,20 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
             mask_mes = pd.to_datetime(df['data']).dt.strftime('%Y-%m') == mes_str
             df_mes = df[mask_mes].copy()
             
-            # Identifica se é um mês já fechado (anterior ao mês corrente)
             mes_fechado = mes_str < mes_hoje_str
             
             def calcular_total_tipo(df_tipo, e_fechado):
                 total = 0
                 if e_fechado:
-                    # PARA MESES FECHADOS: Soma estritamente apenas os realizados
                     itens_principais = df_tipo[(df_tipo['valor_plan'] > 0) | ((df_tipo['valor_plan'] == 0) & (df_tipo['valor_real'] > 0))]
-                    
                     for _, x in itens_principais.iterrows():
                         if x['permite_parcial']:
-                            # Comparação insensível a case para filhas/parciais
                             desc_pai = str(x['descricao']).strip().upper()
                             mask_filhos = (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_pai) & (df_mes['valor_plan'] == 0)
                             v_parciais = df_mes[mask_filhos]['parcial_real'].sum()
                             total += v_parciais
                         else:
                             if x['status'] == 'Realizado':
-                                # Se for cartão CCP, considera a soma de LCLs
                                 if str(x.get('cc_tipo')).strip().upper() in ['$CCP', 'CCP']:
                                     desc_cc = str(x['descricao']).strip().upper()
                                     soma_lcls = df_mes[
@@ -135,7 +125,6 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                                 else:
                                     total += x['valor_real']
                 else:
-                    # PARA MÊS CORRENTE E FUTUROS: Mantém lógica original de orçamento/projeção
                     itens_principais = df_tipo[(df_tipo['valor_plan'] > 0) | ((df_tipo['valor_plan'] == 0) & (df_tipo['valor_real'] > 0))]
                     for _, x in itens_principais.iterrows():
                         if x['permite_parcial']:
@@ -169,51 +158,47 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                 st.divider()
 
                 if not df_mes.empty:
-                    # --- ESTILOS CENTRALIZADOS PARA TABELA E BOTÕES DE AÇÃO ---
+                    # --- CSS RESTAURADO DO PADRÃO ORIGINAL ORCAS ---
                     st.markdown("""
                         <style>
                         .tab-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin-bottom: 2px; }
-                        .tab-body { min-width: 580px; display: flex; flex-direction: column; font-family: sans-serif; color: #1E293B; }
-                        .tab-row { display: flex; flex-direction: row; align-items: center; padding: 6px 0; border-bottom: 1px solid #E2E8F0; }
-                        .tab-hdr { font-weight: bold; background-color: #F8FAFC; border-top: 1px solid #CBD5E1; color: #0F172A; }
+                        .tab-body { min-width: 580px; display: flex; flex-direction: column; font-family: sans-serif; }
+                        .tab-row { display: flex; flex-direction: row; align-items: center; padding: 6px 0; border-bottom: 1px solid #eee; }
+                        .tab-hdr { font-weight: bold; background-color: #f8f9fa; border-top: 1px solid #ddd; }
                         .c-dt { width: 85px; font-size: 13px; flex-shrink: 0; }
                         .c-ds { width: 220px; font-size: 13px; flex-shrink: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 5px; }
                         .c-es { width: 35px; font-size: 13px; flex-shrink: 0; text-align: center; }
                         .c-vl { width: 90px; font-size: 13px; flex-shrink: 0; text-align: right; }
                         .c-st { width: 55px; font-size: 12px; flex-shrink: 0; text-align: center; font-weight: bold; margin-left: 5px; }
                         
-                        /* Destaque de Alerta */
-                        .linha-alerta-saida { color: #DC2626 !important; font-weight: bold; }
-                        .linha-alerta-entrada { color: #2563EB !important; font-weight: bold; }
+                        .linha-alerta-saida { color: #FF0000 !important; font-weight: bold; }
+                        .linha-alerta-entrada { color: #0000FF !important; font-weight: bold; }
 
-                        /* Estilização do Botão Visão Cartão */
-                        .btn-visao-cartao button {
-                            background-color: #0083B0 !important;
-                            color: white !important;
-                            padding: 2px 8px !important;
-                            font-size: 11px !important;
-                            height: 28px !important;
-                            min-height: 28px !important;
-                            line-height: 24px !important;
+                        /* Restauração das cores e estilo dos botões da tabela */
+                        div.stButton > button:not([kind="primary"]) {
+                            background-color: #1E3A8A !important;
+                            color: #FFFFFF !important;
                             border: none !important;
                             border-radius: 4px !important;
-                            width: 100% !important;
+                            font-size: 11px !important;
+                            padding: 2px 6px !important;
+                            height: 28px !important;
+                            min-height: 28px !important;
                         }
-                        .btn-visao-cartao button:hover {
-                            background-color: #006080 !important;
-                            color: white !important;
+                        div.stButton > button:not([kind="primary"]):hover {
+                            background-color: #1E40AF !important;
+                            color: #FFFFFF !important;
                         }
                         </style>
                     """, unsafe_allow_html=True)
 
-                    # Oculta da lista principal os lançamentos que são LCL
                     df_exibir = df_mes[
                         ((df_mes['valor_plan'] > 0) | ((df_mes['valor_plan'] == 0) & (df_mes['valor_real'] > 0))) &
                         (df_mes['cc_tipo'].fillna('').astype(str).str.strip().str.upper() != 'LCL')
                     ].sort_values('data')
                     
-                    # Cabeçalho da tabela com padrão idêntico de colunas [5, 1]
-                    c_hdr_linha, c_hdr_btn = st.columns([5, 1], vertical_alignment="center")
+                    # Cabeçalho da tabela
+                    c_hdr_linha, c_hdr_btn = st.columns([4.8, 1.2], vertical_alignment="center")
                     with c_hdr_linha:
                         h_hdr = '<div class="tab-scroll"><div class="tab-body">'
                         h_hdr += '<div class="tab-row tab-hdr"><div class="c-dt">Data</div><div class="c-ds">Descrição</div><div class="c-es">E/S</div><div class="c-vl">V.Plan</div><div class="c-vl">V.Real</div><div class="c-st">Status</div></div>'
@@ -223,7 +208,6 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                     for idx, row in df_exibir.iterrows():
                         desc_row_upper = str(row['descricao']).strip().upper()
                         
-                        # Busca acumulado de parciais (caso exista)
                         v_ac = df_mes[
                             df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_row_upper
                         ]['parcial_real'].sum()
@@ -231,7 +215,6 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         v_re = v_ac if v_ac > 0 else row['valor_real']
                         eh_cartao_ccp = str(row.get('cc_tipo')).strip().upper() in ['$CCP', 'CCP']
 
-                        # Se for um Cartão Pai ($CCP), o V.Real é a soma de todos os lançamentos LCL vinculados
                         if eh_cartao_ccp:
                             soma_lcls = df_mes[
                                 (df_mes['cc_tipo'].fillna('').astype(str).str.strip().str.upper() == 'LCL') & 
@@ -242,7 +225,6 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         dt_e = pd.to_datetime(row['data']).strftime('%d/%m/%Y')
                         st_e = 'PLAN' if row['status'] == 'Planejado' else 'REAL'
                         
-                        # Definição da classe de cor
                         classe_cor = ""
                         if v_re > row['valor_plan']:
                             if row['tipo'] == 'Saída':
@@ -256,7 +238,6 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         h_row += f'<div class="c-vl">{format_moeda(row["valor_plan"])}</div><div class="c-vl">{format_moeda(v_re)}</div><div class="c-st">{st_e}</div>'
                         h_row += f'</div>'
 
-                        # Busca por filhos/parciais
                         filhos = df_mes[
                             (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_row_upper) & 
                             (df_mes['valor_plan'] == 0) & 
@@ -271,16 +252,13 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                     
                         h_row += '</div></div>'
 
-                        # Renderiza com proporção [5, 1] idêntica ao cabeçalho
-                        c_linha, c_btn = st.columns([5, 1], vertical_alignment="center")
+                        c_linha, c_btn = st.columns([4.8, 1.2], vertical_alignment="center")
                         with c_linha:
                             st.markdown(h_row, unsafe_allow_html=True)
                         with c_btn:
                             if eh_cartao_ccp:
-                                st.markdown('<div class="btn-visao-cartao">', unsafe_allow_html=True)
                                 if st.button("Visão Cartão", key=f"btn_vc_{mes_str}_{idx}"):
                                     abrir_visao_cartao(str(row['descricao']), df_mes, format_moeda, data_vencimento=row['data'])
-                                st.markdown('</div>', unsafe_allow_html=True)
                 else:
                     st.write("ℹ️ Nenhum lançamento para este mês.")
             
