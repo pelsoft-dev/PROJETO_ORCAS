@@ -20,13 +20,23 @@ def buscar_dados_cartao(df, nome_cartao):
         
         if not df_ccp.empty:
             row_c = df_ccp.iloc[0]
-            corte = int(row_c.get('cc_dia_corte', 15)) if pd.notnull(row_c.get('cc_dia_corte')) else 15
-            venc = int(row_c.get('cc_dia_vencimento', 20)) if pd.notnull(row_c.get('cc_dia_vencimento')) else 20
-            return corte, venc
+            corte = int(row_c.get('cc_dia_corte')) if pd.notnull(row_c.get('cc_dia_corte')) else 15
+            venc = int(row_c.get('cc_dia_vencimento')) if pd.notnull(row_c.get('cc_dia_vencimento')) else None
             
-    return 15, 20
+            if venc is not None:
+                return corte, venc
+                
+        # Caso o cartão não possua vencimento explícito no registro atual, busca o padrão do primeiro CCP cadastrado
+        df_any_ccp = df[df['cc_tipo'].fillna('').astype(str).str.strip().str.upper().isin(['$CCP', 'CCP'])]
+        if not df_any_ccp.empty:
+            row_alt = df_any_ccp.iloc[0]
+            corte = int(row_alt.get('cc_dia_corte')) if pd.notnull(row_alt.get('cc_dia_corte')) else 15
+            venc = int(row_alt.get('cc_dia_vencimento')) if pd.notnull(row_alt.get('cc_dia_vencimento')) else 10
+            return corte, venc
 
-def calcular_vencimento_fatura(data_compra, dia_corte=15, dia_vencimento=20):
+    return 15, 10
+
+def calcular_vencimento_fatura(data_compra, dia_corte=15, dia_vencimento=10):
     """Calcula a data de vencimento da 1ª parcela conforme o dia de corte real do cartão."""
     ano = data_compra.year
     mes = data_compra.month
@@ -40,7 +50,7 @@ def calcular_vencimento_fatura(data_compra, dia_corte=15, dia_vencimento=20):
     dia_final = min(dia_vencimento, calendar.monthrange(ano, mes)[1])
     return datetime(ano, mes, dia_final).date()
 
-def somar_meses_data(data_base, qtd_meses, dia_vencimento=20):
+def somar_meses_data(data_base, qtd_meses, dia_vencimento=10):
     """Avança N meses mantendo a coerência do dia de vencimento do cartão."""
     ano = data_base.year + ((data_base.month + qtd_meses - 1) // 12)
     mes = ((data_base.month + qtd_meses - 1) % 12) + 1
@@ -237,10 +247,13 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
 
                     if is_cc:
                         corte, venc = buscar_dados_cartao(df, nome_cartao_final)
-                        v_parcela = round(float(v_sp) / qtd_p, 2)
+                        base_val = round(float(v_sp) / qtd_p, 2)
+                        residuo = round(float(v_sp) - (base_val * qtd_p), 2)
+                        
                         dt_primeiro_venc = calcular_vencimento_fatura(hoje_c, dia_corte=corte, dia_vencimento=venc)
 
                         for i in range(qtd_p):
+                            v_parcela = base_val + (residuo if i == (qtd_p - 1) else 0.0)
                             dt_venc_parc = somar_meses_data(dt_primeiro_venc, i, dia_vencimento=venc)
                             parc_str = f"{i+1:02d}/{qtd_p:02d}"
                             
@@ -253,7 +266,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                                 "data_vencimento": dt_venc_parc.strftime('%Y-%m-%d'),
                                 "cc_data_compra": hoje_c.strftime('%Y-%m-%d'),
                                 "tipo": "Saída",
-                                "valor_plan": v_parcela,
+                                "valor_plan": round(v_parcela, 2),
                                 "valor_real": 0.0,
                                 "status": "Planejado",
                                 "cc_tipo": "LCL",
@@ -373,10 +386,13 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
 
                             if is_cc:
                                 corte, venc = buscar_dados_cartao(df, nome_cartao_final)
-                                v_parcela = round(float(v_dig) / qtd_p, 2)
+                                base_val = round(float(v_dig) / qtd_p, 2)
+                                residuo = round(float(v_dig) - (base_val * qtd_p), 2)
+                                
                                 dt_primeiro_venc = calcular_vencimento_fatura(hoje_c, dia_corte=corte, dia_vencimento=venc)
                                 
                                 for i in range(qtd_p):
+                                    v_parcela = base_val + (residuo if i == (qtd_p - 1) else 0.0)
                                     dt_venc_parc = somar_meses_data(dt_primeiro_venc, i, dia_vencimento=venc)
                                     parc_str = f"{i+1:02d}/{qtd_p:02d}"
                                     
@@ -389,7 +405,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                                         "data_vencimento": dt_venc_parc.strftime('%Y-%m-%d'),
                                         "cc_data_compra": hoje_c.strftime('%Y-%m-%d'),
                                         "tipo": "Saída",
-                                        "valor_plan": v_parcela,
+                                        "valor_plan": round(v_parcela, 2),
                                         "valor_real": 0.0,
                                         "status": "Planejado",
                                         "cc_tipo": "LCL",
@@ -441,10 +457,13 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
 
                             if is_cc:
                                 corte, venc = buscar_dados_cartao(df, nome_cartao_final)
-                                v_parcela = round(float(v_para_gravar) / qtd_p, 2)
+                                base_val = round(float(v_para_gravar) / qtd_p, 2)
+                                residuo = round(float(v_para_gravar) - (base_val * qtd_p), 2)
+                                
                                 dt_primeiro_venc = calcular_vencimento_fatura(row['dt_obj'], dia_corte=corte, dia_vencimento=venc)
 
                                 for i in range(qtd_p):
+                                    v_parcela = base_val + (residuo if i == (qtd_p - 1) else 0.0)
                                     dt_venc_parc = somar_meses_data(dt_primeiro_venc, i, dia_vencimento=venc)
                                     parc_str = f"{i+1:02d}/{qtd_p:02d}"
                                     
@@ -457,7 +476,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                                         "data_vencimento": dt_venc_parc.strftime('%Y-%m-%d'),
                                         "cc_data_compra": row['dt_obj'].strftime('%Y-%m-%d'),
                                         "tipo": "Saída",
-                                        "valor_plan": v_parcela,
+                                        "valor_plan": round(v_parcela, 2),
                                         "valor_real": 0.0,
                                         "status": "Planejado",
                                         "cc_tipo": "LCL",
