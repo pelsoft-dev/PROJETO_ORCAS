@@ -6,7 +6,7 @@ import calendar
 # Importando a ajuda do arquivo dedicado para Projetar
 from orcas_v01_ajuda_projetar import renderizar_ajuda_projetar
 
-def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, parse_moeda):
+def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda, d_ini_db=None):
     # --- CABEÇALHO ALINHADO COM BOTÃO DE AJUDA ---
     col_titulo, col_ajuda = st.columns([4, 1])
     
