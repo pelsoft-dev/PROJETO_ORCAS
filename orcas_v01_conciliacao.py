@@ -84,26 +84,34 @@ def atualizar_valor_plan_cartao(supabase, df, nome_cartao, dt_vencimento, ID_USU
         (pd.to_datetime(df['data_vencimento']).dt.year == ano_venc) &
         (pd.to_datetime(df['data_vencimento']).dt.month == mes_venc)
     )
-    soma_lcls = df[mask_lcls]['valor_plan'].sum() if not df.empty else 0.0
+    soma_lcls = float(df[mask_lcls]['valor_plan'].sum()) if not df.empty else 0.0
 
     if not df_ccp.empty:
         id_ccp = df_ccp.iloc[0]['id']
         supabase.table("lancamentos").update({
-            "valor_plan": soma_lcls
+            "valor_plan": round(soma_lcls, 2)
         }).eq("id", id_ccp).execute()
     else:
-        # Se não existir a linha do cartão pai no mês, cria ela zerada no realizado e com o planejado somado
+        # Busca configurações de dia de corte e vencimento do cartão para registrar corretamente o $CCP
+        corte, venc = buscar_dados_cartao(df, nome_cartao)
+        
+        # Garante a data ajustada com o dia de vencimento real do cartão no mês de destino
+        dia_final = min(venc, calendar.monthrange(ano_venc, mes_venc)[1])
+        dt_exata_ccp = datetime(ano_venc, mes_venc, dia_final).date()
+
         supabase.table("lancamentos").insert({
             "projeto_id": str(st.session_state.projeto_ativo),
             "usuario_id": str(ID_USUARIO_LOGADO),
             "descricao": nome_cartao,
-            "data": dt_vencimento.strftime('%Y-%m-%d'),
-            "data_vencimento": dt_vencimento.strftime('%Y-%m-%d'),
+            "data": dt_exata_ccp.strftime('%Y-%m-%d'),
+            "data_vencimento": dt_exata_ccp.strftime('%Y-%m-%d'),
             "tipo": "Saída",
-            "valor_plan": soma_lcls,
+            "valor_plan": round(soma_lcls, 2),
             "valor_real": 0.0,
             "status": "Planejado",
-            "cc_tipo": "$CCP"
+            "cc_tipo": "$CCP",
+            "cc_dia_corte": corte,
+            "cc_dia_vencimento": venc
         }).execute()
 
 
@@ -217,10 +225,10 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                     "data": hoje_c.strftime('%Y-%m-%d'),
                     "data_vencimento": hoje_c.strftime('%Y-%m-%d'),
                     "tipo": sp_tipo,
-                    "valor_plan": 0, 
-                    "valor_real": v_sp,
+                    "valor_plan": 0.0, 
+                    "valor_real": float(v_sp),
                     "status": "Realizado", 
-                    "parcial_real": 0, 
+                    "parcial_real": 0.0, 
                     "permite_parcial": False,
                     "cc_tipo": "$CCL" if is_cc else None,
                     "cc_qtd_parcelas": qtd_p
@@ -228,7 +236,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
 
                 if is_cc:
                     corte, venc = buscar_dados_cartao(df, nome_cartao_final)
-                    v_parcela = round(v_sp / qtd_p, 2)
+                    v_parcela = round(float(v_sp) / qtd_p, 2)
                     dt_primeiro_venc = calcular_vencimento_fatura(hoje_c, dia_corte=corte, dia_vencimento=venc)
 
                     for i in range(qtd_p):
@@ -349,10 +357,10 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                             "data": ini_mes_c.strftime('%Y-%m-%d'), 
                             "data_vencimento": ini_mes_c.strftime('%Y-%m-%d'), 
                             "tipo": row['tipo'],
-                            "valor_plan": 0, 
-                            "valor_real": 0, 
+                            "valor_plan": 0.0, 
+                            "valor_real": 0.0, 
                             "status": "Planejado",
-                            "parcial_real": v_dig, 
+                            "parcial_real": float(v_dig), 
                             "parcial_data": hoje_c.strftime('%Y-%m-%d'), 
                             "permite_parcial": False,
                             "cc_tipo": "$CCL" if is_cc else None,
@@ -361,7 +369,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
 
                         if is_cc:
                             corte, venc = buscar_dados_cartao(df, nome_cartao_final)
-                            v_parcela = round(v_dig / qtd_p, 2)
+                            v_parcela = round(float(v_dig) / qtd_p, 2)
                             dt_primeiro_venc = calcular_vencimento_fatura(hoje_c, dia_corte=corte, dia_vencimento=venc)
                             
                             for i in range(qtd_p):
@@ -419,7 +427,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                         qtd_p = int(qtd_norm_in) if is_cc else 0
 
                         supabase.table("lancamentos").update({
-                            "valor_real": v_para_gravar, 
+                            "valor_real": float(v_para_gravar), 
                             "status": "Realizado",
                             "cc_tipo": "$CCL" if is_cc else None,
                             "cc_qtd_parcelas": qtd_p
@@ -427,7 +435,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
 
                         if is_cc:
                             corte, venc = buscar_dados_cartao(df, nome_cartao_final)
-                            v_parcela = round(v_para_gravar / qtd_p, 2)
+                            v_parcela = round(float(v_para_gravar) / qtd_p, 2)
                             dt_primeiro_venc = calcular_vencimento_fatura(row['dt_obj'], dia_corte=corte, dia_vencimento=venc)
 
                             for i in range(qtd_p):
