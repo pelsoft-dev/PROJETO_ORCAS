@@ -192,8 +192,11 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         </style>
                     """, unsafe_allow_html=True)
 
+                    # --- ALTERAÇÃO SOLICITADA AQUI ---
+                    eh_ccp_mask = df_mes['cc_tipo'].fillna('').astype(str).str.strip().str.upper().isin(['$CCP', 'CCP'])
+
                     df_exibir = df_mes[
-                        ((df_mes['valor_plan'] > 0) | ((df_mes['valor_plan'] == 0) & (df_mes['valor_real'] > 0))) &
+                        ((df_mes['valor_plan'] > 0) | (df_mes['valor_real'] > 0) | eh_ccp_mask) &
                         (df_mes['cc_tipo'].fillna('').astype(str).str.strip().str.upper() != 'LCL')
                     ].sort_values('data')
                     

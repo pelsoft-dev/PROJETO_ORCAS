@@ -11,7 +11,6 @@ def buscar_dados_cartao(df, nome_cartao):
     ignorando diferenças de maiúsculas/minúsculas e espaços.
     """
     if not df.empty and 'cc_tipo' in df.columns:
-        # Garante comparação insensível a maiúsculas/minúsculas
         nome_busca = str(nome_cartao).strip().upper()
         
         df_ccp = df[
@@ -56,12 +55,57 @@ def buscar_cartoes_lcp(df):
     if not df.empty and 'cc_tipo' in df.columns:
         df_ccp = df[df['cc_tipo'].fillna('').astype(str).str.strip().str.upper().isin(['$CCP', 'CCP'])]
         if not df_ccp.empty and 'descricao' in df_ccp.columns:
-            # Pega as descrições sem forçar .upper() para não duplicar visivelmente
             cartoes_ccp = df_ccp['descricao'].dropna().unique().tolist()
             cartoes_ccp = sorted(list(set([c.strip() for c in cartoes_ccp if c.strip()])))
     
     opcoes = ["Nenhum"] + cartoes_ccp + ["+ Outro Cartão..."]
     return opcoes
+
+def atualizar_valor_plan_cartao(supabase, df, nome_cartao, dt_vencimento, ID_USUARIO_LOGADO):
+    """
+    Recalcula o valor_plan do Cartão Pai (CCP) com base na soma dos LCLs do mês do vencimento.
+    """
+    nome_busca = str(nome_cartao).strip().upper()
+    ano_venc = dt_vencimento.year
+    mes_venc = dt_vencimento.month
+
+    # Busca o Cartão Pai ($CCP) existente para esse mês
+    df_ccp = df[
+        (df['cc_tipo'].fillna('').astype(str).str.strip().str.upper().isin(['$CCP', 'CCP'])) &
+        (df['descricao'].fillna('').astype(str).str.strip().str.upper() == nome_busca) &
+        (pd.to_datetime(df['data']).dt.year == ano_venc) &
+        (pd.to_datetime(df['data']).dt.month == mes_venc)
+    ]
+
+    # Soma os LCLs referentes a este cartão e vencimento
+    mask_lcls = (
+        (df['cc_tipo'].fillna('').astype(str).str.strip().str.upper() == 'LCL') &
+        (df['descricao'].fillna('').astype(str).str.strip().str.upper() == nome_busca) &
+        (pd.to_datetime(df['data_vencimento']).dt.year == ano_venc) &
+        (pd.to_datetime(df['data_vencimento']).dt.month == mes_venc)
+    )
+    soma_lcls = df[mask_lcls]['valor_plan'].sum() if not df.empty else 0.0
+
+    if not df_ccp.empty:
+        id_ccp = df_ccp.iloc[0]['id']
+        supabase.table("lancamentos").update({
+            "valor_plan": soma_lcls
+        }).eq("id", id_ccp).execute()
+    else:
+        # Se não existir a linha do cartão pai no mês, cria ela zerada no realizado e com o planejado somado
+        supabase.table("lancamentos").insert({
+            "projeto_id": str(st.session_state.projeto_ativo),
+            "usuario_id": str(ID_USUARIO_LOGADO),
+            "descricao": nome_cartao,
+            "data": dt_vencimento.strftime('%Y-%m-%d'),
+            "data_vencimento": dt_vencimento.strftime('%Y-%m-%d'),
+            "tipo": "Saída",
+            "valor_plan": soma_lcls,
+            "valor_real": 0.0,
+            "status": "Planejado",
+            "cc_tipo": "$CCP"
+        }).execute()
+
 
 def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moeda):
     """
@@ -196,15 +240,19 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                             "usuario_id": str(ID_USUARIO_LOGADO),
                             "descricao": nome_cartao_final,
                             "cc_descricao": f"{sp_desc} ({parc_str})",
-                            "data": dt_venc_parc.strftime('%Y-%m-%d'),
-                            "data_vencimento": dt_venc_parc.strftime('%Y-%m-%d'),
+                            "data": hoje_c.strftime('%Y-%m-%d'),  # Data REAL da Compra
+                            "data_vencimento": dt_venc_parc.strftime('%Y-%m-%d'), # Data Vencimento Fatura
+                            "cc_data_compra": hoje_c.strftime('%Y-%m-%d'),
                             "tipo": "Saída",
                             "valor_plan": v_parcela,
-                            "valor_real": v_parcela,
-                            "status": "Realizado",
+                            "valor_real": 0.0,
+                            "status": "Planejado",
                             "cc_tipo": "LCL",
                             "cc_qtd_parcelas": 0
                         }).execute()
+
+                        # Atualiza o V.Plan do Cartão Pai ($CCP) referente àquela fatura
+                        atualizar_valor_plan_cartao(supabase, df, nome_cartao_final, dt_venc_parc, ID_USUARIO_LOGADO)
 
                 st.session_state.reset_count += 1
                 st.session_state.abrir_sem_plan = False
@@ -325,15 +373,19 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                                     "usuario_id": str(ID_USUARIO_LOGADO),
                                     "descricao": nome_cartao_final,
                                     "cc_descricao": f"{row['descricao']} ({parc_str})",
-                                    "data": dt_venc_parc.strftime('%Y-%m-%d'),
-                                    "data_vencimento": dt_venc_parc.strftime('%Y-%m-%d'),
+                                    "data": hoje_c.strftime('%Y-%m-%d'), # Data REAL da Compra
+                                    "data_vencimento": dt_venc_parc.strftime('%Y-%m-%d'), # Data Vencimento Fatura
+                                    "cc_data_compra": hoje_c.strftime('%Y-%m-%d'),
                                     "tipo": "Saída",
                                     "valor_plan": v_parcela,
-                                    "valor_real": v_parcela,
-                                    "status": "Realizado",
+                                    "valor_real": 0.0,
+                                    "status": "Planejado",
                                     "cc_tipo": "LCL",
                                     "cc_qtd_parcelas": 0
                                 }).execute()
+
+                                # Atualiza o V.Plan do Cartão Pai ($CCP) referente àquela fatura
+                                atualizar_valor_plan_cartao(supabase, df, nome_cartao_final, dt_venc_parc, ID_USUARIO_LOGADO)
 
                         st.session_state.reset_count += 1
                         st.session_state[v_key] += 1
@@ -387,15 +439,19 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                                     "usuario_id": str(ID_USUARIO_LOGADO),
                                     "descricao": nome_cartao_final,
                                     "cc_descricao": f"{row['descricao']} ({parc_str})",
-                                    "data": dt_venc_parc.strftime('%Y-%m-%d'),
-                                    "data_vencimento": dt_venc_parc.strftime('%Y-%m-%d'),
+                                    "data": row['dt_obj'].strftime('%Y-%m-%d'), # Data REAL da Compra
+                                    "data_vencimento": dt_venc_parc.strftime('%Y-%m-%d'), # Data Vencimento Fatura
+                                    "cc_data_compra": row['dt_obj'].strftime('%Y-%m-%d'),
                                     "tipo": "Saída",
                                     "valor_plan": v_parcela,
-                                    "valor_real": v_parcela,
-                                    "status": "Realizado",
+                                    "valor_real": 0.0,
+                                    "status": "Planejado",
                                     "cc_tipo": "LCL",
                                     "cc_qtd_parcelas": 0
                                 }).execute()
+
+                                # Atualiza o V.Plan do Cartão Pai ($CCP) referente àquela fatura
+                                atualizar_valor_plan_cartao(supabase, df, nome_cartao_final, dt_venc_parc, ID_USUARIO_LOGADO)
 
                         st.session_state.reset_count += 1
                         st.rerun()
