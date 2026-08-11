@@ -13,27 +13,24 @@ def buscar_dados_cartao(df, nome_cartao):
     if not df.empty and 'cc_tipo' in df.columns:
         nome_busca = str(nome_cartao).strip().upper()
         
+        # Filtra registros CCP exatamente do cartão solicitado
         df_ccp = df[
             (df['cc_tipo'].fillna('').astype(str).str.strip().str.upper().isin(['$CCP', 'CCP'])) & 
             (df['descricao'].fillna('').astype(str).str.strip().str.upper() == nome_busca)
         ]
         
         if not df_ccp.empty:
-            row_c = df_ccp.iloc[0]
-            corte = int(row_c.get('cc_dia_corte')) if pd.notnull(row_c.get('cc_dia_corte')) else 15
-            venc = int(row_c.get('cc_dia_vencimento')) if pd.notnull(row_c.get('cc_dia_vencimento')) else None
-            
-            if venc is not None:
-                return corte, venc
+            for _, row_c in df_ccp.iterrows():
+                venc = row_c.get('cc_dia_vencimento')
+                corte = row_c.get('cc_dia_corte')
                 
-        # Caso o cartão não possua vencimento explícito no registro atual, busca o padrão do primeiro CCP cadastrado
-        df_any_ccp = df[df['cc_tipo'].fillna('').astype(str).str.strip().str.upper().isin(['$CCP', 'CCP'])]
-        if not df_any_ccp.empty:
-            row_alt = df_any_ccp.iloc[0]
-            corte = int(row_alt.get('cc_dia_corte')) if pd.notnull(row_alt.get('cc_dia_corte')) else 15
-            venc = int(row_alt.get('cc_dia_vencimento')) if pd.notnull(row_alt.get('cc_dia_vencimento')) else 10
-            return corte, venc
+                # Garante que encontrou valores numéricos válidos
+                if pd.notnull(venc) and pd.notnull(corte):
+                    return int(corte), int(venc)
+                elif pd.notnull(venc):
+                    return 15, int(venc)
 
+    # Fallback padrão caso não encontre cadastro específico deste cartão
     return 15, 10
 
 def calcular_vencimento_fatura(data_compra, dia_corte=15, dia_vencimento=10):
@@ -41,6 +38,7 @@ def calcular_vencimento_fatura(data_compra, dia_corte=15, dia_vencimento=10):
     ano = data_compra.year
     mes = data_compra.month
 
+    # Se a compra foi feita após o corte, joga para a fatura do mês seguinte
     if data_compra.day > dia_corte:
         mes += 1
         if mes > 12:
@@ -79,12 +77,12 @@ def atualizar_valor_plan_cartao(supabase, df, nome_cartao, dt_vencimento, ID_USU
     ano_venc = dt_vencimento.year
     mes_venc = dt_vencimento.month
 
-    # Busca o Cartão Pai ($CCP) existente para esse mês
+    # Busca o Cartão Pai ($CCP) existente para esse mês e ano de vencimento
     df_ccp = df[
         (df['cc_tipo'].fillna('').astype(str).str.strip().str.upper().isin(['$CCP', 'CCP'])) &
         (df['descricao'].fillna('').astype(str).str.strip().str.upper() == nome_busca) &
-        (pd.to_datetime(df['data']).dt.year == ano_venc) &
-        (pd.to_datetime(df['data']).dt.month == mes_venc)
+        (pd.to_datetime(df['data_vencimento']).dt.year == ano_venc) &
+        (pd.to_datetime(df['data_vencimento']).dt.month == mes_venc)
     ]
 
     # Soma os LCLs referentes a este cartão e vencimento
@@ -129,7 +127,6 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
     """
     Sub-rotina da Tela Conciliação - Regras estritas de LOU, LPR e LCL com cartões $CCP.
     """
-    # --- CSS GLOBAL PARA BOTÕES NA TABELA DE CONCILIAÇÃO ---
     st.markdown("""
         <style>
         div[data-testid="stColumn"] div.stButton > button {
@@ -147,7 +144,6 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
 
     reset_key = st.session_state.reset_count
 
-    # --- CABEÇALHO ALINHADO COM BOTÃO DE AJUDA ---
     col_titulo, col_ajuda = st.columns([4, 1])
     
     with col_titulo:
@@ -184,7 +180,6 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
         </style>
     """, unsafe_allow_html=True)
 
-    # Ajuste para UTC-3 (Horário Oficial do Brasil)
     hoje_c = (datetime.utcnow() - timedelta(hours=3)).date()
     ini_mes_c = hoje_c.replace(day=1)
     limite_c = hoje_c - timedelta(days=4)
@@ -262,7 +257,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                                 "usuario_id": str(ID_USUARIO_LOGADO),
                                 "descricao": nome_cartao_final,
                                 "cc_descricao": f"{sp_desc} ({parc_str})",
-                                "data": hoje_c.strftime('%Y-%m-%d'),
+                                "data": dt_venc_parc.strftime('%Y-%m-%d'),
                                 "data_vencimento": dt_venc_parc.strftime('%Y-%m-%d'),
                                 "cc_data_compra": hoje_c.strftime('%Y-%m-%d'),
                                 "tipo": "Saída",
@@ -401,7 +396,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                                         "usuario_id": str(ID_USUARIO_LOGADO),
                                         "descricao": nome_cartao_final,
                                         "cc_descricao": f"{row['descricao']} ({parc_str})",
-                                        "data": hoje_c.strftime('%Y-%m-%d'),
+                                        "data": dt_venc_parc.strftime('%Y-%m-%d'),
                                         "data_vencimento": dt_venc_parc.strftime('%Y-%m-%d'),
                                         "cc_data_compra": hoje_c.strftime('%Y-%m-%d'),
                                         "tipo": "Saída",
@@ -472,7 +467,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                                         "usuario_id": str(ID_USUARIO_LOGADO),
                                         "descricao": nome_cartao_final,
                                         "cc_descricao": f"{row['descricao']} ({parc_str})",
-                                        "data": row['dt_obj'].strftime('%Y-%m-%d'),
+                                        "data": dt_venc_parc.strftime('%Y-%m-%d'),
                                         "data_vencimento": dt_venc_parc.strftime('%Y-%m-%d'),
                                         "cc_data_compra": row['dt_obj'].strftime('%Y-%m-%d'),
                                         "tipo": "Saída",
