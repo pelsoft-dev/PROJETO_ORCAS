@@ -5,6 +5,20 @@ from datetime import datetime
 # Importando a ajuda do arquivo dedicado para Lançamentos
 from orcas_v01_ajuda_lancamentos import renderizar_ajuda_lancamentos
 
+st.markdown("""
+    <style>
+    /* Reduz tamanho, altura e fonte do botão Visão Cartão */
+    div.stButton > button {
+        padding: 0px 8px !important;
+        font-size: 10px !important;
+        height: 22px !important;
+        min-height: 22px !important;
+        line-height: 22px !important;
+        margin: 0px !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 # --- MODAL / JANELA VISÃO CARTÃO ---
 @st.dialog("Visão Cartão - Detalhamento das Faturas")
 def abrir_visao_cartao(desc_cartao, df_mes_cartao, format_moeda):

@@ -6,7 +6,7 @@ import calendar
 # Importando a ajuda do arquivo dedicado para Projetar
 from orcas_v01_ajuda_projetar import renderizar_ajuda_projetar
 
-def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda, d_ini_db=None):
+def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, parse_moeda):
     # --- CABEÇALHO ALINHADO COM BOTÃO DE AJUDA ---
     col_titulo, col_ajuda = st.columns([4, 1])
     
@@ -35,6 +35,20 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda, d_in
     # --- EXIBIÇÃO DA TELA DE AJUDA SE O BOTÃO FOR CLICADO ---
     if st.session_state.get("exibir_ajuda_projetar", False):
         renderizar_ajuda_projetar()
+
+    # --- TRATAMENTO SEGURO DE DATAS VINDAS DO BANCO (d_ini_db e d_fim_db) ---
+    def converter_para_date(val):
+        if isinstance(val, str):
+            try:
+                return datetime.strptime(val[:10], '%Y-%m-%d').date()
+            except:
+                return None
+        elif isinstance(val, datetime):
+            return val.date()
+        return val
+
+    dt_ini_valida = converter_para_date(d_ini_db)
+    dt_fim_valida = converter_para_date(d_fim_db)
 
     # Ajuste de Fuso Horário para Jundiaí/Brasília (UTC-3)
     fuso_br = timezone(timedelta(hours=-3))
@@ -104,31 +118,31 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda, d_in
         
         c_i, c_f = st.columns(2)
         
-        # Ajuste do valor padrão para o dia 01 e trava com min_value e max_value de config_projetos
+        # Ajuste seguro do valor inicial padrão (dia 01) garantindo o intervalo de config_projetos
         val_i_p = inicio_padrao
-        if d_ini_db and val_i_p < d_ini_db:
-            val_i_p = d_ini_db
-        elif d_fim_db and val_i_p > d_fim_db:
-            val_i_p = d_fim_db
+        if dt_ini_valida and val_i_p < dt_ini_valida:
+            val_i_p = dt_ini_valida
+        elif dt_fim_valida and val_i_p > dt_fim_valida:
+            val_i_p = dt_fim_valida
 
         i_p = c_i.date_input(
             "Início", 
             value=val_i_p, 
-            min_value=d_ini_db if d_ini_db else None, 
-            max_value=d_fim_db if d_fim_db else None, 
+            min_value=dt_ini_valida, 
+            max_value=dt_fim_valida, 
             format="DD/MM/YYYY", 
             key=f"pj_data_ini_{v}"
         )
         
-        val_f_p = d_fim_db if d_fim_db else hoje_br
-        if d_ini_db and val_f_p < d_ini_db:
-            val_f_p = d_ini_db
+        val_f_p = dt_fim_valida if dt_fim_valida else hoje_br
+        if dt_ini_valida and val_f_p < dt_ini_valida:
+            val_f_p = dt_ini_valida
 
         f_p = c_f.date_input(
             "Até", 
             value=val_f_p, 
-            min_value=d_ini_db if d_ini_db else None, 
-            max_value=d_fim_db if d_fim_db else None, 
+            min_value=dt_ini_valida, 
+            max_value=dt_fim_valida, 
             format="DD/MM/YYYY", 
             key=f"pj_data_fim_{v}"
         )
@@ -139,7 +153,6 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda, d_in
         col_cc1, col_cc2 = st.columns([2, 5])
         is_cartao = col_cc1.checkbox("Cartão de Crédito", key=f"pj_is_cc_{v}")
         
-        # Padrão para o dia de corte da fatura: Último dia do mês atual
         ult_dia_mes_atual = calendar.monthrange(hoje_br.year, hoje_br.month)[1]
         dia_corte = col_cc2.number_input(
             "A partir deste dia, as despesas serão lançadas na próxima fatura:", 
@@ -176,8 +189,6 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda, d_in
             if permitir_parcial:
                 d_m_final = "1"
 
-            # TRAVA 1: O loop começa na data de Início (i_p).
-            # Se for parcial, forçamos o início do loop para o dia 01 do mês de i_p para não pular o mês atual.
             curr = i_p
             if permitir_parcial:
                 curr = curr.replace(day=1)
@@ -189,7 +200,6 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda, d_in
             gerados = 0
             d_map = {"Segunda":0,"Terça":1,"Quarta":2,"Quinta":3,"Sexta":4,"Sábado":5,"Domingo":6}
             
-            # --- LÓGICA DE INCREMENTO DO COMPLEMENTO ---
             comp_base = comp_txt.strip() if comp_txt else ""
             num_atual = None
             sufixo = ""
@@ -210,7 +220,6 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda, d_in
                     num_atual = int(comp_base)
                     zeros = len(comp_base)
 
-            # O limite é a data Fim (f_p)
             limite_loop = f_p if n_ocorrencias == 0 else i_p + timedelta(days=3650)
 
             while curr <= limite_loop:
@@ -231,12 +240,8 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda, d_in
                     match_dm = (d_m_final == "" or d_m_final == "*" or str(curr.day) == d_m_final)
 
                 if (d_e is None or curr == d_e) and match_dm and (d_s == "" or curr.weekday() == d_map[d_s]):
-                    
-                    # TRAVA 2: Só processa se curr estiver estritamente dentro do intervalo de validade
-                    # Para parciais, validamos apenas se o mês/ano de curr é >= ao mês/ano de i_p
                     processar = False
                     if permitir_parcial:
-                        # Se permitir parcial, o dia de curr é sempre 1. Validamos se esse dia 1 está no período.
                         dt_ref_parcial = curr.replace(day=1)
                         if i_p.replace(day=1) <= dt_ref_parcial <= f_p:
                             processar = True
@@ -252,12 +257,9 @@ def exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_fim_db, parse_moeda, d_in
                             if fds == "Posterga":
                                 dt_f += timedelta(days=(2 if dt_f.weekday()==5 else 1))
                             elif fds == "Antecipa":
-                                # Ajuste: Se domingo (6), volta 2 dias para sexta. Se sábado (5), volta 1 dia para sexta.
                                 dt_f -= timedelta(days=(1 if dt_f.weekday()==5 else 2))
                         
-                        # TRAVA 3: Valida novamente após ajuste de FDS (apenas para não parciais)
                         if permitir_parcial or (i_p <= dt_f <= f_p):
-                            # Gera o texto do complemento para este item
                             comp_gerado = comp_txt
                             if num_atual is not None:
                                 comp_gerado = f"{str(num_atual + gerados).zfill(zeros)}{sufixo}"
