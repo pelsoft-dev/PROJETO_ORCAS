@@ -169,20 +169,40 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                 st.divider()
 
                 if not df_mes.empty:
+                    # --- ESTILOS CENTRALIZADOS PARA TABELA E BOTÕES DE AÇÃO ---
                     st.markdown("""
                         <style>
-                        .tab-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin-bottom: 10px; }
-                        .tab-body { min-width: 600px; display: flex; flex-direction: column; font-family: sans-serif; }
-                        .tab-row { display: flex; flex-direction: row; align-items: center; padding: 7px 0; border-bottom: 1px solid #eee; }
-                        .tab-hdr { font-weight: bold; background-color: #f8f9fa; border-top: 1px solid #ddd; }
+                        .tab-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin-bottom: 2px; }
+                        .tab-body { min-width: 580px; display: flex; flex-direction: column; font-family: sans-serif; color: #1E293B; }
+                        .tab-row { display: flex; flex-direction: row; align-items: center; padding: 6px 0; border-bottom: 1px solid #E2E8F0; }
+                        .tab-hdr { font-weight: bold; background-color: #F8FAFC; border-top: 1px solid #CBD5E1; color: #0F172A; }
                         .c-dt { width: 85px; font-size: 13px; flex-shrink: 0; }
-                        .c-ds { width: 240px; font-size: 13px; flex-shrink: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 5px; }
+                        .c-ds { width: 220px; font-size: 13px; flex-shrink: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 5px; }
                         .c-es { width: 35px; font-size: 13px; flex-shrink: 0; text-align: center; }
                         .c-vl { width: 90px; font-size: 13px; flex-shrink: 0; text-align: right; }
                         .c-st { width: 55px; font-size: 12px; flex-shrink: 0; text-align: center; font-weight: bold; margin-left: 5px; }
-                        /* Classes de cor forçadas para garantir a exibição */
-                        .linha-alerta-saida { color: #FF0000 !important; font-weight: bold; }
-                        .linha-alerta-entrada { color: #0000FF !important; font-weight: bold; }
+                        
+                        /* Destaque de Alerta */
+                        .linha-alerta-saida { color: #DC2626 !important; font-weight: bold; }
+                        .linha-alerta-entrada { color: #2563EB !important; font-weight: bold; }
+
+                        /* Estilização do Botão Visão Cartão */
+                        .btn-visao-cartao button {
+                            background-color: #0083B0 !important;
+                            color: white !important;
+                            padding: 2px 8px !important;
+                            font-size: 11px !important;
+                            height: 28px !important;
+                            min-height: 28px !important;
+                            line-height: 24px !important;
+                            border: none !important;
+                            border-radius: 4px !important;
+                            width: 100% !important;
+                        }
+                        .btn-visao-cartao button:hover {
+                            background-color: #006080 !important;
+                            color: white !important;
+                        }
                         </style>
                     """, unsafe_allow_html=True)
 
@@ -192,11 +212,13 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         (df_mes['cc_tipo'].fillna('').astype(str).str.strip().str.upper() != 'LCL')
                     ].sort_values('data')
                     
-                    # Cabeçalho da tabela HTML
-                    h_hdr = '<div class="tab-scroll"><div class="tab-body">'
-                    h_hdr += '<div class="tab-row tab-hdr"><div class="c-dt">Data</div><div class="c-ds">Descrição</div><div class="c-es">E/S</div><div class="c-vl">V.Plan</div><div class="c-vl">V.Real</div><div class="c-st">Status</div></div>'
-                    h_hdr += '</div></div>'
-                    st.write(h_hdr, unsafe_allow_html=True)
+                    # Cabeçalho da tabela com padrão idêntico de colunas [5, 1]
+                    c_hdr_linha, c_hdr_btn = st.columns([5, 1], vertical_alignment="center")
+                    with c_hdr_linha:
+                        h_hdr = '<div class="tab-scroll"><div class="tab-body">'
+                        h_hdr += '<div class="tab-row tab-hdr"><div class="c-dt">Data</div><div class="c-ds">Descrição</div><div class="c-es">E/S</div><div class="c-vl">V.Plan</div><div class="c-vl">V.Real</div><div class="c-st">Status</div></div>'
+                        h_hdr += '</div></div>'
+                        st.markdown(h_hdr, unsafe_allow_html=True)
 
                     for idx, row in df_exibir.iterrows():
                         desc_row_upper = str(row['descricao']).strip().upper()
@@ -249,30 +271,16 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                     
                         h_row += '</div></div>'
 
-                        if eh_cartao_ccp:
-                            c_linha, c_btn = st.columns([4.5, 1.5], vertical_alignment="center")
-                            with c_linha:
-                                st.write(h_row, unsafe_allow_html=True)
-                            with c_btn:
-                                # Estilo contido apenas dentro do container do botão "Visão Cartão"
-                                st.markdown("""
-                                    <style>
-                                    div[data-testid="stColumn"]:nth-of-type(2) div.stButton > button {
-                                        padding: 2px 8px !important;
-                                        font-size: 11px !important;
-                                        height: 28px !important;
-                                        min-height: 28px !important;
-                                        line-height: 24px !important;
-                                        margin: 0px !important;
-                                        white-space: nowrap !important;
-                                        border-radius: 4px !important;
-                                    }
-                                    </style>
-                                """, unsafe_allow_html=True)
+                        # Renderiza com proporção [5, 1] idêntica ao cabeçalho
+                        c_linha, c_btn = st.columns([5, 1], vertical_alignment="center")
+                        with c_linha:
+                            st.markdown(h_row, unsafe_allow_html=True)
+                        with c_btn:
+                            if eh_cartao_ccp:
+                                st.markdown('<div class="btn-visao-cartao">', unsafe_allow_html=True)
                                 if st.button("Visão Cartão", key=f"btn_vc_{mes_str}_{idx}"):
                                     abrir_visao_cartao(str(row['descricao']), df_mes, format_moeda, data_vencimento=row['data'])
-                        else:
-                            st.write(h_row, unsafe_allow_html=True)
+                                st.markdown('</div>', unsafe_allow_html=True)
                 else:
                     st.write("ℹ️ Nenhum lançamento para este mês.")
             
