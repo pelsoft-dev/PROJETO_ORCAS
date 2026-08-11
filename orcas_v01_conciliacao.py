@@ -67,6 +67,19 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
     """
     Sub-rotina da Tela Conciliação - Regras estritas de LOU, LPR e LCL com cartões $CCP.
     """
+    # --- CSS GLOBAL PARA BOTÕES NA TABELA DE CONCILIAÇÃO ---
+    st.markdown("""
+        <style>
+        div[data-testid="stColumn"] div.stButton > button {
+            padding: 2px 4px !important;
+            min-width: 32px !important;
+            height: 28px !important;
+            font-size: 11px !important;
+            white-space: nowrap !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
     if "reset_count" not in st.session_state:
         st.session_state.reset_count = 0
 
@@ -129,7 +142,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
 
     # --- ÁREA: LANÇAR SEM PLANEJAMENTO ---
     if st.session_state.abrir_sem_plan:
-        cols_sp = st.columns([1.8, 0.8, 1.0, 1.3, 0.6, 0.5])
+        cols_sp = st.columns([1.8, 0.8, 1.0, 1.3, 0.6, 0.5], vertical_alignment="center")
         sp_desc = cols_sp[0].text_input("Descrição", key=f"sp_desc_{reset_key}", placeholder="Ex: Combustível")
         sp_tipo = cols_sp[1].selectbox("E/S", ["Saída", "Entrada"], key=f"sp_tipo_{reset_key}")
         sp_valor = cols_sp[2].text_input("Valor Real", key=f"sp_valor_{reset_key}", value="0,00")
@@ -224,7 +237,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
         demais_itens = df_f[~df_f.index.isin(parciais_topo.index)].sort_values('dt_obj', ascending=False)
         df_final_concilia = pd.concat([parciais_topo, demais_itens])
 
-        h1, h2, h3, h4, h5, h6, h7, h8 = st.columns([1.8, 0.4, 0.9, 0.9, 0.9, 1.2, 0.5, 0.4])
+        h1, h2, h3, h4, h5, h6, h7, h8 = st.columns([2.2, 0.4, 0.9, 0.9, 0.9, 1.2, 0.5, 0.7], vertical_alignment="center")
         h1.write("**Data - Descrição**")
         h2.write("**E/S**")
         h3.write("**V. Plan.**")
@@ -241,7 +254,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
             
             st.markdown('<div style="margin-bottom: -32px;"></div>', unsafe_allow_html=True)
             
-            c1, c2, c3, c4, c5, c6, c7, c8 = st.columns([1.8, 0.4, 0.9, 0.9, 0.9, 1.2, 0.5, 0.4])
+            c1, c2, c3, c4, c5, c6, c7, c8 = st.columns([2.2, 0.4, 0.9, 0.9, 0.9, 1.2, 0.5, 0.7], vertical_alignment="center")
             
             c1.markdown(f"<span style='color:{cor_txt}; font-weight: 500;'>{row['dt_obj'].strftime('%d/%m/%Y')} - {row['descricao']}</span>", unsafe_allow_html=True)
             cor_tipo = 'red' if row['tipo'] == 'Saída' else 'blue'

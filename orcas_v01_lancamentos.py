@@ -244,12 +244,25 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                             h_row += f'</div>'
                     
                         h_row += '</div></div>'
-                        
+
                         if eh_cartao_ccp:
-                            c_linha, c_btn = st.columns([5, 1])
+                            c_linha, c_btn = st.columns([5, 1], vertical_alignment="center")
                             with c_linha:
                                 st.write(h_row, unsafe_allow_html=True)
                             with c_btn:
+                                st.markdown("""
+                                    <style>
+                                    div[data-testid="stColumn"] div.stButton > button {
+                                        padding: 0px 4px !important;
+                                        font-size: 11px !important;
+                                        height: 24px !important;
+                                        min-height: 24px !important;
+                                        line-height: 24px !important;
+                                        margin: 0px !important;
+                                        white-space: nowrap !important;
+                                    }
+                                    </style>
+                                """, unsafe_allow_html=True)
                                 if st.button("Visão Cartão", key=f"btn_vc_{mes_str}_{idx}"):
                                     abrir_visao_cartao(str(row['descricao']), df_mes, format_moeda)
                         else:
