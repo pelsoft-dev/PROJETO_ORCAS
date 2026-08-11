@@ -230,7 +230,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                     "status": "Realizado", 
                     "parcial_real": 0.0, 
                     "permite_parcial": False,
-                    "cc_tipo": "$CCL" if is_cc else None,
+                    "cc_tipo": "LCL" if is_cc else None,
                     "cc_qtd_parcelas": qtd_p
                 }).execute()
 
@@ -363,7 +363,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                             "parcial_real": float(v_dig), 
                             "parcial_data": hoje_c.strftime('%Y-%m-%d'), 
                             "permite_parcial": False,
-                            "cc_tipo": "$CCL" if is_cc else None,
+                            "cc_tipo": "LCL" if is_cc else None,
                             "cc_qtd_parcelas": qtd_p
                         }).execute()
 
@@ -429,7 +429,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                         supabase.table("lancamentos").update({
                             "valor_real": float(v_para_gravar), 
                             "status": "Realizado",
-                            "cc_tipo": "$CCL" if is_cc else None,
+                            "cc_tipo": "LCL" if is_cc else None,
                             "cc_qtd_parcelas": qtd_p
                         }).eq("id", row['id']).execute()
 
