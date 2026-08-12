@@ -15,7 +15,7 @@ def buscar_dados_cartao(df, nome_cartao):
         
         # Filtra registros CCP exatamente do cartão solicitado
         df_ccp = df[
-            (df['cc_tipo'].fillna('').astype(str).str.strip().str.upper().isin(['$CCP', 'CCP'])) & 
+            (df['cc_tipo'].fillna('').astype(str).str.strip().str.upper().isin(['$CCP', 'CCP', "'Z $CCP", "Z|$CCP"])) & 
             (df['descricao'].fillna('').astype(str).str.strip().str.upper() == nome_busca)
         ]
         
@@ -71,7 +71,7 @@ def buscar_cartoes_lcp(df):
     """
     cartoes_ccp = []
     if not df.empty and 'cc_tipo' in df.columns:
-        df_ccp = df[df['cc_tipo'].fillna('').astype(str).str.strip().str.upper().isin(['$CCP', 'CCP'])]
+        df_ccp = df[df['cc_tipo'].fillna('').astype(str).str.strip().str.upper().isin(['$CCP', 'CCP', "'Z $CCP", "Z|$CCP"])]
         if not df_ccp.empty and 'descricao' in df_ccp.columns:
             cartoes_ccp = df_ccp['descricao'].dropna().unique().tolist()
             cartoes_ccp = sorted(list(set([c.strip() for c in cartoes_ccp if c.strip()])))
@@ -90,19 +90,21 @@ def atualizar_valor_plan_cartao(supabase, df, nome_cartao, dt_vencimento, ID_USU
 
     # Busca se já existe registro $CCP criado para este cartão neste mês/ano
     df_ccp = df[
-        (df['cc_tipo'].fillna('').astype(str).str.strip().str.upper().isin(['$CCP', 'CCP'])) &
+        (df['cc_tipo'].fillna('').astype(str).str.strip().str.upper().isin(['$CCP', 'CCP', "'Z $CCP", "Z|$CCP"])) &
         (df['descricao'].fillna('').astype(str).str.strip().str.upper() == nome_busca) &
         (pd.to_datetime(df['data_vencimento']).dt.year == ano_venc) &
         (pd.to_datetime(df['data_vencimento']).dt.month == mes_venc)
     ]
 
-    # Soma os LCLs (parcelas) deste cartão que vencem neste mês/ano
+    # Soma todos os LCLs (parcelas do cartão) deste cartão com vencimento neste mês/ano
+    # Abrangendo variações comuns de gravação (LCL, 'Z LCL, $CCL, etc)
     mask_lcls = (
-        (df['cc_tipo'].fillna('').astype(str).str.strip().str.upper().isin(['LCL', '$CCL'])) &
+        (df['cc_tipo'].fillna('').astype(str).str.strip().str.upper().str.contains('LCL|\$CCL', regex=True)) &
         (df['descricao'].fillna('').astype(str).str.strip().str.upper() == nome_busca) &
         (pd.to_datetime(df['data_vencimento']).dt.year == ano_venc) &
         (pd.to_datetime(df['data_vencimento']).dt.month == mes_venc)
     )
+    
     soma_lcls = float(df[mask_lcls]['valor_plan'].sum()) if not df.empty else 0.0
 
     try:
@@ -298,7 +300,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
         df_c['dt_obj'] = pd.to_datetime(df_c['data']).dt.date
         df_c['parcial_real'] = pd.to_numeric(df_c['parcial_real'], errors='coerce').fillna(0)
         
-        df_base_tela = df_c[(df_c['parcial_real'] == 0) & (~df_c['cc_tipo'].fillna('').astype(str).str.strip().str.upper().isin(['LCL', '$CCL']))].copy()
+        df_base_tela = df_c[(df_c['parcial_real'] == 0) & (~df_c['cc_tipo'].fillna('').astype(str).str.strip().str.upper().str.contains('LCL|\$CCL', regex=True))].copy()
         
         if st.session_state.listar_todos_mes:
             proximo_mes = (ini_mes_c + timedelta(days=32)).replace(day=1)
@@ -343,9 +345,9 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
             c2.markdown(f"<span style='color:{cor_tipo}'>{row['tipo'][0]}</span>", unsafe_allow_html=True)
             
             valor_exibicao_real = row['valor_real']
-            if str(row.get('cc_tipo')).strip().upper() in ['$CCP', 'CCP']:
+            if str(row.get('cc_tipo')).strip().upper() in ['$CCP', 'CCP', "'Z $CCP", "Z|$CCP"]:
                 soma_lcls = df[
-                    (df['cc_tipo'].fillna('').astype(str).str.strip().str.upper().isin(['LCL', '$CCL'])) & 
+                    (df['cc_tipo'].fillna('').astype(str).str.strip().str.upper().str.contains('LCL|\$CCL', regex=True)) & 
                     (df['descricao'].fillna('').astype(str).str.strip().str.upper() == str(row['descricao']).strip().upper()) & 
                     (pd.to_datetime(df['data_vencimento']).dt.month == row['dt_obj'].month) &
                     (pd.to_datetime(df['data_vencimento']).dt.year == row['dt_obj'].year)
