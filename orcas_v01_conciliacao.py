@@ -38,8 +38,8 @@ def calcular_vencimento_fatura(data_compra, dia_corte=15, dia_vencimento=10):
     ano = data_compra.year
     mes = data_compra.month
 
-    # Se a compra foi feita após o corte, joga para a fatura do mês seguinte
-    if data_compra.day > dia_corte:
+    # Se a compra foi feita no dia de corte ou após, joga para a fatura do mês seguinte
+    if data_compra.day >= dia_corte:
         mes += 1
         if mes > 12:
             mes = 1
@@ -71,7 +71,7 @@ def buscar_cartoes_lcp(df):
 
 def atualizar_valor_plan_cartao(supabase, df, nome_cartao, dt_vencimento, ID_USUARIO_LOGADO):
     """
-    Recalcula o valor_plan do Cartão Pai (CCP) com base na soma dos LCLs do mês do vencimento.
+    Recalcula o valor_plan do Cartão Pai (CCP) com base na soma dos LCLs e $CCLs do mês do vencimento.
     """
     nome_busca = str(nome_cartao).strip().upper()
     ano_venc = dt_vencimento.year
@@ -85,9 +85,9 @@ def atualizar_valor_plan_cartao(supabase, df, nome_cartao, dt_vencimento, ID_USU
         (pd.to_datetime(df['data_vencimento']).dt.month == mes_venc)
     ]
 
-    # Soma os LCLs referentes a este cartão e vencimento
+    # Soma os LCLs e $CCLs referentes a este cartão e vencimento
     mask_lcls = (
-        (df['cc_tipo'].fillna('').astype(str).str.strip().str.upper() == 'LCL') &
+        (df['cc_tipo'].fillna('').astype(str).str.strip().str.upper().isin(['LCL', '$CCL'])) &
         (df['descricao'].fillna('').astype(str).str.strip().str.upper() == nome_busca) &
         (pd.to_datetime(df['data_vencimento']).dt.year == ano_venc) &
         (pd.to_datetime(df['data_vencimento']).dt.month == mes_venc)
@@ -283,7 +283,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
         df_c['dt_obj'] = pd.to_datetime(df_c['data']).dt.date
         df_c['parcial_real'] = pd.to_numeric(df_c['parcial_real'], errors='coerce').fillna(0)
         
-        df_base_tela = df_c[(df_c['parcial_real'] == 0) & (df_c['cc_tipo'] != 'LCL')].copy()
+        df_base_tela = df_c[(df_c['parcial_real'] == 0) & (~df_c['cc_tipo'].fillna('').astype(str).str.strip().str.upper().isin(['LCL', '$CCL']))].copy()
         
         if st.session_state.listar_todos_mes:
             proximo_mes = (ini_mes_c + timedelta(days=32)).replace(day=1)
@@ -330,7 +330,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
             valor_exibicao_real = row['valor_real']
             if str(row.get('cc_tipo')).strip().upper() in ['$CCP', 'CCP']:
                 soma_lcls = df[
-                    (df['cc_tipo'].fillna('').astype(str).str.strip().str.upper() == 'LCL') & 
+                    (df['cc_tipo'].fillna('').astype(str).str.strip().str.upper().isin(['LCL', '$CCL'])) & 
                     (df['descricao'].fillna('').astype(str).str.strip().str.upper() == str(row['descricao']).strip().upper()) & 
                     (pd.to_datetime(df['data_vencimento']).dt.month == row['dt_obj'].month) &
                     (pd.to_datetime(df['data_vencimento']).dt.year == row['dt_obj'].year)
