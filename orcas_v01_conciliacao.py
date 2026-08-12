@@ -28,18 +28,26 @@ def buscar_dados_cartao(df, nome_cartao):
                 if pd.notnull(venc) and pd.notnull(corte):
                     return int(corte), int(venc)
                 elif pd.notnull(venc):
-                    return 15, int(venc)
+                    # Se não tem dia de corte cadastrado, assume que o corte é 10 dias antes do vencimento
+                    corte_calc = int(venc) - 10 if int(venc) > 10 else int(venc) + 20
+                    return corte_calc, int(venc)
 
     # Fallback padrão caso não encontre cadastro específico deste cartão
-    return 15, 10
+    return 10, 10
 
-def calcular_vencimento_fatura(data_compra, dia_corte=15, dia_vencimento=10):
-    """Calcula a data de vencimento da 1ª parcela conforme o dia de corte real do cartão."""
+
+def calcular_vencimento_fatura(data_compra, dia_corte=10, dia_vencimento=10):
+    """
+    Calcula a data de vencimento da 1ª parcela com base no dia de vencimento/corte.
+    Se data_compra.day >= dia_vencimento (ou corte), a 1ª parcela vai para o mês seguinte.
+    """
     ano = data_compra.year
     mes = data_compra.month
 
-    # Se a compra foi feita no dia de corte ou após, joga para a fatura do mês seguinte
-    if data_compra.day >= dia_corte:
+    # Usamos o menor valor entre corte e vencimento para garantir o fechamento correto
+    dia_limite = min(dia_corte, dia_vencimento)
+
+    if data_compra.day >= dia_limite:
         mes += 1
         if mes > 12:
             mes = 1
@@ -48,12 +56,14 @@ def calcular_vencimento_fatura(data_compra, dia_corte=15, dia_vencimento=10):
     dia_final = min(dia_vencimento, calendar.monthrange(ano, mes)[1])
     return datetime(ano, mes, dia_final).date()
 
+
 def somar_meses_data(data_base, qtd_meses, dia_vencimento=10):
     """Avança N meses mantendo a coerência do dia de vencimento do cartão."""
     ano = data_base.year + ((data_base.month + qtd_meses - 1) // 12)
     mes = ((data_base.month + qtd_meses - 1) % 12) + 1
     dia = min(dia_vencimento, calendar.monthrange(ano, mes)[1])
     return datetime(ano, mes, dia).date()
+
 
 def buscar_cartoes_lcp(df):
     """
@@ -69,15 +79,16 @@ def buscar_cartoes_lcp(df):
     opcoes = ["Nenhum"] + cartoes_ccp + ["+ Outro Cartão..."]
     return opcoes
 
+
 def atualizar_valor_plan_cartao(supabase, df, nome_cartao, dt_vencimento, ID_USUARIO_LOGADO):
     """
-    Recalcula o valor_plan do Cartão Pai (CCP) com base na soma dos LCLs e $CCLs do mês do vencimento.
+    Recalcula o valor_plan do Cartão Pai ($CCP) com base na soma dos LCLs referentes ao mês de vencimento.
     """
     nome_busca = str(nome_cartao).strip().upper()
     ano_venc = dt_vencimento.year
     mes_venc = dt_vencimento.month
 
-    # Busca o Cartão Pai ($CCP) existente para esse mês e ano de vencimento
+    # Busca se já existe registro $CCP criado para este cartão neste mês/ano
     df_ccp = df[
         (df['cc_tipo'].fillna('').astype(str).str.strip().str.upper().isin(['$CCP', 'CCP'])) &
         (df['descricao'].fillna('').astype(str).str.strip().str.upper() == nome_busca) &
@@ -85,7 +96,7 @@ def atualizar_valor_plan_cartao(supabase, df, nome_cartao, dt_vencimento, ID_USU
         (pd.to_datetime(df['data_vencimento']).dt.month == mes_venc)
     ]
 
-    # Soma os LCLs e $CCLs referentes a este cartão e vencimento
+    # Soma os LCLs (parcelas) deste cartão que vencem neste mês/ano
     mask_lcls = (
         (df['cc_tipo'].fillna('').astype(str).str.strip().str.upper().isin(['LCL', '$CCL'])) &
         (df['descricao'].fillna('').astype(str).str.strip().str.upper() == nome_busca) &
@@ -224,6 +235,10 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                 qtd_p = int(sp_parc) if is_cc else 0
 
                 try:
+                    # Se for Cartão de Crédito, a compra original fica com valor_real = 0 para NÃO duplicar a saída no mês atual!
+                    v_real_lancamento = 0.0 if is_cc else float(v_sp)
+                    status_lancamento = "Planejado" if is_cc else "Realizado"
+
                     supabase.table("lancamentos").insert({
                         "projeto_id": str(st.session_state.projeto_ativo),
                         "usuario_id": str(ID_USUARIO_LOGADO),
@@ -232,8 +247,8 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                         "data_vencimento": hoje_c.strftime('%Y-%m-%d'),
                         "tipo": sp_tipo,
                         "valor_plan": 0.0, 
-                        "valor_real": float(v_sp),
-                        "status": "Realizado", 
+                        "valor_real": v_real_lancamento,
+                        "status": status_lancamento, 
                         "parcial_real": 0.0, 
                         "permite_parcial": False,
                         "cc_tipo": "LCL" if is_cc else None,
@@ -370,8 +385,8 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                                 "data_vencimento": ini_mes_c.strftime('%Y-%m-%d'), 
                                 "tipo": row['tipo'],
                                 "valor_plan": 0.0, 
-                                "valor_real": 0.0, 
-                                "status": "Planejado",
+                                "valor_real": 0.0 if is_cc else float(v_dig), 
+                                "status": "Planejado" if is_cc else "Realizado",
                                 "parcial_real": float(v_dig), 
                                 "parcial_data": hoje_c.strftime('%Y-%m-%d'), 
                                 "permite_parcial": False,
@@ -443,9 +458,14 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                         qtd_p = int(qtd_norm_in) if is_cc else 0
 
                         try:
+                            # Se for cartão de crédito, o lançamento original fica com valor_real = 0 e status "Planejado"
+                            # assim o gasto não entra como saída no mês atual e vai 100% para a fatura do cartão
+                            v_update_real = 0.0 if is_cc else float(v_para_gravar)
+                            status_update = "Planejado" if is_cc else "Realizado"
+
                             supabase.table("lancamentos").update({
-                                "valor_real": float(v_para_gravar), 
-                                "status": "Realizado",
+                                "valor_real": v_update_real, 
+                                "status": status_update,
                                 "cc_tipo": "LCL" if is_cc else None,
                                 "cc_qtd_parcelas": qtd_p
                             }).eq("id", row['id']).execute()
