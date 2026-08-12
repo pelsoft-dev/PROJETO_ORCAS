@@ -34,11 +34,11 @@ def abrir_visao_cartao(desc_cartao, df_mes_cartao, format_moeda, data_vencimento
         df_exibir_modal = pd.DataFrame({
             'Descrição': df_lcls['cc_descricao'] if 'cc_descricao' in df_lcls.columns else df_lcls['descricao'],
             'Data da Compra': pd.to_datetime(df_lcls[col_data_compra]).dt.strftime('%d/%m/%Y'),
-            'Valor (R$)': df_lcls['valor_real'].apply(lambda v: format_moeda(v))
+            'Valor (R$)': df_lcls['valor_plan'].apply(lambda v: format_moeda(v))
         })
         st.dataframe(df_exibir_modal, use_container_width=True, hide_index=True)
         
-        total_fatura = df_lcls['valor_real'].sum()
+        total_fatura = df_lcls['valor_plan'].sum()
         st.markdown(f"**Total da Fatura:** R$ {format_moeda(total_fatura)}")
     else:
         st.info("Nenhum lançamento (LCL) encontrado para este cartão neste mês.")
