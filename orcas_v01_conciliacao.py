@@ -83,29 +83,44 @@ def buscar_cartoes_lcp(df):
 def atualizar_valor_plan_cartao(supabase, df, nome_cartao, dt_vencimento, ID_USUARIO_LOGADO):
     """
     Recalcula o valor_plan do Cartão Pai ($CCP) com base na soma dos LCLs referentes ao mês de vencimento.
+    Busca diretamente no Supabase para garantir a soma das parcelas recém-criadas.
     """
     nome_busca = str(nome_cartao).strip().upper()
     ano_venc = dt_vencimento.year
     mes_venc = dt_vencimento.month
 
-    # Busca se já existe registro $CCP criado para este cartão neste mês/ano
-    df_ccp = df[
-        (df['cc_tipo'].fillna('').astype(str).str.strip().str.upper().isin(['$CCP', 'CCP', "'Z $CCP", "Z|$CCP"])) &
-        (df['descricao'].fillna('').astype(str).str.strip().str.upper() == nome_busca) &
-        (pd.to_datetime(df['data_vencimento']).dt.year == ano_venc) &
-        (pd.to_datetime(df['data_vencimento']).dt.month == mes_venc)
-    ]
+    primeiro_dia_mes = f"{ano_venc:04d}-{mes_venc:02d}-01"
+    ultimo_dia_mes = f"{ano_venc:04d}-{mes_venc:02d}-{calendar.monthrange(ano_venc, mes_venc)[1]:02d}"
 
-    # Soma todos os LCLs (parcelas do cartão) deste cartão com vencimento neste mês/ano
-    # Abrangendo variações comuns de gravação (LCL, 'Z LCL, $CCL, etc)
-    mask_lcls = (
-        (df['cc_tipo'].fillna('').astype(str).str.strip().str.upper().str.contains('LCL|\$CCL', regex=True)) &
-        (df['descricao'].fillna('').astype(str).str.strip().str.upper() == nome_busca) &
-        (pd.to_datetime(df['data_vencimento']).dt.year == ano_venc) &
-        (pd.to_datetime(df['data_vencimento']).dt.month == mes_venc)
-    )
-    
-    soma_lcls = float(df[mask_lcls]['valor_plan'].sum()) if not df.empty else 0.0
+    try:
+        # Busca os lançamentos atualizados no banco de dados para a janela do mês
+        res = supabase.table("lancamentos") \
+            .select("id, descricao, cc_tipo, valor_plan, data_vencimento") \
+            .eq("projeto_id", str(st.session_state.projeto_ativo)) \
+            .gte("data_vencimento", primeiro_dia_mes) \
+            .lte("data_vencimento", ultimo_dia_mes) \
+            .execute()
+        
+        df_db = pd.DataFrame(res.data) if res.data else pd.DataFrame()
+    except Exception:
+        df_db = pd.DataFrame()
+
+    if not df_db.empty:
+        # Busca registro CCP existente
+        df_ccp = df_db[
+            (df_db['cc_tipo'].fillna('').astype(str).str.strip().str.upper().isin(['$CCP', 'CCP', "'Z $CCP", "Z|$CCP"])) &
+            (df_db['descricao'].fillna('').astype(str).str.strip().str.upper() == nome_busca)
+        ]
+        
+        # Soma todos os LCLs referentes a este cartão no mês
+        mask_lcls = (
+            (df_db['cc_tipo'].fillna('').astype(str).str.strip().str.upper().str.contains('LCL|\$CCL', regex=True)) &
+            (df_db['descricao'].fillna('').astype(str).str.strip().str.upper() == nome_busca)
+        )
+        soma_lcls = float(df_db[mask_lcls]['valor_plan'].sum())
+    else:
+        df_ccp = pd.DataFrame()
+        soma_lcls = 0.0
 
     try:
         if not df_ccp.empty:
