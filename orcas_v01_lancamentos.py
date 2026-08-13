@@ -9,7 +9,7 @@ from orcas_v01_ajuda_lancamentos import renderizar_ajuda_lancamentos
 def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db, format_moeda, ir_para_o_topo):
     """
     Sub-rotina da Tela Lançamentos.
-    Correção do botão: Alternância garantida entre '>>' (fechado) e '^^' (aberto).
+    Correção do botão: Alternância via elementos HTML reais (display toggle) para forçar o repaint no navegador.
     """
 
     if 'msg_sucesso' not in st.session_state: 
@@ -121,7 +121,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                 st.divider()
 
                 if not df_mes.empty:
-                    # --- CSS DE ALTERNÂNCIA DIRETA DE ESTADO DO BOTÃO ---
+                    # --- CSS REVISADO: TOGGLE REAL DE EXIBIÇÃO ---
                     st.markdown("""
                         <style>
                         .tab-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin-bottom: 2px; }
@@ -151,7 +151,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                             display: none !important;
                         }
 
-                        /* Estilização do Botão */
+                        /* Estilo da caixa do botão */
                         .btn-exp-native {
                             background-color: transparent !important;
                             color: #000000 !important;
@@ -162,23 +162,22 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                             padding: 1px 5px !important;
                             height: 22px !important;
                             min-width: 28px !important;
-                            display: inline-flex;
-                            align-items: center;
-                            justify-content: center;
-                            user-select: none;
+                            display: inline-flex !important;
+                            align-items: center !important;
+                            justify-content: center !important;
+                            user-select: none !important;
                         }
                         .btn-exp-native:hover {
                             background-color: #e5e7eb !important;
                             border-color: #000000 !important;
                         }
 
-                        /* REGRA DUAL EXPLÍCITA DE ALTERNÂNCIA */
-                        details:not([open]) .btn-exp-native::before {
-                            content: ">>" !important;
-                        }
-                        details[open] .btn-exp-native::before {
-                            content: "^^" !important;
-                        }
+                        /* REGRA DE EXIBIÇÃO REAL DOS ELEMENTOS HTML INTERNOS */
+                        details .lbl-closed { display: inline !important; }
+                        details .lbl-open { display: none !important; }
+
+                        details[open] .lbl-closed { display: none !important; }
+                        details[open] .lbl-open { display: inline !important; }
 
                         /* Outros botões padrão do Streamlit */
                         div.stButton > button:not([kind="primary"]) {
@@ -248,7 +247,10 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                             h_hdr += f'<div class="tab-row{classe_cor}">'
                             h_hdr += f'<div class="c-dt">{dt_e}</div><div class="c-ds">{row["descricao"]}</div><div class="c-es">{row["tipo"][0]}</div>'
                             h_hdr += f'<div class="c-vl">{format_moeda(row["valor_plan"])}</div><div class="c-vl">{format_moeda(v_re)}</div><div class="c-st">{st_e}</div>'
-                            h_hdr += f'<div class="c-act"><span class="btn-exp-native"></span></div>'
+                            
+                            # Botão com duas tags SPAN internas para alternância direta
+                            h_hdr += f'<div class="c-act"><span class="btn-exp-native"><span class="lbl-closed">&gt;&gt;</span><span class="lbl-open">^^</span></span></div>'
+                            
                             h_hdr += '</div></summary>'
 
                             # Subitens exibidos quando aberto
