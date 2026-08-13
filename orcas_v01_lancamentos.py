@@ -9,7 +9,8 @@ from orcas_v01_ajuda_lancamentos import renderizar_ajuda_lancamentos
 def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db, format_moeda, ir_para_o_topo):
     """
     Sub-rotina da Tela Lançamentos.
-    Correção do botão: Alternância via elementos HTML reais (display toggle) para forçar o repaint no navegador.
+    - Status mantido estritamente como 'PLAN'.
+    - Botão de expansão corrigido com classe isolada 'det-linha' para evitar conflito com st.expander.
     """
 
     if 'msg_sucesso' not in st.session_state: 
@@ -121,7 +122,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                 st.divider()
 
                 if not df_mes.empty:
-                    # --- CSS REVISADO: TOGGLE REAL DE EXIBIÇÃO ---
+                    # --- CSS REVISADO COM CLASSE EXCLUSIVA det-linha ---
                     st.markdown("""
                         <style>
                         .tab-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin-bottom: 2px; }
@@ -140,14 +141,14 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         .linha-alerta-saida { color: #FF0000 !important; font-weight: bold; }
                         .linha-alerta-entrada { color: #0000FF !important; font-weight: bold; }
 
-                        /* Oculta seta nativa do HTML */
-                        details > summary {
+                        /* Oculta seta nativa apenas das nossas linhas */
+                        details.det-linha > summary {
                             list-style: none !important;
                             outline: none !important;
                             cursor: pointer;
                         }
-                        details > summary::-webkit-details-marker,
-                        details > summary::marker {
+                        details.det-linha > summary::-webkit-details-marker,
+                        details.det-linha > summary::marker {
                             display: none !important;
                         }
 
@@ -172,12 +173,13 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                             border-color: #000000 !important;
                         }
 
-                        /* REGRA DE EXIBIÇÃO REAL DOS ELEMENTOS HTML INTERNOS */
-                        details .lbl-closed { display: inline !important; }
-                        details .lbl-open { display: none !important; }
+                        /* 1. ESTADO FECHADO (PADRÃO): Mostra >> e esconde ^^ */
+                        details.det-linha > summary .lbl-closed { display: inline !important; }
+                        details.det-linha > summary .lbl-open { display: none !important; }
 
-                        details[open] .lbl-closed { display: none !important; }
-                        details[open] .lbl-open { display: inline !important; }
+                        /* 2. ESTADO ABERTO DA PRÓPRIA LINHA: Esconde >> e mostra ^^ */
+                        details.det-linha[open] > summary .lbl-closed { display: none !important; }
+                        details.det-linha[open] > summary .lbl-open { display: inline !important; }
 
                         /* Outros botões padrão do Streamlit */
                         div.stButton > button:not([kind="primary"]) {
@@ -243,18 +245,19 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
 
                         # Montagem do bloco de linha
                         if tem_subitens:
-                            h_hdr += f'<details><summary>'
+                            # Adicionada a classe 'det-linha' para isolar do st.expander do mês
+                            h_hdr += f'<details class="det-linha"><summary>'
                             h_hdr += f'<div class="tab-row{classe_cor}">'
                             h_hdr += f'<div class="c-dt">{dt_e}</div><div class="c-ds">{row["descricao"]}</div><div class="c-es">{row["tipo"][0]}</div>'
                             h_hdr += f'<div class="c-vl">{format_moeda(row["valor_plan"])}</div><div class="c-vl">{format_moeda(v_re)}</div><div class="c-st">{st_e}</div>'
                             
-                            # Botão com duas tags SPAN internas para alternância direta
+                            # Aqui estão os dois estados do botão inseridos explicitamente no HTML:
                             h_hdr += f'<div class="c-act"><span class="btn-exp-native"><span class="lbl-closed">&gt;&gt;</span><span class="lbl-open">^^</span></span></div>'
                             
                             h_hdr += '</div></summary>'
 
                             # Subitens exibidos quando aberto
-                            # 1. Compras no Cartão de Crédito
+                            # 1. Compras no Cartão de Crédito (Status mantido como PLAN)
                             if eh_cartao_ccp and not df_lcls_cartao.empty:
                                 for _, lcl in df_lcls_cartao.iterrows():
                                     desc_lcl = lcl.get('cc_descricao') if 'cc_descricao' in lcl and pd.notna(lcl['cc_descricao']) else lcl['descricao']
