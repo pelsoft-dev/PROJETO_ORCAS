@@ -9,8 +9,7 @@ from orcas_v01_ajuda_lancamentos import renderizar_ajuda_lancamentos
 def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db, format_moeda, ir_para_o_topo):
     """
     Sub-rotina da Tela Lançamentos.
-    - Status de itens de cartão mantidos como 'PLAN'.
-    - Botão de expansão fixado para iniciar SEMPRE como '>>' e alternar para '^^' apenas quando aberto.
+    Correção do botão de expansão: Inicia fechado como '>>' e troca para '^^' apenas quando aberto.
     """
 
     if 'msg_sucesso' not in st.session_state: 
@@ -122,7 +121,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                 st.divider()
 
                 if not df_mes.empty:
-                    # --- CSS REVISADO ---
+                    # --- CSS REVISADO: CONTROLE ESTRITO DO BOTÃO >> E ^^ ---
                     st.markdown("""
                         <style>
                         .tab-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin-bottom: 2px; }
@@ -135,13 +134,13 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         .c-vl { width: 90px; font-size: 13px; flex-shrink: 0; text-align: right; }
                         .c-st { width: 55px; font-size: 12px; flex-shrink: 0; text-align: center; font-weight: bold; margin-left: 5px; }
                         
-                        /* Margem de 38px (1cm) à direita do Status */
+                        /* Margem de 38px à direita do Status */
                         .c-act { width: 40px; margin-left: 38px; flex-shrink: 0; display: flex; align-items: center; justify-content: flex-start; }
 
                         .linha-alerta-saida { color: #FF0000 !important; font-weight: bold; }
                         .linha-alerta-entrada { color: #0000FF !important; font-weight: bold; }
 
-                        /* Remove o marcador nativo do HTML details/summary */
+                        /* Oculta seta nativa do HTML */
                         details > summary {
                             list-style: none !important;
                             outline: none !important;
@@ -152,7 +151,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                             display: none !important;
                         }
 
-                        /* Caixa do Botão */
+                        /* Container do Botão */
                         .btn-exp-native {
                             background-color: transparent !important;
                             color: #000000 !important;
@@ -162,7 +161,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                             font-weight: bold !important;
                             padding: 1px 5px !important;
                             height: 22px !important;
-                            line-height: 18px !important;
+                            min-width: 28px !important;
                             display: inline-flex;
                             align-items: center;
                             justify-content: center;
@@ -173,14 +172,13 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                             border-color: #000000 !important;
                         }
 
-                        /* REGRA DEFINITIVA DE ESTADO DO BOTÃO: */
-                        /* 1. Por padrão (fechado), sempre injeta '>>' */
-                        details .btn-exp-native::after {
+                        /* FORÇA ESTADO INICIAL FECHADO (>>) */
+                        .btn-exp-native::before {
                             content: ">>" !important;
                         }
 
-                        /* 2. Quando o pai <details> estiver ABERTO [open], força '^^' */
-                        details[open] .btn-exp-native::after {
+                        /* QUANDO EXPANDIDO/ABERTO TROCA PARA (^^) */
+                        details[open] .btn-exp-native::before {
                             content: "^^" !important;
                         }
 
@@ -256,7 +254,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                             h_hdr += '</div></summary>'
 
                             # Subitens exibidos quando aberto
-                            # 1. Compras no Cartão de Crédito (Status retornado estritamente para PLAN)
+                            # 1. Compras no Cartão de Crédito (Status mantido como PLAN)
                             if eh_cartao_ccp and not df_lcls_cartao.empty:
                                 for _, lcl in df_lcls_cartao.iterrows():
                                     desc_lcl = lcl.get('cc_descricao') if 'cc_descricao' in lcl and pd.notna(lcl['cc_descricao']) else lcl['descricao']
