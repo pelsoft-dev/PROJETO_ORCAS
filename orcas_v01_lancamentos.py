@@ -9,8 +9,7 @@ from orcas_v01_ajuda_lancamentos import renderizar_ajuda_lancamentos
 def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db, format_moeda, ir_para_o_topo):
     """
     Sub-rotina da Tela Lançamentos.
-    - Status mantido estritamente como 'PLAN'.
-    - Botão de expansão corrigido com classe isolada 'det-linha' para evitar conflito com st.expander.
+    Correção: Duplicidade de LCLs no cálculo do total de Saídas removida.
     """
 
     if 'msg_sucesso' not in st.session_state: 
@@ -69,8 +68,14 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
             
             def calcular_total_tipo(df_tipo, e_fechado):
                 total = 0
+                
+                # IGNORA LCLs no loop principal para não duplicar o valor do Cartão
+                df_tipo_filtrado = df_tipo[
+                    df_tipo['cc_tipo'].fillna('').astype(str).str.strip().str.upper() != 'LCL'
+                ]
+                
                 if e_fechado:
-                    itens_principais = df_tipo[(df_tipo['valor_plan'] > 0) | ((df_tipo['valor_plan'] == 0) & (df_tipo['valor_real'] > 0))]
+                    itens_principais = df_tipo_filtrado[(df_tipo_filtrado['valor_plan'] > 0) | ((df_tipo_filtrado['valor_plan'] == 0) & (df_tipo_filtrado['valor_real'] > 0))]
                     for _, x in itens_principais.iterrows():
                         if x['permite_parcial']:
                             desc_pai = str(x['descricao']).strip().upper()
@@ -89,7 +94,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                                 else:
                                     total += x['valor_real']
                 else:
-                    itens_principais = df_tipo[(df_tipo['valor_plan'] > 0) | ((df_tipo['valor_plan'] == 0) & (df_tipo['valor_real'] > 0))]
+                    itens_principais = df_tipo_filtrado[(df_tipo_filtrado['valor_plan'] > 0) | ((df_tipo_filtrado['valor_plan'] == 0) & (df_tipo_filtrado['valor_real'] > 0))]
                     for _, x in itens_principais.iterrows():
                         if x['permite_parcial']:
                             desc_pai = str(x['descricao']).strip().upper()
@@ -245,19 +250,15 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
 
                         # Montagem do bloco de linha
                         if tem_subitens:
-                            # Adicionada a classe 'det-linha' para isolar do st.expander do mês
                             h_hdr += f'<details class="det-linha"><summary>'
                             h_hdr += f'<div class="tab-row{classe_cor}">'
                             h_hdr += f'<div class="c-dt">{dt_e}</div><div class="c-ds">{row["descricao"]}</div><div class="c-es">{row["tipo"][0]}</div>'
                             h_hdr += f'<div class="c-vl">{format_moeda(row["valor_plan"])}</div><div class="c-vl">{format_moeda(v_re)}</div><div class="c-st">{st_e}</div>'
-                            
-                            # Aqui estão os dois estados do botão inseridos explicitamente no HTML:
                             h_hdr += f'<div class="c-act"><span class="btn-exp-native"><span class="lbl-closed">&gt;&gt;</span><span class="lbl-open">^^</span></span></div>'
-                            
                             h_hdr += '</div></summary>'
 
                             # Subitens exibidos quando aberto
-                            # 1. Compras no Cartão de Crédito (Status mantido como PLAN)
+                            # 1. Compras no Cartão de Crédito
                             if eh_cartao_ccp and not df_lcls_cartao.empty:
                                 for _, lcl in df_lcls_cartao.iterrows():
                                     desc_lcl = lcl.get('cc_descricao') if 'cc_descricao' in lcl and pd.notna(lcl['cc_descricao']) else lcl['descricao']
