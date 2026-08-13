@@ -9,8 +9,8 @@ from orcas_v01_ajuda_lancamentos import renderizar_ajuda_lancamentos
 def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db, format_moeda, ir_para_o_topo):
     """
     Sub-rotina da Tela Lançamentos - Integridade total da lógica de meses e saldos,
-    com visualização expansível (>) para Cartões ($CCP/LCL) e Pagamentos Parciais.
-    Ajuste estético: botão '>' colado à coluna Status e sem fundo azul.
+    com visualização expansível (>>) para Cartões ($CCP/LCL) e Pagamentos Parciais.
+    Estética do botão com borda arredondada (outline) conforme imagem enviada.
     """
 
     if 'msg_sucesso' not in st.session_state: 
@@ -126,7 +126,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                 st.divider()
 
                 if not df_mes.empty:
-                    # --- CSS RESTAURADO E ESTILO DO BOTÃO DE EXPANSÃO (SEM AZUL E PROXIMO) ---
+                    # --- CSS ESTILIZADO CONFORME O DESENHO ENVIADO ---
                     st.markdown("""
                         <style>
                         .tab-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin-bottom: 2px; }
@@ -142,7 +142,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         .linha-alerta-saida { color: #FF0000 !important; font-weight: bold; }
                         .linha-alerta-entrada { color: #0000FF !important; font-weight: bold; }
 
-                        /* Estilo geral dos botões da tabela */
+                        /* Estilo padrão dos outros botões */
                         div.stButton > button:not([kind="primary"]) {
                             background-color: #1E3A8A !important;
                             color: #FFFFFF !important;
@@ -153,24 +153,24 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                             height: 28px !important;
                             min-height: 28px !important;
                         }
-                        div.stButton > button:not([kind="primary"]):hover {
-                            background-color: #1E40AF !important;
-                            color: #FFFFFF !important;
-                        }
 
-                        /* Estilo específico para o botão de expansão '>' (fundo transparente/sem azul) */
+                        /* Estilo exato do desenho: Caixa transparente com borda arredondada e seta preta */
                         div.stButton > button[key*="btn_exp_"] {
                             background-color: transparent !important;
-                            color: #333333 !important;
+                            color: #000000 !important;
+                            border: 1.5px solid #222222 !important;
+                            border-radius: 6px !important;
+                            font-size: 12px !important;
                             font-weight: bold !important;
-                            font-size: 14px !important;
-                            border: none !important;
+                            padding: 1px 6px !important;
+                            height: 24px !important;
+                            min-height: 24px !important;
+                            line-height: 1 !important;
                             box-shadow: none !important;
-                            padding: 0px !important;
                         }
                         div.stButton > button[key*="btn_exp_"]:hover {
-                            background-color: #e2e8f0 !important;
-                            color: #000000 !important;
+                            background-color: #f0f0f0 !important;
+                            border-color: #000000 !important;
                         }
                         </style>
                     """, unsafe_allow_html=True)
@@ -182,7 +182,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         (df_mes['cc_tipo'].fillna('').astype(str).str.strip().str.upper() != 'LCL')
                     ].sort_values('data')
                     
-                    # Cabeçalho da tabela com proporção ajustada para colar o botão na coluna Status
+                    # Proporção ajustada para aproximar o botão da coluna Status
                     c_hdr_linha, c_hdr_btn = st.columns([15, 1], vertical_alignment="center")
                     with c_hdr_linha:
                         h_hdr = '<div class="tab-scroll"><div class="tab-body">'
@@ -238,7 +238,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         h_row += f'<div class="c-vl">{format_moeda(row["valor_plan"])}</div><div class="c-vl">{format_moeda(v_re)}</div><div class="c-st">{st_e}</div>'
                         h_row += '</div>'
 
-                        # Renderiza sub-itens expansíveis se estiver ativo (>)
+                        # Renderiza sub-itens expansíveis se estiver ativo (>>)
                         if is_expanded:
                             # 1. Sub-itens do Cartão de Crédito (LCLs)
                             if eh_cartao_ccp and not df_lcls_cartao.empty:
@@ -263,13 +263,12 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
 
                         h_row += '</div></div>'
 
-                        # Proporção ajustada para colar o botão à coluna Status (15:1)
                         c_linha, c_btn = st.columns([15, 1], vertical_alignment="center")
                         with c_linha:
                             st.markdown(h_row, unsafe_allow_html=True)
                         with c_btn:
                             if tem_subitens:
-                                icon_btn = "v" if is_expanded else ">"
+                                icon_btn = "vv" if is_expanded else ">>"
                                 if st.button(icon_btn, key=f"btn_exp_{key_exp}"):
                                     st.session_state.exp_rows[key_exp] = not is_expanded
                                     st.rerun()
