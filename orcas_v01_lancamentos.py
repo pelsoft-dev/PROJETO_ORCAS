@@ -9,11 +9,7 @@ from orcas_v01_ajuda_lancamentos import renderizar_ajuda_lancamentos
 def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db, format_moeda, ir_para_o_topo):
     """
     Sub-rotina da Tela Lançamentos.
-    Expansão controlada via HTML nativo (<details>/<summary>), garantindo:
-    1. Distância exata de 1cm (38px) da coluna Status.
-    2. Visual transparente com borda arredondada (sem fundo azul).
-    3. Alternância entre '>>' (fechado) e '^^' (aberto).
-    4. Expansão instantânea sem reload e sem queda de sessão.
+    Correção do ícone: Inicia sempre fechado como '>>' e altera alternadamente para '^^' ao abrir.
     """
 
     if 'msg_sucesso' not in st.session_state: 
@@ -125,7 +121,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                 st.divider()
 
                 if not df_mes.empty:
-                    # --- CSS RESTAURADO PERFEITO UTILIZANDO DETAILS/SUMMARY NATIVO ---
+                    # --- CSS REVISADO: ALTERNÂNCIA ESTRITA E INÍCIO FECHADO (>>) ---
                     st.markdown("""
                         <style>
                         .tab-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin-bottom: 2px; }
@@ -144,15 +140,16 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         .linha-alerta-saida { color: #FF0000 !important; font-weight: bold; }
                         .linha-alerta-entrada { color: #0000FF !important; font-weight: bold; }
 
-                        /* Remove a seta predeterminada da tag <details> */
+                        /* Oculta marcador padrão do details */
                         details > summary {
-                            list-style: none;
+                            list-style: none !important;
+                            cursor: pointer;
                         }
                         details > summary::-webkit-details-marker {
-                            display: none;
+                            display: none !important;
                         }
 
-                        /* Estilização do botão embutido no <summary> */
+                        /* Caixa do botão arredondada e transparente */
                         .btn-exp-native {
                             background-color: transparent !important;
                             color: #000000 !important;
@@ -163,7 +160,6 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                             padding: 1px 5px !important;
                             height: 22px !important;
                             line-height: 18px !important;
-                            cursor: pointer;
                             display: inline-flex;
                             align-items: center;
                             justify-content: center;
@@ -174,12 +170,14 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                             border-color: #000000 !important;
                         }
 
-                        /* Alterna o texto do botão de >> para ^^ via CSS puramente declarativo */
-                        .btn-exp-native::after {
-                            content: ">>";
+                        /* ESTADO INICIAL (FECHADO): Mostra obrigatoriamente >> */
+                        .btn-exp-native::before {
+                            content: ">>" !important;
                         }
-                        details[open] .btn-exp-native::after {
-                            content: "^^";
+
+                        /* ESTADO EXPANDIDO (ABERTO): Troca para ^^ quando o container <details> está com o atributo open */
+                        details[open] .btn-exp-native::before {
+                            content: "^^" !important;
                         }
 
                         /* Outros botões padrão do Streamlit */
@@ -244,7 +242,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
 
                         tem_subitens = (eh_cartao_ccp and not df_lcls_cartao.empty) or (not filhos_parciais.empty)
 
-                        # Montagem do bloco de linha usando <details> quando há subitens
+                        # Montagem do bloco de linha
                         if tem_subitens:
                             h_hdr += f'<details><summary style="outline:none;">'
                             h_hdr += f'<div class="tab-row{classe_cor}">'
