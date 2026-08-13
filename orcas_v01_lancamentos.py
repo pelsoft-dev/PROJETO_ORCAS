@@ -9,7 +9,8 @@ from orcas_v01_ajuda_lancamentos import renderizar_ajuda_lancamentos
 def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db, format_moeda, ir_para_o_topo):
     """
     Sub-rotina da Tela Lançamentos.
-    Correção do ícone: Inicia sempre fechado como '>>' e altera alternadamente para '^^' ao abrir.
+    - Status de itens de cartão mantidos como 'PLAN'.
+    - Botão de expansão fixado para iniciar SEMPRE como '>>' e alternar para '^^' apenas quando aberto.
     """
 
     if 'msg_sucesso' not in st.session_state: 
@@ -121,7 +122,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                 st.divider()
 
                 if not df_mes.empty:
-                    # --- CSS REVISADO: ALTERNÂNCIA ESTRITA E INÍCIO FECHADO (>>) ---
+                    # --- CSS REVISADO ---
                     st.markdown("""
                         <style>
                         .tab-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin-bottom: 2px; }
@@ -134,22 +135,24 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         .c-vl { width: 90px; font-size: 13px; flex-shrink: 0; text-align: right; }
                         .c-st { width: 55px; font-size: 12px; flex-shrink: 0; text-align: center; font-weight: bold; margin-left: 5px; }
                         
-                        /* Margem de 1cm (38px) à direita do Status */
+                        /* Margem de 38px (1cm) à direita do Status */
                         .c-act { width: 40px; margin-left: 38px; flex-shrink: 0; display: flex; align-items: center; justify-content: flex-start; }
 
                         .linha-alerta-saida { color: #FF0000 !important; font-weight: bold; }
                         .linha-alerta-entrada { color: #0000FF !important; font-weight: bold; }
 
-                        /* Oculta marcador padrão do details */
+                        /* Remove o marcador nativo do HTML details/summary */
                         details > summary {
                             list-style: none !important;
+                            outline: none !important;
                             cursor: pointer;
                         }
-                        details > summary::-webkit-details-marker {
+                        details > summary::-webkit-details-marker,
+                        details > summary::marker {
                             display: none !important;
                         }
 
-                        /* Caixa do botão arredondada e transparente */
+                        /* Caixa do Botão */
                         .btn-exp-native {
                             background-color: transparent !important;
                             color: #000000 !important;
@@ -170,13 +173,14 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                             border-color: #000000 !important;
                         }
 
-                        /* ESTADO INICIAL (FECHADO): Mostra obrigatoriamente >> */
-                        .btn-exp-native::before {
+                        /* REGRA DEFINITIVA DE ESTADO DO BOTÃO: */
+                        /* 1. Por padrão (fechado), sempre injeta '>>' */
+                        details .btn-exp-native::after {
                             content: ">>" !important;
                         }
 
-                        /* ESTADO EXPANDIDO (ABERTO): Troca para ^^ quando o container <details> está com o atributo open */
-                        details[open] .btn-exp-native::before {
+                        /* 2. Quando o pai <details> estiver ABERTO [open], força '^^' */
+                        details[open] .btn-exp-native::after {
                             content: "^^" !important;
                         }
 
@@ -244,7 +248,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
 
                         # Montagem do bloco de linha
                         if tem_subitens:
-                            h_hdr += f'<details><summary style="outline:none;">'
+                            h_hdr += f'<details><summary>'
                             h_hdr += f'<div class="tab-row{classe_cor}">'
                             h_hdr += f'<div class="c-dt">{dt_e}</div><div class="c-ds">{row["descricao"]}</div><div class="c-es">{row["tipo"][0]}</div>'
                             h_hdr += f'<div class="c-vl">{format_moeda(row["valor_plan"])}</div><div class="c-vl">{format_moeda(v_re)}</div><div class="c-st">{st_e}</div>'
@@ -252,7 +256,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                             h_hdr += '</div></summary>'
 
                             # Subitens exibidos quando aberto
-                            # 1. Cartão de Crédito
+                            # 1. Compras no Cartão de Crédito (Status retornado estritamente para PLAN)
                             if eh_cartao_ccp and not df_lcls_cartao.empty:
                                 for _, lcl in df_lcls_cartao.iterrows():
                                     desc_lcl = lcl.get('cc_descricao') if 'cc_descricao' in lcl and pd.notna(lcl['cc_descricao']) else lcl['descricao']
@@ -261,7 +265,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                                     
                                     h_hdr += f'<div class="tab-row{classe_cor}" style="font-style: italic; opacity: 0.85; background-color: #f1f5f9;">'
                                     h_hdr += f'<div class="c-dt"></div><div class="c-ds" style="padding-left:15px;">> {desc_lcl} ({dt_compra_str})</div><div class="c-es">S</div>'
-                                    h_hdr += f'<div class="c-vl">{format_moeda(lcl["valor_plan"])}</div><div class="c-vl">{format_moeda(lcl["valor_real"])}</div><div class="c-st">LCL</div><div class="c-act"></div>'
+                                    h_hdr += f'<div class="c-vl">{format_moeda(lcl["valor_plan"])}</div><div class="c-vl">{format_moeda(lcl["valor_real"])}</div><div class="c-st">PLAN</div><div class="c-act"></div>'
                                     h_hdr += f'</div>'
                             
                             # 2. Parciais
