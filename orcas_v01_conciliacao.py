@@ -5,49 +5,65 @@ import calendar
 
 from orcas_v01_ajuda_conciliacao import renderizar_ajuda_conciliacao
 
-def buscar_dados_cartao(df, nome_cartao):
+def buscar_dados_cartao(supabase, df, nome_cartao):
     """
-    Busca o dia de corte e o dia de vencimento do cartão ($CCP),
-    ignorando diferenças de maiúsculas/minúsculas e espaços.
+    Busca o dia de corte e o dia de vencimento do cartão ($CCP).
+    Caso não encontre no df local, realiza uma busca direta no Supabase.
     """
+    nome_busca = str(nome_cartao).strip().upper()
+
+    # 1. Tenta buscar no DataFrame local
     if not df.empty and 'cc_tipo' in df.columns:
-        nome_busca = str(nome_cartao).strip().upper()
-        
-        # Filtra registros CCP exatamente do cartão solicitado
         df_ccp = df[
             (df['cc_tipo'].fillna('').astype(str).str.strip().str.upper().isin(['$CCP', 'CCP', "'Z $CCP", "Z|$CCP"])) & 
             (df['descricao'].fillna('').astype(str).str.strip().str.upper() == nome_busca)
         ]
-        
         if not df_ccp.empty:
-            for _, row_c in df_ccp.iterrows():
-                venc = row_c.get('cc_dia_vencimento')
-                corte = row_c.get('cc_dia_corte')
-                
-                # Garante que encontrou valores numéricos válidos
-                if pd.notnull(venc) and pd.notnull(corte):
+            row = df_ccp.iloc[0]
+            venc = row.get('cc_dia_vencimento')
+            corte = row.get('cc_dia_corte')
+            if pd.notnull(venc) and pd.notnull(corte):
+                return int(corte), int(venc)
+            elif pd.notnull(venc):
+                venc_int = int(venc)
+                corte_calc = venc_int - 6 if venc_int > 6 else venc_int + 24
+                return corte_calc, venc_int
+
+    # 2. Se não achou no df local, busca direto no Supabase
+    try:
+        res = supabase.table("lancamentos") \
+            .select("cc_dia_corte, cc_dia_vencimento") \
+            .eq("projeto_id", str(st.session_state.projeto_ativo)) \
+            .ilike("descricao", nome_busca) \
+            .execute()
+        
+        if res.data:
+            for item in res.data:
+                venc = item.get('cc_dia_vencimento')
+                corte = item.get('cc_dia_corte')
+                if venc is not None and corte is not None:
                     return int(corte), int(venc)
-                elif pd.notnull(venc):
-                    # Se não tem dia de corte cadastrado, assume que o corte é 10 dias antes do vencimento
-                    corte_calc = int(venc) - 10 if int(venc) > 10 else int(venc) + 20
-                    return corte_calc, int(venc)
+                elif venc is not None:
+                    venc_int = int(venc)
+                    corte_calc = venc_int - 6 if venc_int > 6 else venc_int + 24
+                    return corte_calc, venc_int
+    except Exception:
+        pass
 
-    # Fallback padrão caso não encontre cadastro específico deste cartão
-    return 10, 10
+    # Fallback genérico apenas se não houver NENHUM cadastro no banco
+    return 21, 27
 
 
-def calcular_vencimento_fatura(data_compra, dia_corte=10, dia_vencimento=10):
+def calcular_vencimento_fatura(data_compra, dia_corte=21, dia_vencimento=27):
     """
-    Calcula a data de vencimento da 1ª parcela com base no dia de vencimento/corte.
-    Se data_compra.day >= dia_vencimento (ou corte), a 1ª parcela vai para o mês seguinte.
+    Calcula a data de vencimento da 1ª parcela com base no dia de corte da fatura.
+    Se data_compra.day >= dia_corte, a compra entra no faturamento do mês seguinte.
     """
     ano = data_compra.year
     mes = data_compra.month
 
-    # Usamos o menor valor entre corte e vencimento para garantir o fechamento correto
-    dia_limite = min(dia_corte, dia_vencimento)
-
-    if data_compra.day >= dia_limite:
+    # Se a compra foi feita no dia do corte ou após o corte, vai para a fatura do mês seguinte
+    if data_compra.day >= dia_corte:
         mes += 1
         if mes > 12:
             mes = 1
@@ -57,8 +73,8 @@ def calcular_vencimento_fatura(data_compra, dia_corte=10, dia_vencimento=10):
     return datetime(ano, mes, dia_final).date()
 
 
-def somar_meses_data(data_base, qtd_meses, dia_vencimento=10):
-    """Avança N meses mantendo a coerência do dia de vencimento do cartão."""
+def somar_meses_data(data_base, qtd_meses, dia_vencimento=27):
+    """Avança N meses mantendo o dia de vencimento exato do cartão."""
     ano = data_base.year + ((data_base.month + qtd_meses - 1) // 12)
     mes = ((data_base.month + qtd_meses - 1) % 12) + 1
     dia = min(dia_vencimento, calendar.monthrange(ano, mes)[1])
@@ -132,7 +148,7 @@ def atualizar_valor_plan_cartao(supabase, df, nome_cartao, dt_vencimento, ID_USU
             }).eq("id", id_ccp).execute()
         else:
             # Caso não exista o registro $CCP no mês, cria um novo
-            corte, venc = buscar_dados_cartao(df, nome_cartao)
+            corte, venc = buscar_dados_cartao(supabase, df, nome_cartao)
             dia_final = min(venc, calendar.monthrange(ano_venc, mes_venc)[1])
             dt_exata_ccp = datetime(ano_venc, mes_venc, dia_final).date()
 
@@ -275,7 +291,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                     }).execute()
 
                     if is_cc:
-                        corte, venc = buscar_dados_cartao(df, nome_cartao_final)
+                        corte, venc = buscar_dados_cartao(supabase, df, nome_cartao_final)
                         base_val = round(float(v_sp) / qtd_p, 2)
                         residuo = round(float(v_sp) - (base_val * qtd_p), 2)
                         
@@ -414,7 +430,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                             }).execute()
 
                             if is_cc:
-                                corte, venc = buscar_dados_cartao(df, nome_cartao_final)
+                                corte, venc = buscar_dados_cartao(supabase, df, nome_cartao_final)
                                 base_val = round(float(v_dig) / qtd_p, 2)
                                 residuo = round(float(v_dig) - (base_val * qtd_p), 2)
                                 
@@ -490,7 +506,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                             }).eq("id", row['id']).execute()
 
                             if is_cc:
-                                corte, venc = buscar_dados_cartao(df, nome_cartao_final)
+                                corte, venc = buscar_dados_cartao(supabase, df, nome_cartao_final)
                                 base_val = round(float(v_para_gravar) / qtd_p, 2)
                                 residuo = round(float(v_para_gravar) - (base_val * qtd_p), 2)
                                 
