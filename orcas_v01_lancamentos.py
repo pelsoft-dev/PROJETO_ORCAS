@@ -10,6 +10,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
     """
     Sub-rotina da Tela Lançamentos - Integridade total da lógica de meses e saldos,
     com visualização expansível (>) para Cartões ($CCP/LCL) e Pagamentos Parciais.
+    Ajuste estético: botão '>' colado à coluna Status e sem fundo azul.
     """
 
     if 'msg_sucesso' not in st.session_state: 
@@ -125,7 +126,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                 st.divider()
 
                 if not df_mes.empty:
-                    # --- CSS RESTAURADO DO PADRÃO ORIGINAL ORCAS ---
+                    # --- CSS RESTAURADO E ESTILO DO BOTÃO DE EXPANSÃO (SEM AZUL E PROXIMO) ---
                     st.markdown("""
                         <style>
                         .tab-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin-bottom: 2px; }
@@ -141,7 +142,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         .linha-alerta-saida { color: #FF0000 !important; font-weight: bold; }
                         .linha-alerta-entrada { color: #0000FF !important; font-weight: bold; }
 
-                        /* Estilo dos botões da tabela */
+                        /* Estilo geral dos botões da tabela */
                         div.stButton > button:not([kind="primary"]) {
                             background-color: #1E3A8A !important;
                             color: #FFFFFF !important;
@@ -156,6 +157,21 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                             background-color: #1E40AF !important;
                             color: #FFFFFF !important;
                         }
+
+                        /* Estilo específico para o botão de expansão '>' (fundo transparente/sem azul) */
+                        div.stButton > button[key*="btn_exp_"] {
+                            background-color: transparent !important;
+                            color: #333333 !important;
+                            font-weight: bold !important;
+                            font-size: 14px !important;
+                            border: none !important;
+                            box-shadow: none !important;
+                            padding: 0px !important;
+                        }
+                        div.stButton > button[key*="btn_exp_"]:hover {
+                            background-color: #e2e8f0 !important;
+                            color: #000000 !important;
+                        }
                         </style>
                     """, unsafe_allow_html=True)
 
@@ -166,8 +182,8 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         (df_mes['cc_tipo'].fillna('').astype(str).str.strip().str.upper() != 'LCL')
                     ].sort_values('data')
                     
-                    # Cabeçalho da tabela
-                    c_hdr_linha, c_hdr_btn = st.columns([5.2, 0.8], vertical_alignment="center")
+                    # Cabeçalho da tabela com proporção ajustada para colar o botão na coluna Status
+                    c_hdr_linha, c_hdr_btn = st.columns([15, 1], vertical_alignment="center")
                     with c_hdr_linha:
                         h_hdr = '<div class="tab-scroll"><div class="tab-body">'
                         h_hdr += '<div class="tab-row tab-hdr"><div class="c-dt">Data</div><div class="c-ds">Descrição</div><div class="c-es">E/S</div><div class="c-vl">V.Plan</div><div class="c-vl">V.Real</div><div class="c-st">Status</div></div>'
@@ -247,7 +263,8 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
 
                         h_row += '</div></div>'
 
-                        c_linha, c_btn = st.columns([5.2, 0.8], vertical_alignment="center")
+                        # Proporção ajustada para colar o botão à coluna Status (15:1)
+                        c_linha, c_btn = st.columns([15, 1], vertical_alignment="center")
                         with c_linha:
                             st.markdown(h_row, unsafe_allow_html=True)
                         with c_btn:
