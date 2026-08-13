@@ -8,9 +8,9 @@ from orcas_v01_ajuda_lancamentos import renderizar_ajuda_lancamentos
 
 def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db, format_moeda, ir_para_o_topo):
     """
-    Sub-rotina da Tela Lançamentos - Integridade total da lógica de meses e saldos.
-    Ajuste estético: Botão '>>' sem fundo azul, com borda arredondada e exatamente 
-    a 1cm da coluna Status.
+    Sub-rotina da Tela Lançamentos.
+    Botão '>>' / '^^' integrado diretamente no HTML da linha para garantir 
+    distância exata de 1cm do Status e estilo com borda arredondada sem fundo azul.
     """
 
     if 'msg_sucesso' not in st.session_state: 
@@ -19,6 +19,14 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
     # Controle de expansão das linhas (Cartão ou Parciais)
     if 'exp_rows' not in st.session_state:
         st.session_state.exp_rows = {}
+
+    # Trata cliques disparados pelos botões HTML nativos integrados
+    query_params = st.query_params
+    if "toggle_exp" in query_params:
+        key_clicked = query_params["toggle_exp"]
+        st.session_state.exp_rows[key_clicked] = not st.session_state.exp_rows.get(key_clicked, False)
+        st.query_params.clear()
+        st.rerun()
 
     # --- CABEÇALHO ALINHADO COM BOTÃO DE AJUDA ---
     col_titulo, col_ajuda = st.columns([4, 1])
@@ -126,7 +134,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                 st.divider()
 
                 if not df_mes.empty:
-                    # --- CSS REVISADO COM APROXIMAÇÃO DA COLUNA STATUS E REMOÇÃO TOTAL DO AZUL ---
+                    # --- CSS DA TABELA E BOTÃO NATIVO INTEGRADO ---
                     st.markdown("""
                         <style>
                         .tab-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin-bottom: 2px; }
@@ -139,13 +147,35 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         .c-vl { width: 90px; font-size: 13px; flex-shrink: 0; text-align: right; }
                         .c-st { width: 55px; font-size: 12px; flex-shrink: 0; text-align: center; font-weight: bold; margin-left: 5px; }
                         
-                        /* Margem de 1cm (38px) à direita do status para abrigar o botão expansor */
-                        .c-act { width: 45px; margin-left: 38px; flex-shrink: 0; display: flex; align-items: center; justify-content: start; }
+                        /* Área reservada para o botão exata a 1cm (38px) da coluna Status */
+                        .c-act { width: 40px; margin-left: 38px; flex-shrink: 0; display: flex; align-items: center; justify-content: flex-start; }
 
                         .linha-alerta-saida { color: #FF0000 !important; font-weight: bold; }
                         .linha-alerta-entrada { color: #0000FF !important; font-weight: bold; }
 
-                        /* Estilo padrão dos outros botões da tela */
+                        /* Estilo exato da imagem enviada: borda arredondada, sem fundo azul */
+                        .btn-exp-native {
+                            background-color: transparent !important;
+                            color: #000000 !important;
+                            border: 1.5px solid #222222 !important;
+                            border-radius: 6px !important;
+                            font-size: 11px !important;
+                            font-weight: bold !important;
+                            padding: 1px 5px !important;
+                            height: 22px !important;
+                            line-height: 18px !important;
+                            cursor: pointer;
+                            display: inline-flex;
+                            align-items: center;
+                            justify-content: center;
+                            text-decoration: none !important;
+                        }
+                        .btn-exp-native:hover {
+                            background-color: #e5e7eb !important;
+                            border-color: #000000 !important;
+                        }
+
+                        /* Mantém os outros botões do Streamlit no padrão original */
                         div.stButton > button:not([kind="primary"]) {
                             background-color: #1E3A8A !important;
                             color: #FFFFFF !important;
@@ -154,33 +184,6 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                             font-size: 11px !important;
                             padding: 2px 6px !important;
                             height: 28px !important;
-                            min-height: 28px !important;
-                        }
-
-                        /* SOBREPOSIÇÃO FORÇADA: Botões com classe ou key de expansão (btn-exp-custom) */
-                        div.stButton > button.btn-exp-custom,
-                        div.stButton > button[key*="btn_exp_"] {
-                            background-color: transparent !important;
-                            background: transparent !important;
-                            color: #000000 !important;
-                            border: 1.5px solid #000000 !important;
-                            border-radius: 6px !important;
-                            font-size: 11px !important;
-                            font-weight: bold !important;
-                            padding: 0px 4px !important;
-                            height: 22px !important;
-                            min-height: 22px !important;
-                            width: 34px !important;
-                            line-height: 1 !important;
-                            box-shadow: none !important;
-                        }
-                        
-                        div.stButton > button.btn-exp-custom:hover,
-                        div.stButton > button[key*="btn_exp_"]:hover {
-                            background-color: #e5e7eb !important;
-                            background: #e5e7eb !important;
-                            color: #000000 !important;
-                            border-color: #000000 !important;
                         }
                         </style>
                     """, unsafe_allow_html=True)
@@ -192,11 +195,9 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         (df_mes['cc_tipo'].fillna('').astype(str).str.strip().str.upper() != 'LCL')
                     ].sort_values('data')
                     
-                    # Cabeçalho da tabela com coluna de ação encostada
+                    # Cabeçalho da tabela
                     h_hdr = '<div class="tab-scroll"><div class="tab-body">'
                     h_hdr += '<div class="tab-row tab-hdr"><div class="c-dt">Data</div><div class="c-ds">Descrição</div><div class="c-es">E/S</div><div class="c-vl">V.Plan</div><div class="c-vl">V.Real</div><div class="c-st">Status</div><div class="c-act"></div></div>'
-                    h_hdr += '</div></div>'
-                    st.markdown(h_hdr, unsafe_allow_html=True)
 
                     for idx, row in df_exibir.iterrows():
                         desc_row_upper = str(row['descricao']).strip().upper()
@@ -234,54 +235,51 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                             (df_mes['parcial_real'] > 0)
                         ]
 
-                        # Verifica se o item tem conteúdo expansível (Cartão com compras LCL ou Item com Parciais)
+                        # Verifica se o item tem conteúdo expansível
                         tem_subitens = (eh_cartao_ccp and not df_lcls_cartao.empty) or (not filhos_parciais.empty)
                         key_exp = f"exp_{mes_str}_{idx}_{row['id']}"
                         is_expanded = st.session_state.exp_rows.get(key_exp, False)
 
-                        # Usamos colunas internas do Streamlit com ajuste preciso (largura do conteúdo da linha vs botão encostado)
-                        c_linha, c_btn = st.columns([580, 50], vertical_alignment="center")
-                        
-                        with c_linha:
-                            # Desenha a linha principal
-                            h_row = '<div class="tab-scroll"><div class="tab-body">'
-                            h_row += f'<div class="tab-row{classe_cor}">'
-                            h_row += f'<div class="c-dt">{dt_e}</div><div class="c-ds">{row["descricao"]}</div><div class="c-es">{row["tipo"][0]}</div>'
-                            h_row += f'<div class="c-vl">{format_moeda(row["valor_plan"])}</div><div class="c-vl">{format_moeda(v_re)}</div><div class="c-st">{st_e}</div>'
-                            h_row += '</div>'
+                        # Define o ícone: ^^ quando aberto e >> quando fechado
+                        icon_btn = "^^" if is_expanded else "&gt;&gt;"
 
-                            # Renderiza sub-itens expansíveis se estiver ativo (>>)
-                            if is_expanded:
-                                # 1. Sub-itens do Cartão de Crédito (LCLs)
-                                if eh_cartao_ccp and not df_lcls_cartao.empty:
-                                    for _, lcl in df_lcls_cartao.iterrows():
-                                        desc_lcl = lcl.get('cc_descricao') if 'cc_descricao' in lcl and pd.notna(lcl['cc_descricao']) else lcl['descricao']
-                                        dt_compra = lcl.get('cc_data_compra') if 'cc_data_compra' in lcl and pd.notna(lcl['cc_data_compra']) else lcl['data']
-                                        dt_compra_str = pd.to_datetime(dt_compra).strftime('%d/%m/%Y')
-                                        
-                                        h_row += f'<div class="tab-row{classe_cor}" style="font-style: italic; opacity: 0.85; background-color: #f1f5f9;">'
-                                        h_row += f'<div class="c-dt"></div><div class="c-ds" style="padding-left:15px;">> {desc_lcl} ({dt_compra_str})</div><div class="c-es">S</div>'
-                                        h_row += f'<div class="c-vl">{format_moeda(lcl["valor_plan"])}</div><div class="c-vl">{format_moeda(lcl["valor_real"])}</div><div class="c-st">LCL</div>'
-                                        h_row += f'</div>'
-                                
-                                # 2. Sub-itens de Parciais
-                                if not filhos_parciais.empty:
-                                    for _, f in filhos_parciais.iterrows():
-                                        dt_f = pd.to_datetime(f['parcial_data']).strftime('%d/%m/%Y')
-                                        h_row += f'<div class="tab-row{classe_cor}" style="font-style: italic; opacity: 0.85; background-color: #f1f5f9;">'
-                                        h_row += f'<div class="c-dt"></div><div class="c-ds" style="padding-left:15px;">> Parcial: {dt_f}</div><div class="c-es">{f["tipo"][0]}</div>'
-                                        h_row += f'<div class="c-vl">---</div><div class="c-vl">{format_moeda(f["parcial_real"])}</div><div class="c-st">REAL</div>'
-                                        h_row += f'</div>'
+                        # Botão HTML inserido diretamente dentro do fluxo da linha
+                        html_btn = ""
+                        if tem_subitens:
+                            html_btn = f'<a href="?toggle_exp={key_exp}" target="_self" class="btn-exp-native">{icon_btn}</a>'
 
-                            h_row += '</div></div>'
-                            st.markdown(h_row, unsafe_allow_html=True)
+                        # Monta a linha com a coluna do botão a 38px (1cm) de distância do Status
+                        h_hdr += f'<div class="tab-row{classe_cor}">'
+                        h_hdr += f'<div class="c-dt">{dt_e}</div><div class="c-ds">{row["descricao"]}</div><div class="c-es">{row["tipo"][0]}</div>'
+                        h_hdr += f'<div class="c-vl">{format_moeda(row["valor_plan"])}</div><div class="c-vl">{format_moeda(v_re)}</div><div class="c-st">{st_e}</div>'
+                        h_hdr += f'<div class="c-act">{html_btn}</div>'
+                        h_hdr += '</div>'
 
-                        with c_btn:
-                            if tem_subitens:
-                                icon_btn = "vv" if is_expanded else ">>"
-                                if st.button(icon_btn, key=f"btn_exp_{key_exp}"):
-                                    st.session_state.exp_rows[key_exp] = not is_expanded
-                                    st.rerun()
+                        # Renderiza sub-itens expansíveis
+                        if is_expanded:
+                            # 1. Sub-itens do Cartão de Crédito (LCLs)
+                            if eh_cartao_ccp and not df_lcls_cartao.empty:
+                                for _, lcl in df_lcls_cartao.iterrows():
+                                    desc_lcl = lcl.get('cc_descricao') if 'cc_descricao' in lcl and pd.notna(lcl['cc_descricao']) else lcl['descricao']
+                                    dt_compra = lcl.get('cc_data_compra') if 'cc_data_compra' in lcl and pd.notna(lcl['cc_data_compra']) else lcl['data']
+                                    dt_compra_str = pd.to_datetime(dt_compra).strftime('%d/%m/%Y')
+                                    
+                                    h_hdr += f'<div class="tab-row{classe_cor}" style="font-style: italic; opacity: 0.85; background-color: #f1f5f9;">'
+                                    h_hdr += f'<div class="c-dt"></div><div class="c-ds" style="padding-left:15px;">> {desc_lcl} ({dt_compra_str})</div><div class="c-es">S</div>'
+                                    h_hdr += f'<div class="c-vl">{format_moeda(lcl["valor_plan"])}</div><div class="c-vl">{format_moeda(lcl["valor_real"])}</div><div class="c-st">LCL</div><div class="c-act"></div>'
+                                    h_hdr += f'</div>'
+                            
+                            # 2. Sub-itens de Parciais
+                            if not filhos_parciais.empty:
+                                for _, f in filhos_parciais.iterrows():
+                                    dt_f = pd.to_datetime(f['parcial_data']).strftime('%d/%m/%Y')
+                                    h_hdr += f'<div class="tab-row{classe_cor}" style="font-style: italic; opacity: 0.85; background-color: #f1f5f9;">'
+                                    h_hdr += f'<div class="c-dt"></div><div class="c-ds" style="padding-left:15px;">> Parcial: {dt_f}</div><div class="c-es">{f["tipo"][0]}</div>'
+                                    h_hdr += f'<div class="c-vl">---</div><div class="c-vl">{format_moeda(f["parcial_real"])}</div><div class="c-st">REAL</div><div class="c-act"></div>'
+                                    h_hdr += f'</div>'
+
+                    h_hdr += '</div></div>'
+                    st.markdown(h_hdr, unsafe_allow_html=True)
                 else:
                     st.write("ℹ️ Nenhum lançamento para este mês.")
             
