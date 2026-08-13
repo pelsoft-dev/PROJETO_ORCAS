@@ -5,52 +5,19 @@ from datetime import datetime
 # Importando a ajuda do arquivo dedicado para Lançamentos
 from orcas_v01_ajuda_lancamentos import renderizar_ajuda_lancamentos
 
-# --- MODAL / JANELA VISÃO CARTÃO ---
-@st.dialog("Visão Cartão - Detalhamento das Faturas")
-def abrir_visao_cartao(desc_cartao, df_mes_cartao, format_moeda, data_vencimento=None):
-    dt_venc_str = ""
-    if data_vencimento:
-        try:
-            dt_venc_str = f" — **Vencimento:** {pd.to_datetime(data_vencimento).strftime('%d/%m/%Y')}"
-        except Exception:
-            dt_venc_str = ""
-
-    st.markdown(f"### 💳 {desc_cartao}{dt_venc_str}")
-    
-    # Filtra os lançamentos LCL vinculados a este cartão no mês
-    mask_lcls = (
-        (df_mes_cartao['cc_tipo'].fillna('').astype(str).str.strip().str.upper() == 'LCL') &
-        (df_mes_cartao['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_cartao.upper())
-    )
-    df_lcls = df_mes_cartao[mask_lcls].copy()
-    
-    if not df_lcls.empty:
-        col_data_compra = 'data'
-        if 'cc_data_compra' in df_lcls.columns and df_lcls['cc_data_compra'].notna().any():
-            col_data_compra = 'cc_data_compra'
-        elif 'data_compra' in df_lcls.columns and df_lcls['data_compra'].notna().any():
-            col_data_compra = 'data_compra'
-
-        df_exibir_modal = pd.DataFrame({
-            'Descrição': df_lcls['cc_descricao'] if 'cc_descricao' in df_lcls.columns else df_lcls['descricao'],
-            'Data da Compra': pd.to_datetime(df_lcls[col_data_compra]).dt.strftime('%d/%m/%Y'),
-            'Valor (R$)': df_lcls['valor_plan'].apply(lambda v: format_moeda(v))
-        })
-        st.dataframe(df_exibir_modal, use_container_width=True, hide_index=True)
-        
-        total_fatura = df_lcls['valor_plan'].sum()
-        st.markdown(f"**Total da Fatura:** R$ {format_moeda(total_fatura)}")
-    else:
-        st.info("Nenhum lançamento (LCL) encontrado para este cartão neste mês.")
-
 
 def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db, format_moeda, ir_para_o_topo):
     """
-    Sub-rotina da Tela Lançamentos - Integridade total da lógica de meses e saldos.
+    Sub-rotina da Tela Lançamentos - Integridade total da lógica de meses e saldos,
+    com visualização expansível (>) para Cartões ($CCP/LCL) e Pagamentos Parciais.
     """
 
     if 'msg_sucesso' not in st.session_state: 
         st.session_state.msg_sucesso = False
+
+    # Controle de expansão das linhas (Cartão ou Parciais)
+    if 'exp_rows' not in st.session_state:
+        st.session_state.exp_rows = {}
 
     # --- CABEÇALHO ALINHADO COM BOTÃO DE AJUDA ---
     col_titulo, col_ajuda = st.columns([4, 1])
@@ -174,7 +141,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         .linha-alerta-saida { color: #FF0000 !important; font-weight: bold; }
                         .linha-alerta-entrada { color: #0000FF !important; font-weight: bold; }
 
-                        /* Restauração das cores e estilo dos botões da tabela */
+                        /* Estilo dos botões da tabela */
                         div.stButton > button:not([kind="primary"]) {
                             background-color: #1E3A8A !important;
                             color: #FFFFFF !important;
@@ -192,7 +159,6 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         </style>
                     """, unsafe_allow_html=True)
 
-                    # --- ALTERAÇÃO SOLICITADA AQUI ---
                     eh_ccp_mask = df_mes['cc_tipo'].fillna('').astype(str).str.strip().str.upper().isin(['$CCP', 'CCP'])
 
                     df_exibir = df_mes[
@@ -201,7 +167,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                     ].sort_values('data')
                     
                     # Cabeçalho da tabela
-                    c_hdr_linha, c_hdr_btn = st.columns([4.8, 1.2], vertical_alignment="center")
+                    c_hdr_linha, c_hdr_btn = st.columns([5.2, 0.8], vertical_alignment="center")
                     with c_hdr_linha:
                         h_hdr = '<div class="tab-scroll"><div class="tab-body">'
                         h_hdr += '<div class="tab-row tab-hdr"><div class="c-dt">Data</div><div class="c-ds">Descrição</div><div class="c-es">E/S</div><div class="c-vl">V.Plan</div><div class="c-vl">V.Real</div><div class="c-st">Status</div></div>'
@@ -218,12 +184,14 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         v_re = v_ac if v_ac > 0 else row['valor_real']
                         eh_cartao_ccp = str(row.get('cc_tipo')).strip().upper() in ['$CCP', 'CCP']
 
+                        # Busca LCLs vinculadas (Compras do cartão)
+                        df_lcls_cartao = pd.DataFrame()
                         if eh_cartao_ccp:
-                            soma_lcls = df_mes[
+                            df_lcls_cartao = df_mes[
                                 (df_mes['cc_tipo'].fillna('').astype(str).str.strip().str.upper() == 'LCL') & 
                                 (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_row_upper)
-                            ]['valor_real'].sum()
-                            v_re = soma_lcls
+                            ]
+                            v_re = df_lcls_cartao['valor_real'].sum()
 
                         dt_e = pd.to_datetime(row['data']).strftime('%d/%m/%Y')
                         st_e = 'PLAN' if row['status'] == 'Planejado' else 'REAL'
@@ -235,33 +203,59 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                             elif row['tipo'] == 'Entrada':
                                 classe_cor = " linha-alerta-entrada"
                         
-                        h_row = '<div class="tab-scroll"><div class="tab-body">'
-                        h_row += f'<div class="tab-row{classe_cor}">'
-                        h_row += f'<div class="c-dt">{dt_e}</div><div class="c-ds">{row["descricao"]}</div><div class="c-es">{row["tipo"][0]}</div>'
-                        h_row += f'<div class="c-vl">{format_moeda(row["valor_plan"])}</div><div class="c-vl">{format_moeda(v_re)}</div><div class="c-st">{st_e}</div>'
-                        h_row += f'</div>'
-
-                        filhos = df_mes[
+                        # Identifica lançamentos de baixa parcial (filhos)
+                        filhos_parciais = df_mes[
                             (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_row_upper) & 
                             (df_mes['valor_plan'] == 0) & 
                             (df_mes['parcial_real'] > 0)
                         ]
-                        for _, f in filhos.iterrows():
-                            dt_f = pd.to_datetime(f['parcial_data']).strftime('%d/%m/%Y')
-                            h_row += f'<div class="tab-row{classe_cor}" style="font-style: italic; opacity: 0.8;">'
-                            h_row += f'<div class="c-dt"></div><div class="c-ds" style="padding-left:15px;">> {dt_f}</div><div class="c-es">{f["tipo"][0]}</div>'
-                            h_row += f'<div class="c-vl">---</div><div class="c-vl">{format_moeda(f["parcial_real"])}</div><div class="c-st">REAL</div>'
-                            h_row += f'</div>'
-                    
+
+                        # Verifica se o item tem conteúdo expansível (Cartão com compras LCL ou Item com Parciais)
+                        tem_subitens = (eh_cartao_ccp and not df_lcls_cartao.empty) or (not filhos_parciais.empty)
+                        key_exp = f"exp_{mes_str}_{idx}_{row['id']}"
+                        is_expanded = st.session_state.exp_rows.get(key_exp, False)
+
+                        # Desenha a linha principal
+                        h_row = '<div class="tab-scroll"><div class="tab-body">'
+                        h_row += f'<div class="tab-row{classe_cor}">'
+                        h_row += f'<div class="c-dt">{dt_e}</div><div class="c-ds">{row["descricao"]}</div><div class="c-es">{row["tipo"][0]}</div>'
+                        h_row += f'<div class="c-vl">{format_moeda(row["valor_plan"])}</div><div class="c-vl">{format_moeda(v_re)}</div><div class="c-st">{st_e}</div>'
+                        h_row += '</div>'
+
+                        # Renderiza sub-itens expansíveis se estiver ativo (>)
+                        if is_expanded:
+                            # 1. Sub-itens do Cartão de Crédito (LCLs)
+                            if eh_cartao_ccp and not df_lcls_cartao.empty:
+                                for _, lcl in df_lcls_cartao.iterrows():
+                                    desc_lcl = lcl.get('cc_descricao') if 'cc_descricao' in lcl and pd.notna(lcl['cc_descricao']) else lcl['descricao']
+                                    dt_compra = lcl.get('cc_data_compra') if 'cc_data_compra' in lcl and pd.notna(lcl['cc_data_compra']) else lcl['data']
+                                    dt_compra_str = pd.to_datetime(dt_compra).strftime('%d/%m/%Y')
+                                    
+                                    h_row += f'<div class="tab-row{classe_cor}" style="font-style: italic; opacity: 0.85; background-color: #f1f5f9;">'
+                                    h_row += f'<div class="c-dt"></div><div class="c-ds" style="padding-left:15px;">> {desc_lcl} ({dt_compra_str})</div><div class="c-es">S</div>'
+                                    h_row += f'<div class="c-vl">{format_moeda(lcl["valor_plan"])}</div><div class="c-vl">{format_moeda(lcl["valor_real"])}</div><div class="c-st">LCL</div>'
+                                    h_row += f'</div>'
+                            
+                            # 2. Sub-itens de Parciais
+                            if not filhos_parciais.empty:
+                                for _, f in filhos_parciais.iterrows():
+                                    dt_f = pd.to_datetime(f['parcial_data']).strftime('%d/%m/%Y')
+                                    h_row += f'<div class="tab-row{classe_cor}" style="font-style: italic; opacity: 0.85; background-color: #f1f5f9;">'
+                                    h_row += f'<div class="c-dt"></div><div class="c-ds" style="padding-left:15px;">> Parcial: {dt_f}</div><div class="c-es">{f["tipo"][0]}</div>'
+                                    h_row += f'<div class="c-vl">---</div><div class="c-vl">{format_moeda(f["parcial_real"])}</div><div class="c-st">REAL</div>'
+                                    h_row += f'</div>'
+
                         h_row += '</div></div>'
 
-                        c_linha, c_btn = st.columns([4.8, 1.2], vertical_alignment="center")
+                        c_linha, c_btn = st.columns([5.2, 0.8], vertical_alignment="center")
                         with c_linha:
                             st.markdown(h_row, unsafe_allow_html=True)
                         with c_btn:
-                            if eh_cartao_ccp:
-                                if st.button("Visão Cartão", key=f"btn_vc_{mes_str}_{idx}"):
-                                    abrir_visao_cartao(str(row['descricao']), df_mes, format_moeda, data_vencimento=row['data'])
+                            if tem_subitens:
+                                icon_btn = "v" if is_expanded else ">"
+                                if st.button(icon_btn, key=f"btn_exp_{key_exp}"):
+                                    st.session_state.exp_rows[key_exp] = not is_expanded
+                                    st.rerun()
                 else:
                     st.write("ℹ️ Nenhum lançamento para este mês.")
             
