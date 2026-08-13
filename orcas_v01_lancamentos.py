@@ -9,7 +9,7 @@ from orcas_v01_ajuda_lancamentos import renderizar_ajuda_lancamentos
 def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db, format_moeda, ir_para_o_topo):
     """
     Sub-rotina da Tela Lançamentos.
-    Correção do botão de expansão: Inicia fechado como '>>' e troca para '^^' apenas quando aberto.
+    Correção do botão: Alternância garantida entre '>>' (fechado) e '^^' (aberto).
     """
 
     if 'msg_sucesso' not in st.session_state: 
@@ -121,7 +121,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                 st.divider()
 
                 if not df_mes.empty:
-                    # --- CSS REVISADO: CONTROLE ESTRITO DO BOTÃO >> E ^^ ---
+                    # --- CSS DE ALTERNÂNCIA DIRETA DE ESTADO DO BOTÃO ---
                     st.markdown("""
                         <style>
                         .tab-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin-bottom: 2px; }
@@ -151,7 +151,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                             display: none !important;
                         }
 
-                        /* Container do Botão */
+                        /* Estilização do Botão */
                         .btn-exp-native {
                             background-color: transparent !important;
                             color: #000000 !important;
@@ -172,12 +172,10 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                             border-color: #000000 !important;
                         }
 
-                        /* FORÇA ESTADO INICIAL FECHADO (>>) */
-                        .btn-exp-native::before {
+                        /* REGRA DUAL EXPLÍCITA DE ALTERNÂNCIA */
+                        details:not([open]) .btn-exp-native::before {
                             content: ">>" !important;
                         }
-
-                        /* QUANDO EXPANDIDO/ABERTO TROCA PARA (^^) */
                         details[open] .btn-exp-native::before {
                             content: "^^" !important;
                         }
@@ -254,7 +252,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                             h_hdr += '</div></summary>'
 
                             # Subitens exibidos quando aberto
-                            # 1. Compras no Cartão de Crédito (Status mantido como PLAN)
+                            # 1. Compras no Cartão de Crédito
                             if eh_cartao_ccp and not df_lcls_cartao.empty:
                                 for _, lcl in df_lcls_cartao.iterrows():
                                     desc_lcl = lcl.get('cc_descricao') if 'cc_descricao' in lcl and pd.notna(lcl['cc_descricao']) else lcl['descricao']
