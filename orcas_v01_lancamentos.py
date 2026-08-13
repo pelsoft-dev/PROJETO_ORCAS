@@ -8,25 +8,12 @@ from orcas_v01_ajuda_lancamentos import renderizar_ajuda_lancamentos
 
 def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db, format_moeda, ir_para_o_topo):
     """
-    Sub-rotina da Tela Lançamentos.
-    Botão '>>' / '^^' integrado diretamente no HTML da linha para garantir 
-    distância exata de 1cm do Status e estilo com borda arredondada sem fundo azul.
+    Sub-rotina da Tela Lançamentos - Visual perfeito mantido.
+    Ação de clique ajustada via JS nativo no navegador para evitar perdas de sessão/login.
     """
 
     if 'msg_sucesso' not in st.session_state: 
         st.session_state.msg_sucesso = False
-
-    # Controle de expansão das linhas (Cartão ou Parciais)
-    if 'exp_rows' not in st.session_state:
-        st.session_state.exp_rows = {}
-
-    # Trata cliques disparados pelos botões HTML nativos integrados
-    query_params = st.query_params
-    if "toggle_exp" in query_params:
-        key_clicked = query_params["toggle_exp"]
-        st.session_state.exp_rows[key_clicked] = not st.session_state.exp_rows.get(key_clicked, False)
-        st.query_params.clear()
-        st.rerun()
 
     # --- CABEÇALHO ALINHADO COM BOTÃO DE AJUDA ---
     col_titulo, col_ajuda = st.columns([4, 1])
@@ -134,7 +121,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                 st.divider()
 
                 if not df_mes.empty:
-                    # --- CSS DA TABELA E BOTÃO NATIVO INTEGRADO ---
+                    # --- CSS RESTAURADO PERFEITO COM SCRIPT DE ALTERNÂNCIA LOCAL (JS) ---
                     st.markdown("""
                         <style>
                         .tab-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin-bottom: 2px; }
@@ -147,7 +134,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         .c-vl { width: 90px; font-size: 13px; flex-shrink: 0; text-align: right; }
                         .c-st { width: 55px; font-size: 12px; flex-shrink: 0; text-align: center; font-weight: bold; margin-left: 5px; }
                         
-                        /* Área reservada para o botão exata a 1cm (38px) da coluna Status */
+                        /* Margem de 1cm (38px) à direita do status */
                         .c-act { width: 40px; margin-left: 38px; flex-shrink: 0; display: flex; align-items: center; justify-content: flex-start; }
 
                         .linha-alerta-saida { color: #FF0000 !important; font-weight: bold; }
@@ -168,14 +155,14 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                             display: inline-flex;
                             align-items: center;
                             justify-content: center;
-                            text-decoration: none !important;
+                            user-select: none;
                         }
                         .btn-exp-native:hover {
                             background-color: #e5e7eb !important;
                             border-color: #000000 !important;
                         }
 
-                        /* Mantém os outros botões do Streamlit no padrão original */
+                        /* Outros botões padrão do Streamlit */
                         div.stButton > button:not([kind="primary"]) {
                             background-color: #1E3A8A !important;
                             color: #FFFFFF !important;
@@ -186,6 +173,21 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                             height: 28px !important;
                         }
                         </style>
+
+                        <script>
+                        function toggleExpansor(idTarget, btnEl) {
+                            var el = document.getElementById(idTarget);
+                            if (el) {
+                                if (el.style.display === "none" || el.style.display === "") {
+                                    el.style.display = "block";
+                                    btnEl.innerHTML = "^^";
+                                } else {
+                                    el.style.display = "none";
+                                    btnEl.innerHTML = ">>";
+                                }
+                            }
+                        }
+                        </script>
                     """, unsafe_allow_html=True)
 
                     eh_ccp_mask = df_mes['cc_tipo'].fillna('').astype(str).str.strip().str.upper().isin(['$CCP', 'CCP'])
@@ -195,7 +197,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         (df_mes['cc_tipo'].fillna('').astype(str).str.strip().str.upper() != 'LCL')
                     ].sort_values('data')
                     
-                    # Cabeçalho da tabela
+                    # Cabeçalho
                     h_hdr = '<div class="tab-scroll"><div class="tab-body">'
                     h_hdr += '<div class="tab-row tab-hdr"><div class="c-dt">Data</div><div class="c-ds">Descrição</div><div class="c-es">E/S</div><div class="c-vl">V.Plan</div><div class="c-vl">V.Real</div><div class="c-st">Status</div><div class="c-act"></div></div>'
 
@@ -235,28 +237,25 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                             (df_mes['parcial_real'] > 0)
                         ]
 
-                        # Verifica se o item tem conteúdo expansível
                         tem_subitens = (eh_cartao_ccp and not df_lcls_cartao.empty) or (not filhos_parciais.empty)
-                        key_exp = f"exp_{mes_str}_{idx}_{row['id']}"
-                        is_expanded = st.session_state.exp_rows.get(key_exp, False)
+                        id_sub_container = f"sub_cont_{mes_str}_{idx}_{row['id']}"
 
-                        # Define o ícone: ^^ quando aberto e >> quando fechado
-                        icon_btn = "^^" if is_expanded else "&gt;&gt;"
-
-                        # Botão HTML inserido diretamente dentro do fluxo da linha
+                        # Botão HTML chamando função JS nativa
                         html_btn = ""
                         if tem_subitens:
-                            html_btn = f'<a href="?toggle_exp={key_exp}" target="_self" class="btn-exp-native">{icon_btn}</a>'
+                            html_btn = f'<button class="btn-exp-native" onclick="toggleExpansor(\'{id_sub_container}\', this)">&gt;&gt;</button>'
 
-                        # Monta a linha com a coluna do botão a 38px (1cm) de distância do Status
+                        # Linha principal
                         h_hdr += f'<div class="tab-row{classe_cor}">'
                         h_hdr += f'<div class="c-dt">{dt_e}</div><div class="c-ds">{row["descricao"]}</div><div class="c-es">{row["tipo"][0]}</div>'
                         h_hdr += f'<div class="c-vl">{format_moeda(row["valor_plan"])}</div><div class="c-vl">{format_moeda(v_re)}</div><div class="c-st">{st_e}</div>'
                         h_hdr += f'<div class="c-act">{html_btn}</div>'
                         h_hdr += '</div>'
 
-                        # Renderiza sub-itens expansíveis
-                        if is_expanded:
+                        # Container de sub-itens (inicia oculto: display:none)
+                        if tem_subitens:
+                            h_hdr += f'<div id="{id_sub_container}" style="display:none;">'
+                            
                             # 1. Sub-itens do Cartão de Crédito (LCLs)
                             if eh_cartao_ccp and not df_lcls_cartao.empty:
                                 for _, lcl in df_lcls_cartao.iterrows():
@@ -277,6 +276,8 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                                     h_hdr += f'<div class="c-dt"></div><div class="c-ds" style="padding-left:15px;">> Parcial: {dt_f}</div><div class="c-es">{f["tipo"][0]}</div>'
                                     h_hdr += f'<div class="c-vl">---</div><div class="c-vl">{format_moeda(f["parcial_real"])}</div><div class="c-st">REAL</div><div class="c-act"></div>'
                                     h_hdr += f'</div>'
+
+                            h_hdr += '</div>'
 
                     h_hdr += '</div></div>'
                     st.markdown(h_hdr, unsafe_allow_html=True)
