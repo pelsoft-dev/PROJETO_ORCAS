@@ -79,11 +79,10 @@ def buscar_cartoes_lcp(df):
     opcoes = ["Nenhum"] + cartoes_ccp + ["+ Outro Cartão..."]
     return opcoes
 
-
 def atualizar_valor_plan_cartao(supabase, df, nome_cartao, dt_vencimento, ID_USUARIO_LOGADO):
     """
-    Recalcula o valor_plan do Cartão Pai ($CCP) com base na soma dos LCLs referentes ao mês de vencimento.
-    Busca diretamente no Supabase para garantir a soma das parcelas recém-criadas.
+    Recalcula o valor_plan do Cartão Pai ($CCP) consultando diretamente o Supabase.
+    Soma todas as parcelas (LCL) com vencimento no mês/ano correspondente.
     """
     nome_busca = str(nome_cartao).strip().upper()
     ano_venc = dt_vencimento.year
@@ -93,7 +92,7 @@ def atualizar_valor_plan_cartao(supabase, df, nome_cartao, dt_vencimento, ID_USU
     ultimo_dia_mes = f"{ano_venc:04d}-{mes_venc:02d}-{calendar.monthrange(ano_venc, mes_venc)[1]:02d}"
 
     try:
-        # Busca os lançamentos atualizados no banco de dados para a janela do mês
+        # Busca lançamentos atualizados diretamente do banco de dados
         res = supabase.table("lancamentos") \
             .select("id, descricao, cc_tipo, valor_plan, data_vencimento") \
             .eq("projeto_id", str(st.session_state.projeto_ativo)) \
@@ -106,29 +105,33 @@ def atualizar_valor_plan_cartao(supabase, df, nome_cartao, dt_vencimento, ID_USU
         df_db = pd.DataFrame()
 
     if not df_db.empty:
-        # Busca registro CCP existente
+        # Identifica o Cartão Pai ($CCP) existente no mês
         df_ccp = df_db[
             (df_db['cc_tipo'].fillna('').astype(str).str.strip().str.upper().isin(['$CCP', 'CCP', "'Z $CCP", "Z|$CCP"])) &
             (df_db['descricao'].fillna('').astype(str).str.strip().str.upper() == nome_busca)
         ]
         
-        # Soma todos os LCLs referentes a este cartão no mês
+        # Filtra e soma todas as parcelas (LCL) vinculadas a este cartão no mês
         mask_lcls = (
             (df_db['cc_tipo'].fillna('').astype(str).str.strip().str.upper().str.contains('LCL|\$CCL', regex=True)) &
             (df_db['descricao'].fillna('').astype(str).str.strip().str.upper() == nome_busca)
         )
-        soma_lcls = float(df_db[mask_lcls]['valor_plan'].sum())
+        
+        # Garante a soma do 'valor_plan' dos lançamentos LCL
+        soma_lcls = float(df_db[mask_lcls]['valor_plan'].fillna(0).sum())
     else:
         df_ccp = pd.DataFrame()
         soma_lcls = 0.0
 
     try:
         if not df_ccp.empty:
+            # Atualiza o registro $CCP existente
             id_ccp = df_ccp.iloc[0]['id']
             supabase.table("lancamentos").update({
                 "valor_plan": round(soma_lcls, 2)
             }).eq("id", id_ccp).execute()
         else:
+            # Caso não exista o registro $CCP no mês, cria um novo
             corte, venc = buscar_dados_cartao(df, nome_cartao)
             dia_final = min(venc, calendar.monthrange(ano_venc, mes_venc)[1])
             dt_exata_ccp = datetime(ano_venc, mes_venc, dia_final).date()
@@ -149,7 +152,6 @@ def atualizar_valor_plan_cartao(supabase, df, nome_cartao, dt_vencimento, ID_USU
             }).execute()
     except Exception as e:
         st.error(f"Erro ao atualizar Cartão Pai ($CCP): {e}")
-
 
 def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moeda):
     """
