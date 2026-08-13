@@ -8,8 +8,12 @@ from orcas_v01_ajuda_lancamentos import renderizar_ajuda_lancamentos
 
 def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db, format_moeda, ir_para_o_topo):
     """
-    Sub-rotina da Tela Lançamentos - Visual perfeito mantido.
-    Ação de clique ajustada via JS nativo no navegador para evitar perdas de sessão/login.
+    Sub-rotina da Tela Lançamentos.
+    Expansão controlada via HTML nativo (<details>/<summary>), garantindo:
+    1. Distância exata de 1cm (38px) da coluna Status.
+    2. Visual transparente com borda arredondada (sem fundo azul).
+    3. Alternância entre '>>' (fechado) e '^^' (aberto).
+    4. Expansão instantânea sem reload e sem queda de sessão.
     """
 
     if 'msg_sucesso' not in st.session_state: 
@@ -121,7 +125,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                 st.divider()
 
                 if not df_mes.empty:
-                    # --- CSS RESTAURADO PERFEITO COM SCRIPT DE ALTERNÂNCIA LOCAL (JS) ---
+                    # --- CSS RESTAURADO PERFEITO UTILIZANDO DETAILS/SUMMARY NATIVO ---
                     st.markdown("""
                         <style>
                         .tab-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin-bottom: 2px; }
@@ -134,13 +138,21 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         .c-vl { width: 90px; font-size: 13px; flex-shrink: 0; text-align: right; }
                         .c-st { width: 55px; font-size: 12px; flex-shrink: 0; text-align: center; font-weight: bold; margin-left: 5px; }
                         
-                        /* Margem de 1cm (38px) à direita do status */
+                        /* Margem de 1cm (38px) à direita do Status */
                         .c-act { width: 40px; margin-left: 38px; flex-shrink: 0; display: flex; align-items: center; justify-content: flex-start; }
 
                         .linha-alerta-saida { color: #FF0000 !important; font-weight: bold; }
                         .linha-alerta-entrada { color: #0000FF !important; font-weight: bold; }
 
-                        /* Estilo exato da imagem enviada: borda arredondada, sem fundo azul */
+                        /* Remove a seta predeterminada da tag <details> */
+                        details > summary {
+                            list-style: none;
+                        }
+                        details > summary::-webkit-details-marker {
+                            display: none;
+                        }
+
+                        /* Estilização do botão embutido no <summary> */
                         .btn-exp-native {
                             background-color: transparent !important;
                             color: #000000 !important;
@@ -162,6 +174,14 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                             border-color: #000000 !important;
                         }
 
+                        /* Alterna o texto do botão de >> para ^^ via CSS puramente declarativo */
+                        .btn-exp-native::after {
+                            content: ">>";
+                        }
+                        details[open] .btn-exp-native::after {
+                            content: "^^";
+                        }
+
                         /* Outros botões padrão do Streamlit */
                         div.stButton > button:not([kind="primary"]) {
                             background-color: #1E3A8A !important;
@@ -173,21 +193,6 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                             height: 28px !important;
                         }
                         </style>
-
-                        <script>
-                        function toggleExpansor(idTarget, btnEl) {
-                            var el = document.getElementById(idTarget);
-                            if (el) {
-                                if (el.style.display === "none" || el.style.display === "") {
-                                    el.style.display = "block";
-                                    btnEl.innerHTML = "^^";
-                                } else {
-                                    el.style.display = "none";
-                                    btnEl.innerHTML = ">>";
-                                }
-                            }
-                        }
-                        </script>
                     """, unsafe_allow_html=True)
 
                     eh_ccp_mask = df_mes['cc_tipo'].fillna('').astype(str).str.strip().str.upper().isin(['$CCP', 'CCP'])
@@ -197,7 +202,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         (df_mes['cc_tipo'].fillna('').astype(str).str.strip().str.upper() != 'LCL')
                     ].sort_values('data')
                     
-                    # Cabeçalho
+                    # Cabeçalho da tabela
                     h_hdr = '<div class="tab-scroll"><div class="tab-body">'
                     h_hdr += '<div class="tab-row tab-hdr"><div class="c-dt">Data</div><div class="c-ds">Descrição</div><div class="c-es">E/S</div><div class="c-vl">V.Plan</div><div class="c-vl">V.Real</div><div class="c-st">Status</div><div class="c-act"></div></div>'
 
@@ -238,25 +243,18 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         ]
 
                         tem_subitens = (eh_cartao_ccp and not df_lcls_cartao.empty) or (not filhos_parciais.empty)
-                        id_sub_container = f"sub_cont_{mes_str}_{idx}_{row['id']}"
 
-                        # Botão HTML chamando função JS nativa
-                        html_btn = ""
+                        # Montagem do bloco de linha usando <details> quando há subitens
                         if tem_subitens:
-                            html_btn = f'<button class="btn-exp-native" onclick="toggleExpansor(\'{id_sub_container}\', this)">&gt;&gt;</button>'
+                            h_hdr += f'<details><summary style="outline:none;">'
+                            h_hdr += f'<div class="tab-row{classe_cor}">'
+                            h_hdr += f'<div class="c-dt">{dt_e}</div><div class="c-ds">{row["descricao"]}</div><div class="c-es">{row["tipo"][0]}</div>'
+                            h_hdr += f'<div class="c-vl">{format_moeda(row["valor_plan"])}</div><div class="c-vl">{format_moeda(v_re)}</div><div class="c-st">{st_e}</div>'
+                            h_hdr += f'<div class="c-act"><span class="btn-exp-native"></span></div>'
+                            h_hdr += '</div></summary>'
 
-                        # Linha principal
-                        h_hdr += f'<div class="tab-row{classe_cor}">'
-                        h_hdr += f'<div class="c-dt">{dt_e}</div><div class="c-ds">{row["descricao"]}</div><div class="c-es">{row["tipo"][0]}</div>'
-                        h_hdr += f'<div class="c-vl">{format_moeda(row["valor_plan"])}</div><div class="c-vl">{format_moeda(v_re)}</div><div class="c-st">{st_e}</div>'
-                        h_hdr += f'<div class="c-act">{html_btn}</div>'
-                        h_hdr += '</div>'
-
-                        # Container de sub-itens (inicia oculto: display:none)
-                        if tem_subitens:
-                            h_hdr += f'<div id="{id_sub_container}" style="display:none;">'
-                            
-                            # 1. Sub-itens do Cartão de Crédito (LCLs)
+                            # Subitens exibidos quando aberto
+                            # 1. Cartão de Crédito
                             if eh_cartao_ccp and not df_lcls_cartao.empty:
                                 for _, lcl in df_lcls_cartao.iterrows():
                                     desc_lcl = lcl.get('cc_descricao') if 'cc_descricao' in lcl and pd.notna(lcl['cc_descricao']) else lcl['descricao']
@@ -268,7 +266,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                                     h_hdr += f'<div class="c-vl">{format_moeda(lcl["valor_plan"])}</div><div class="c-vl">{format_moeda(lcl["valor_real"])}</div><div class="c-st">LCL</div><div class="c-act"></div>'
                                     h_hdr += f'</div>'
                             
-                            # 2. Sub-itens de Parciais
+                            # 2. Parciais
                             if not filhos_parciais.empty:
                                 for _, f in filhos_parciais.iterrows():
                                     dt_f = pd.to_datetime(f['parcial_data']).strftime('%d/%m/%Y')
@@ -277,6 +275,13 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                                     h_hdr += f'<div class="c-vl">---</div><div class="c-vl">{format_moeda(f["parcial_real"])}</div><div class="c-st">REAL</div><div class="c-act"></div>'
                                     h_hdr += f'</div>'
 
+                            h_hdr += '</details>'
+                        else:
+                            # Linha normal sem subitens
+                            h_hdr += f'<div class="tab-row{classe_cor}">'
+                            h_hdr += f'<div class="c-dt">{dt_e}</div><div class="c-ds">{row["descricao"]}</div><div class="c-es">{row["tipo"][0]}</div>'
+                            h_hdr += f'<div class="c-vl">{format_moeda(row["valor_plan"])}</div><div class="c-vl">{format_moeda(v_re)}</div><div class="c-st">{st_e}</div>'
+                            h_hdr += f'<div class="c-act"></div>'
                             h_hdr += '</div>'
 
                     h_hdr += '</div></div>'
