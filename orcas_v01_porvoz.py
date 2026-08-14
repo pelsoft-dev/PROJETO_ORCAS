@@ -62,6 +62,93 @@ def limpar_descricao_busca(descricao):
   return " ".join(palavras) if palavras else norma
 
 
+def adicionar_meses(data_origem, meses):
+  """Adiciona N meses a uma data respeitando viradas de ano e limites de dias no mês."""
+  ano = data_origem.year + (data_origem.month + meses - 1) // 12
+  mes = (data_origem.month + meses - 1) % 12 + 1
+  dias_no_mes = [
+      31,
+      29 if ano % 4 == 0 and (ano % 100 != 0 or ano % 400 == 0) else 28,
+      31,
+      30,
+      31,
+      30,
+      31,
+      31,
+      30,
+      31,
+      30,
+      31,
+  ]
+  dia = min(data_origem.day, dias_no_mes[mes - 1])
+  return date(ano, mes, dia)
+
+
+def buscar_info_cartao(supabase, usuario_id, nome_cartao):
+  """Busca configurações do cartão (dia_vencimento, dia_fechamento) no Supabase se existir."""
+  if not nome_cartao:
+    return None
+  try:
+    res = (
+        supabase.table("cartoes")
+        .select("*")
+        .eq("usuario_id", str(usuario_id))
+        .execute()
+    )
+    if res and res.data:
+      cartao_norm = normalizar_texto(nome_cartao)
+      for c in res.data:
+        nome_banco = normalizar_texto(c.get("nome", ""))
+        if nome_banco in cartao_norm or cartao_norm in nome_banco:
+          return c
+  except Exception:
+    pass
+  return None
+
+
+def calcular_datas_parcelas_cartao(
+    data_base_dt, parcelas, info_cartao=None
+):
+  """Calcula as datas das parcelas considerando dia de fechamento e vencimento do cartão."""
+  datas = []
+  dia_vencimento = info_cartao.get("dia_vencimento") if info_cartao else None
+  dia_fechamento = info_cartao.get("dia_fechamento") if info_cartao else None
+
+  for i in range(parcelas):
+    # Se a compra foi feita após/no dia do fechamento, a 1ª parcela vai para a fatura do próximo mês
+    offset_mes = i
+    if dia_fechamento and data_base_dt.day >= int(dia_fechamento):
+      offset_mes += 1
+
+    dt_temp = adicionar_meses(data_base_dt, offset_mes)
+
+    if dia_vencimento:
+      ano = dt_temp.year
+      mes = dt_temp.month
+      dias_no_mes = [
+          31,
+          29 if ano % 4 == 0 and (ano % 100 != 0 or ano % 400 == 0) else 28,
+          31,
+          30,
+          31,
+          30,
+          31,
+          31,
+          30,
+          31,
+          30,
+          31,
+      ]
+      dia_efetivo = min(int(dia_vencimento), dias_no_mes[mes - 1])
+      dt_parcela = date(ano, mes, dia_efetivo)
+    else:
+      dt_parcela = dt_temp
+
+    datas.append(dt_parcela.strftime("%Y-%m-%d"))
+
+  return datas
+
+
 def buscar_planos_do_usuario(supabase, usuario_id):
   """Busca no Supabase todos os planos/projetos vinculados ao usuário."""
   try:
@@ -161,7 +248,7 @@ def processar_texto_groq(
     REGRAS RÍGIDAS DE INTERPRETAÇÃO:
     1. INTENÇÃO:
        - "PROJETAR": Criar/incluir um novo lançamento futuro, agendamento ou conta a pagar/receber (ex: "planejar para dia X", "projetar gasto", "agendar para dia X").
-       - "REALIZAR": Baixar, pagar ou liquidar uma conta existente ou lançamento do dia.
+       - "REALIZAR": Baixar, pagar ou liquidar uma conta existente, compra realizada no cartão ou lançamento do dia.
        - "PARCIAL": Quando for um gasto do dia a dia (ex: Supermercado, Combustível, Farmácia, Restaurante) que abate/entra como lançamento parcial de uma projeção orçada.
        - "ALTERAR": Modificar valor, nome, descrição ou data de uma conta existente.
        - "EXCLUIR": APENAS quando o usuário usar termos explícitos como "deletar", "excluir", "apagar", "remover".
@@ -170,21 +257,28 @@ def processar_texto_groq(
     2. PERMITE PARCIAIS E RECORRÊNCIA TEMPORAL (permite_parcial):
        - Identifique se o usuário mencionou permitir parciais (ex: "permita parciais", "permita parcial", "aceita parcial", "com parcial"). Se sim, defina permite_parcial = true.
        - Se o usuário disse "em todos os meses do meu plano" ou "em todos os meses", defina recorrencia_tipo = "TODOS".
-       - Se o usuário especificou um intervalo de meses (ex: "de agosto até dezembro de 2026", "de maio a outubro"), defina recorrencia_tipo = "PERIODO", e preencha mes_inicio e mes_fim no formato YYYY-MM-01 (ex: "2026-08-01" e "2026-12-01").
+       - Se o usuário especificou um intervalo de meses (ex: "de agosto até dezembro de 2026", "de maio a outubro"), defina recorrencia_tipo = "PERIODO", e preencha mes_inicio e mes_fim no formato YYYY-MM-01.
        - Quando permite_parcial for true, a data base do lançamento DEVE ser o dia 01 do mês correspondente (ex: YYYY-MM-01).
 
-    3. DATA DE VENCIMENTO OU DA OCORRÊNCIA (data_vencimento):
-       - PRIORIDADE MÁXIMA: Se o usuário mencionou uma data específica (ex: "dia 20 de agosto de 2026", "20/08/2026", "na data 30/07/2026", "no dia 15 de maio"), você DEVE obrigatoriamente converter e atribuir essa data no formato YYYY-MM-DD. NUNCA substitua pela data de hoje nem por datas passadas se o usuário citou uma data explícita.
+    3. CARTÃO DE CRÉDITO E PARCELAMENTO:
+       - Se o usuário mencionou uso de cartão (ex: "com o cartão xxxxxxxx", "no cartão Nubank", "paguei com cartão"), preencha o campo "cartao" com o nome/número do cartão identificado.
+       - Se mencionou parcelas (ex: "em 3x", "em 5 parcelas", "em 6x sem juros"), preencha o campo "parcelas" com o número inteiro correspondente. Caso contrário, defina "parcelas" = 1.
+       - Se for um gasto no cartão em estabelecimento que aceita parcial (ex: "gastei X no mercado e paguei com o cartão Y em 3x"), defina a intencao como "PARCIAL".
+       - Se for compra não planejada parcelada (ex: "acabei de comprar um sapato por X no cartão Y em 5 parcelas"), defina a intencao como "REALIZAR".
+       - Se for pagamento de conta/curso planejado no cartão (ex: "paguei meu curso de inglês com cartão Y em 6x"), defina a intencao como "REALIZAR".
+
+    4. DATA DE VENCIMENTO OU DA OCORRÊNCIA (data_vencimento):
+       - PRIORIDADE MÁXIMA: Se o usuário mencionou uma data específica (ex: "dia 20 de agosto de 2026", "20/08/2026"), você DEVE obrigatoriamente converter essa data no formato YYYY-MM-DD.
        - Se o usuário solicitar "permita parciais", garanta que a data seja dia 01 do mês citado ou do mês atual (ex: YYYY-MM-01).
        - Se o usuário disse "amanhã", atribua OBRIGATORIAMENTE a data: "{amanha_dt.strftime('%Y-%m-%d')}".
        - Se o usuário disse "hoje" ou "na data de hoje", atribua OBRIGATORIAMENTE a data: "{hoje_dt.strftime('%Y-%m-%d')}".
        - Se o usuário disse "ontem", atribua OBRIGATORIAMENTE a data: "{ontem_dt.strftime('%Y-%m-%d')}".
-       - Se nenhuma data foi mencionada para inclusão/projeção/realização, use a data de HOJE: "{hoje_dt.strftime('%Y-%m-%d')}".
+       - Se nenhuma data foi mencionada, use a data de HOJE: "{hoje_dt.strftime('%Y-%m-%d')}".
 
-    4. MÊS DE REFERÊNCIA (mes_referencia):
+    5. MÊS DE REFERÊNCIA (mes_referencia):
        - Se o usuário mencionou um mês específico (ex: "em julho", "de setembro"), retorne o mês numérico (1 a 12). Caso contrário, retorne o mês da data_vencimento identificada.
 
-    5. DESCRIÇÃO:
+    6. DESCRIÇÃO:
        - Extraia apenas o identificador/nome da conta ou serviço.
        - Remova termos genéricos iniciais como "conta", "lançamento", "boleto", "fatura".
 
@@ -202,7 +296,9 @@ def processar_texto_groq(
       "permite_parcial": boolean,
       "recorrencia_tipo": "TODOS" | "PERIODO" | null,
       "mes_inicio": "YYYY-MM-01" | null,
-      "mes_fim": "YYYY-MM-01" | null
+      "mes_fim": "YYYY-MM-01" | null,
+      "cartao": string_ou_null,
+      "parcelas": int
     }}
     """
 
@@ -227,7 +323,7 @@ def buscar_planejamento_existente(
     valor_filtro=None,
     data_venc_filtro=None,
 ):
-  """Busca lançamentos no Supabase com suporte a busca flexível e filtro por valor/data exatos para evitar exclusões/alterações erradas."""
+  """Busca lançamentos no Supabase com suporte a busca flexível e filtro por valor/data exatos."""
   if not descricao or len(descricao.strip()) < 2:
     return None
 
@@ -286,7 +382,6 @@ def buscar_planejamento_existente(
       d_banco_limpo = limpar_descricao_busca(item.get("descricao", ""))
       palavras_banco = [p for p in d_banco_limpo.split() if len(p) >= 2]
 
-      # Match exato ou interseção de palavras
       if (
           desc_norm == d_banco
           or desc_limpa == d_banco_limpo
@@ -348,12 +443,24 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
   intencao = dados.get("intencao")
   projeto_id = str(dados.get("projeto_id"))
   descricao = dados.get("descricao")
-  valor = float(dados.get("valor") or 0.0)
+  valor_total = float(dados.get("valor") or 0.0)
   
   # AJUSTE DE FUSO HORÁRIO BRASÍLIA
   data_hoje = obter_hoje_brasil().strftime("%Y-%m-%d")
   data_venc = dados.get("data_vencimento") or data_hoje
   permite_parcial = bool(dados.get("permite_parcial", False))
+
+  cartao = dados.get("cartao")
+  parcelas = int(dados.get("parcelas") or 1)
+  if parcelas < 1:
+    parcelas = 1
+
+  valor_parcela = round(valor_total / parcelas, 2) if parcelas > 1 else valor_total
+
+  # Obter informações do cartão de crédito se informado
+  info_cartao = buscar_info_cartao(supabase, usuario_id, cartao) if cartao else None
+  dt_compra_obj = datetime.strptime(data_venc, "%Y-%m-%d").date()
+  datas_parcelas = calcular_datas_parcelas_cartao(dt_compra_obj, parcelas, info_cartao)
 
   tipo_fluxo = dados.get("tipo", "Saída")
   if tipo_fluxo not in ["Entrada", "Saída"]:
@@ -378,12 +485,13 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
       nova_desc = dados.get("nova_descricao") or descricao
       payload_alterar = {
           "descricao": nova_desc,
-          "valor_plan": valor,
+          "valor_plan": valor_total,
           "data_vencimento": data_venc,
           "data": data_venc,
           "tipo": tipo_fluxo,
           "projeto_id": projeto_id,
           "permite_parcial": permite_parcial,
+          "cartao": cartao,
       }
       supabase.table("lancamentos").update(payload_alterar).eq(
           "id", id_existente
@@ -397,76 +505,171 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
 
   # AÇÃO: PARCIAL
   if intencao == "PARCIAL":
-    try:
-      dt_obj = datetime.strptime(data_venc, "%Y-%m-%d")
-      data_primeiro_dia = dt_obj.replace(day=1).strftime("%Y-%m-%d")
-    except Exception:
-      data_primeiro_dia = obter_hoje_brasil().replace(day=1).strftime("%Y-%m-%d")
+    payloads_parciais = []
+    for i in range(parcelas):
+      dt_p = datas_parcelas[i]
+      try:
+        dt_obj = datetime.strptime(dt_p, "%Y-%m-%d")
+        data_primeiro_dia = dt_obj.replace(day=1).strftime("%Y-%m-%d")
+      except Exception:
+        data_primeiro_dia = obter_hoje_brasil().replace(day=1).strftime("%Y-%m-%d")
 
-    payload_parcial = {
-        "projeto_id": projeto_id,
-        "usuario_id": str(usuario_id),
-        "descricao": descricao,
-        "data": data_primeiro_dia,
-        "data_vencimento": data_primeiro_dia,
-        "tipo": tipo_fluxo,
-        "valor_plan": 0,
-        "valor_real": 0,
-        "parcial_real": valor,
-        "parcial_data": data_venc,
-        "status": "Realizado",
-        "permite_parcial": False,
-    }
-    supabase.table("lancamentos").insert(payload_parcial).execute()
+      desc_final = f"{descricao} ({i+1}/{parcelas})" if parcelas > 1 else descricao
 
-    dt_efetiva_fmt = datetime.strptime(data_venc, "%Y-%m-%d").strftime(
-        "%d/%m/%Y"
-    )
-    return (
-        f"✅ Lançamento parcial de **{formatar_moeda_br(valor)}** registrado em"
-        f" **{descricao}** para o dia **{dt_efetiva_fmt}**!"
-    )
+      payloads_parciais.append({
+          "projeto_id": projeto_id,
+          "usuario_id": str(usuario_id),
+          "descricao": desc_final,
+          "data": data_primeiro_dia,
+          "data_vencimento": data_primeiro_dia,
+          "tipo": tipo_fluxo,
+          "valor_plan": 0,
+          "valor_real": 0,
+          "parcial_real": valor_parcela,
+          "parcial_data": dt_p,
+          "status": "Realizado",
+          "permite_parcial": False,
+          "cartao": cartao,
+      })
+
+    supabase.table("lancamentos").insert(payloads_parciais).execute()
+
+    str_cartao = f" no cartão **{cartao}**" if cartao else ""
+    if parcelas > 1:
+      return (
+          f"✅ Lançamento parcial em **{parcelas}x** de **{formatar_moeda_br(valor_parcela)}**"
+          f" (Total: {formatar_moeda_br(valor_total)}) registrado em **{descricao}**{str_cartao}!"
+      )
+    else:
+      dt_efetiva_fmt = datetime.strptime(data_venc, "%Y-%m-%d").strftime("%d/%m/%Y")
+      return (
+          f"✅ Lançamento parcial de **{formatar_moeda_br(valor_total)}** registrado em"
+          f" **{descricao}** para o dia **{dt_efetiva_fmt}**{str_cartao}!"
+      )
 
   # AÇÃO: REALIZAR / CONSULTAR
   if intencao in ["REALIZAR", "CONSULTAR"]:
-    if id_existente:
+    if id_existente and parcelas == 1:
       payload_update = {
-          "valor_real": valor,
+          "valor_real": valor_total,
           "status": "Realizado",
           "data_vencimento": data_venc,
+          "cartao": cartao,
       }
       supabase.table("lancamentos").update(payload_update).eq(
           "id", id_existente
       ).execute()
       return (
           f"✅ Lançamento **{descricao}** baixado como **Realizado** no valor"
-          f" de {formatar_moeda_br(valor)}!"
+          f" de {formatar_moeda_br(valor_total)}!"
       )
     else:
-      payload_direto = {
-          "projeto_id": projeto_id,
-          "usuario_id": str(usuario_id),
-          "descricao": descricao,
-          "data": data_venc,
-          "data_vencimento": data_venc,
-          "tipo": tipo_fluxo,
-          "valor_plan": 0,
-          "valor_real": valor,
-          "status": "Realizado",
-          "parcial_real": 0,
-          "permite_parcial": False,
-      }
-      supabase.table("lancamentos").insert(payload_direto).execute()
-      return (
-          f"✅ Lançamento **{descricao}** ({formatar_moeda_br(valor)})"
-          " registrado e baixado com sucesso!"
-      )
+      # Se houver id_existente e parcelas > 1, dá baixa na 1ª parcela da conta cadastrada
+      if id_existente:
+        desc_1a = f"{descricao} (1/{parcelas})"
+        payload_update = {
+            "descricao": desc_1a,
+            "valor_real": valor_parcela,
+            "status": "Realizado",
+            "data_vencimento": datas_parcelas[0],
+            "cartao": cartao,
+        }
+        supabase.table("lancamentos").update(payload_update).eq(
+            "id", id_existente
+        ).execute()
+
+        # Insere as parcelas restantes (2 a N)
+        payloads_restantes = []
+        for i in range(1, parcelas):
+          dt_p = datas_parcelas[i]
+          payloads_restantes.append({
+              "projeto_id": projeto_id,
+              "usuario_id": str(usuario_id),
+              "descricao": f"{descricao} ({i+1}/{parcelas})",
+              "data": dt_p,
+              "data_vencimento": dt_p,
+              "tipo": tipo_fluxo,
+              "valor_plan": 0,
+              "valor_real": valor_parcela,
+              "status": "Realizado",
+              "parcial_real": 0,
+              "permite_parcial": False,
+              "cartao": cartao,
+          })
+        if payloads_restantes:
+          supabase.table("lancamentos").insert(payloads_restantes).execute()
+
+        str_cartao = f" no cartão **{cartao}**" if cartao else ""
+        return (
+            f"✅ Lançamento **{descricao}** baixado e parcelado em **{parcelas}x** de"
+            f" **{formatar_moeda_br(valor_parcela)}**{str_cartao}!"
+        )
+
+      else:
+        # Lançamento direto / não planejado (ex: sapato no cartão em 5x)
+        payloads_diretos = []
+        for i in range(parcelas):
+          dt_p = datas_parcelas[i]
+          desc_f = f"{descricao} ({i+1}/{parcelas})" if parcelas > 1 else descricao
+          payloads_diretos.append({
+              "projeto_id": projeto_id,
+              "usuario_id": str(usuario_id),
+              "descricao": desc_f,
+              "data": dt_p,
+              "data_vencimento": dt_p,
+              "tipo": tipo_fluxo,
+              "valor_plan": 0,
+              "valor_real": valor_parcela,
+              "status": "Realizado",
+              "parcial_real": 0,
+              "permite_parcial": False,
+              "cartao": cartao,
+          })
+
+        supabase.table("lancamentos").insert(payloads_diretos).execute()
+
+        str_cartao = f" no cartão **{cartao}**" if cartao else ""
+        if parcelas > 1:
+          return (
+              f"✅ Compra **{descricao}** ({formatar_moeda_br(valor_total)}) registrada e parcelada em"
+              f" **{parcelas}x** de **{formatar_moeda_br(valor_parcela)}**{str_cartao}!"
+          )
+        else:
+          return (
+              f"✅ Lançamento **{descricao}** ({formatar_moeda_br(valor_total)})"
+              f" registrado e baixado com sucesso{str_cartao}!"
+          )
 
   # AÇÃO: PROJETAR
   elif intencao == "PROJETAR":
     recorrencia_tipo = dados.get("recorrencia_tipo")
     mes_inicio_str = dados.get("mes_inicio")
     mes_fim_str = dados.get("mes_fim")
+
+    if parcelas > 1:
+      payloads = []
+      for i in range(parcelas):
+        dt_p = datas_parcelas[i]
+        payloads.append({
+            "projeto_id": projeto_id,
+            "usuario_id": str(usuario_id),
+            "descricao": f"{descricao} ({i+1}/{parcelas})",
+            "data": dt_p,
+            "data_vencimento": dt_p,
+            "tipo": tipo_fluxo,
+            "valor_plan": valor_parcela,
+            "valor_real": 0,
+            "status": "Planejado",
+            "parcial_real": 0,
+            "permite_parcial": False,
+            "cartao": cartao,
+        })
+      supabase.table("lancamentos").insert(payloads).execute()
+      str_cartao = f" no cartão **{cartao}**" if cartao else ""
+      return (
+          f"✅ Lançamento **{descricao}** projetado em **{parcelas}x** de"
+          f" **{formatar_moeda_br(valor_parcela)}** (Total: {formatar_moeda_br(valor_total)}){str_cartao}!"
+      )
 
     datas_para_inserir = []
 
@@ -510,11 +713,12 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
           "data": dt_ins,
           "data_vencimento": dt_ins,
           "tipo": tipo_fluxo,
-          "valor_plan": valor,
+          "valor_plan": valor_total,
           "valor_real": 0,
           "status": "Planejado",
           "parcial_real": 0,
           "permite_parcial": permite_parcial,
+          "cartao": cartao,
       })
 
     supabase.table("lancamentos").insert(payloads).execute()
@@ -522,7 +726,7 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
     qtd = len(payloads)
     if qtd > 1:
       return (
-          f"✅ {qtd} lançamentos de **{descricao}** ({formatar_moeda_br(valor)})"
+          f"✅ {qtd} lançamentos de **{descricao}** ({formatar_moeda_br(valor_total)})"
           " projetados com sucesso (Permite Parciais)!"
       )
 
@@ -531,7 +735,7 @@ def executar_acao_no_supabase(supabase, usuario_id, dados):
     ).strftime("%d/%m/%Y")
     info_parcial = " (Permite Parciais)" if permite_parcial else ""
     return (
-        f"✅ Lançamento **{descricao}** ({formatar_moeda_br(valor)}) com"
+        f"✅ Lançamento **{descricao}** ({formatar_moeda_br(valor_total)}) com"
         f" vencimento para **{dt_venc_fmt}**{info_parcial} projetado com"
         " sucesso!"
     )
@@ -634,6 +838,8 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
               )
 
             valor_falado = float(dados.get("valor") or 0.0)
+            cartao_falado = dados.get("cartao")
+            parcelas_faladas = int(dados.get("parcelas") or 1)
 
             if item_existente:
               dados["id_existente"] = item_existente.get("id")
@@ -668,11 +874,18 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
                 dt_venc_fmt = datetime.strptime(
                     dados["data_vencimento"], "%Y-%m-%d"
                 ).strftime("%d/%m/%Y")
+
+                str_cartao = f" no cartão **{cartao_falado}**" if cartao_falado else ""
+                str_parc = (
+                    f" em **{parcelas_faladas}x** de **{formatar_moeda_br(valor_falado / parcelas_faladas)}** (Total: {formatar_moeda_br(valor_falado)})"
+                    if parcelas_faladas > 1
+                    else f" de **{formatar_moeda_br(valor_falado)}**"
+                )
+
                 dados["mensagem_orcas"] = (
                     f"Identifiquei a conta orçada **{desc_cadastrada}**"
-                    " (Permite Parcial).\n\nConfirmar o lançamento parcial"
-                    f" de **{formatar_moeda_br(valor_falado)}** na data"
-                    f" **{dt_venc_fmt}**?"
+                    f" (Permite Parcial).\n\nConfirmar o lançamento parcial"
+                    f"{str_parc}{str_cartao} na data **{dt_venc_fmt}**?"
                 )
 
               elif intencao == "EXCLUIR":
@@ -714,11 +927,18 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
                     dados["data_vencimento"], "%Y-%m-%d"
                 ).strftime("%d/%m/%Y")
 
+                str_cartao = f" no cartão **{cartao_falado}**" if cartao_falado else ""
+                str_parc = (
+                    f" em **{parcelas_faladas}x** de **{formatar_moeda_br(valor_final / parcelas_faladas)}**"
+                    if parcelas_faladas > 1
+                    else ""
+                )
+
                 dados["mensagem_orcas"] = (
                     f"Encontrei a conta **{desc_cadastrada}** com o valor"
                     f" planejado de **{formatar_moeda_br(valor_planejado)}**"
                     f" (Vencimento: **{dt_venc_fmt}**).\n\nEsta é a conta a"
-                    " que você se refere e confirma a baixa?"
+                    f" que você se refere e confirma a baixa{str_parc}{str_cartao}?"
                 )
 
             else:
@@ -731,6 +951,13 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
               dt_venc_fmt = datetime.strptime(
                   dados["data_vencimento"], "%Y-%m-%d"
               ).strftime("%d/%m/%Y")
+
+              str_cartao = f" no cartão **{cartao_falado}**" if cartao_falado else ""
+              str_parc = (
+                  f" em **{parcelas_faladas}x** de **{formatar_moeda_br(valor_falado / parcelas_faladas)}**"
+                  if parcelas_faladas > 1
+                  else ""
+              )
 
               if intencao == "EXCLUIR":
                 dados["mensagem_orcas"] = (
@@ -750,7 +977,7 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
                 )
                 dados["mensagem_orcas"] = (
                     f"Deseja incluir o lançamento **{dados.get('descricao')}**"
-                    f" no valor de **{formatar_moeda_br(valor_falado)}** com"
+                    f" no valor de **{formatar_moeda_br(valor_falado)}**{str_parc}{str_cartao} com"
                     f" vencimento para **{dt_venc_fmt}**{str_parcial}?"
                 )
               elif valor_falado > 0.0:
@@ -758,7 +985,7 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
                     "Não encontrei um planejamento pendente para"
                     f" **{dados.get('descricao')}**. Deseja realizar um novo"
                     " lançamento direto no valor de"
-                    f" **{formatar_moeda_br(valor_falado)}**?"
+                    f" **{formatar_moeda_br(valor_falado)}**{str_parc}{str_cartao}?"
                 )
               else:
                 dados["mensagem_orcas"] = (
@@ -813,6 +1040,10 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
           )
           nova_descricao = st.text_input("Descrição", value=desc_inicial)
 
+          novo_cartao = st.text_input(
+              "Cartão de Crédito", value=dados.get("cartao") or ""
+          )
+
         with col_2:
           tipo_opcoes = ["Saída", "Entrada"]
           idx_tipo = 0 if dados.get("tipo", "Saída") == "Saída" else 1
@@ -820,7 +1051,7 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
 
           valor_inicial = float(dados.get("valor") or 0.0)
           novo_valor = st.number_input(
-              "Valor (R$)", value=valor_inicial, step=5.0, format="%.2f"
+              "Valor Total (R$)", value=valor_inicial, step=5.0, format="%.2f"
           )
 
           try:
@@ -834,6 +1065,14 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
               "Data de Vencimento / Ocorrência",
               value=dt_val,
               format="DD/MM/YYYY",
+          )
+
+          novas_parcelas = st.number_input(
+              "Parcelas",
+              value=int(dados.get("parcelas") or 1),
+              min_value=1,
+              max_value=72,
+              step=1,
           )
 
         novo_permite_parcial = st.checkbox(
@@ -877,6 +1116,8 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
             "mes_inicio": dados.get("mes_inicio"),
             "mes_fim": dados.get("mes_fim"),
             "id_existente": dados.get("id_existente"),
+            "cartao": novo_cartao.strip() if novo_cartao and novo_cartao.strip() else None,
+            "parcelas": novas_parcelas,
         }
         try:
           msg_sucesso = executar_acao_no_supabase(
