@@ -7,15 +7,12 @@ import zoneinfo
 from groq import Groq
 import streamlit as st
 
-# IMPORTANTE: Importa o motor central de conciliação para evitar duplicação de regras
-# Importe aqui as funções reais do seu modulo_conciliacao.py
 try:
     from modulo_conciliacao import (
         buscar_planejamento_conciliacao,
         processar_baixa_ou_lancamento_conciliacao,
     )
 except ImportError:
-    # Stubs/Fallback caso as funções estejam no mesmo arquivo ou módulo diferente
     pass
 
 LIMITES_USO = {"PADRÃO": 30, "INTERMEDIÁRIO": 100, "ILIMITADO": 999999}
@@ -81,9 +78,9 @@ def processar_texto_groq(
     Planos DISPONÍVEIS: {planos_disponiveis}
     ÁUDIO: "{texto_transcrito}"
 
-    REGRAS DE CLASSIFICAÇÃO:
-    - Verbos no passado ("comprei", "paguei", "fiz"): intencao = "REALIZAR"
-    - Verbos ou ideias futuras ("vou comprar", "agendar", "projetar"): intencao = "PROJETAR"
+    REGRAS STRICTAS DE INTENÇÃO E TEMPO VERBAL:
+    - Verbos no passado ("comprei", "paguei", "fiz", "gastei"): intencao = "REALIZAR"
+    - Verbos no futuro / planejamento ("vou comprar", "agendar", "projetar", "orçar"): intencao = "PROJETAR"
     - Se citar cartão ou bandeira ("visa", "master", "cartão", "itau"): preencher "cartao"
     - Se citar parcelas ("em 3x", "parcelado em 5 vezes"): preencher "parcelas" (int)
 
@@ -155,8 +152,6 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
                     client_groq, texto, planos_disponiveis, plano_ativo
                 )
 
-                # USA O MOTOR DE BUSCA DA CONCILIAÇÃO
-                # O motor da conciliação procura a conta pendente no banco
                 item_existente = None
                 if 'buscar_planejamento_conciliacao' in globals():
                     item_existente = buscar_planejamento_conciliacao(
@@ -190,10 +185,10 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
             with st.form("form_confirmacao_orcas"):
                 nova_descricao = st.text_input("Descrição", value=dados.get("descricao", ""))
                 novo_valor = st.number_input("Valor (R$)", value=float(dados.get("valor") or 0.0))
-                nova_intencao = st.selectbox(
-                    "Ação", ["REALIZAR", "PROJETAR", "PARCIAL", "ALTERAR", "EXCLUIR"],
-                    index=0 if dados.get("intencao") == "REALIZAR" else 1
-                )
+                
+                ops_intencao = ["REALIZAR", "PROJETAR", "PARCIAL", "ALTERAR", "EXCLUIR"]
+                idx_int = ops_intencao.index(dados.get("intencao", "REALIZAR")) if dados.get("intencao") in ops_intencao else 0
+                nova_intencao = st.selectbox("Ação", ops_intencao, index=idx_int)
 
                 submit_salvar = st.form_submit_button("✅ Processar na Conciliação", type="primary")
 
@@ -202,7 +197,6 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
                 dados["valor"] = novo_valor
                 dados["intencao"] = nova_intencao
 
-                # REPASSA O COMANDO FINAL INTEGRALMENTE PARA O MOTOR DA CONCILIAÇÃO
                 try:
                     if 'processar_baixa_ou_lancamento_conciliacao' in globals():
                         msg_sucesso = processar_baixa_ou_lancamento_conciliacao(
@@ -210,11 +204,22 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
                         )
                         st.success(msg_sucesso)
                     else:
-                        # Redireciona o payload diretamente para a Session State da Conciliação
+                        st.session_state["porvoz_descricao"] = dados.get("descricao")
+                        st.session_state["porvoz_valor"] = f"{float(dados.get('valor') or 0.0):,.2f}".replace(".", ",")
+                        st.session_state["porvoz_tipo"] = dados.get("tipo", "Saída")
+                        st.session_state["porvoz_cartao"] = dados.get("cartao")
+                        st.session_state["porvoz_parcelas"] = dados.get("parcelas", 0)
+                        st.session_state["porvoz_intencao"] = nova_intencao
                         st.session_state["payload_conciliacao_pendente"] = dados
-                        st.success("✅ Dados enviados com sucesso para o Módulo de Conciliação!")
+                        
+                        if nova_intencao == "REALIZAR":
+                            st.session_state["porvoz_acao"] = "executar_realizar_direto"
+                        else:
+                            st.session_state["porvoz_acao"] = "sem_planejamento"
 
-                    time.sleep(1.0)
+                        st.success("✅ Comando processado! Redirecionando...")
+
+                    time.sleep(0.8)
                     fechar_modal_voz()
                     st.rerun()
                 except Exception as e:
