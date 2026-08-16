@@ -78,9 +78,9 @@ def processar_texto_groq(
     Planos DISPONÍVEIS: {planos_disponiveis}
     ÁUDIO: "{texto_transcrito}"
 
-    REGRAS STRICTAS DE INTENÇÃO E TEMPO VERBAL:
-    - Verbos no passado ("comprei", "paguei", "fiz", "gastei"): intencao = "REALIZAR"
-    - Verbos no futuro / planejamento ("vou comprar", "agendar", "projetar", "orçar"): intencao = "PROJETAR"
+    REGRAS DE CLASSIFICAÇÃO:
+    - Verbos no passado ("comprei", "paguei", "fiz"): intencao = "REALIZAR"
+    - Verbos ou ideias futuras ("vou comprar", "agendar", "projetar"): intencao = "PROJETAR"
     - Se citar cartão ou bandeira ("visa", "master", "cartão", "itau"): preencher "cartao"
     - Se citar parcelas ("em 3x", "parcelado em 5 vezes"): preencher "parcelas" (int)
 
@@ -185,10 +185,10 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
             with st.form("form_confirmacao_orcas"):
                 nova_descricao = st.text_input("Descrição", value=dados.get("descricao", ""))
                 novo_valor = st.number_input("Valor (R$)", value=float(dados.get("valor") or 0.0))
-                
-                ops_intencao = ["REALIZAR", "PROJETAR", "PARCIAL", "ALTERAR", "EXCLUIR"]
-                idx_int = ops_intencao.index(dados.get("intencao", "REALIZAR")) if dados.get("intencao") in ops_intencao else 0
-                nova_intencao = st.selectbox("Ação", ops_intencao, index=idx_int)
+                nova_intencao = st.selectbox(
+                    "Ação", ["REALIZAR", "PROJETAR", "PARCIAL", "ALTERAR", "EXCLUIR"],
+                    index=0 if dados.get("intencao") == "REALIZAR" else 1
+                )
 
                 submit_salvar = st.form_submit_button("✅ Processar na Conciliação", type="primary")
 
@@ -207,19 +207,11 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
                         st.session_state["porvoz_descricao"] = dados.get("descricao")
                         st.session_state["porvoz_valor"] = f"{float(dados.get('valor') or 0.0):,.2f}".replace(".", ",")
                         st.session_state["porvoz_tipo"] = dados.get("tipo", "Saída")
-                        st.session_state["porvoz_cartao"] = dados.get("cartao")
-                        st.session_state["porvoz_parcelas"] = dados.get("parcelas", 0)
-                        st.session_state["porvoz_intencao"] = nova_intencao
+                        st.session_state["porvoz_acao"] = "sem_planejamento"
                         st.session_state["payload_conciliacao_pendente"] = dados
-                        
-                        if nova_intencao == "REALIZAR":
-                            st.session_state["porvoz_acao"] = "executar_realizar_direto"
-                        else:
-                            st.session_state["porvoz_acao"] = "sem_planejamento"
+                        st.success("✅ Dados enviados com sucesso para a Conciliação!")
 
-                        st.success("✅ Comando processado! Redirecionando...")
-
-                    time.sleep(0.8)
+                    time.sleep(0.5)
                     fechar_modal_voz()
                     st.rerun()
                 except Exception as e:
