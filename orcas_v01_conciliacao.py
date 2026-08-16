@@ -15,7 +15,7 @@ def buscar_dados_cartao(supabase, df, nome_cartao):
     # 1. Tenta buscar no DataFrame local
     if not df.empty and 'cc_tipo' in df.columns:
         df_ccp = df[
-            (df['cc_tipo'].fillna('').astype(str).str.strip().str.upper().isin(['$CCP', 'CCP', "'Z $CCP", "Z|$CCP"])) & 
+            (df['cc_tipo'].fillna('').astype(str).str.strip().str.upper().isin(['$CCP', 'CCP', "'Z $CCP", "Z|$CCP"])) &
             (df['descricao'].fillna('').astype(str).str.strip().str.upper() == nome_busca)
         ]
         if not df_ccp.empty:
@@ -169,10 +169,16 @@ def atualizar_valor_plan_cartao(supabase, df, nome_cartao, dt_vencimento, ID_USU
     except Exception as e:
         st.error(f"Erro ao atualizar Cartão Pai ($CCP): {e}")
 
-def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moeda):
+def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moeda, **kwargs):
     """
     Sub-rotina da Tela Conciliação - Regras estritas de LOU, LPR e LCL com cartões $CCP.
+    Suporte nativo para atalhos do porvoz via session_state.
     """
+    # Se o módulo porvoz sinalizar para abrir o lançamento sem planejamento[cite: 1]
+    if st.session_state.get('porvoz_acao') == 'sem_planejamento':
+        st.session_state.abrir_sem_plan = True
+        st.session_state['porvoz_acao'] = None
+
     st.markdown("""
         <style>
         div[data-testid="stColumn"] div.stButton > button {
@@ -246,9 +252,15 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
     # --- ÁREA: LANÇAR SEM PLANEJAMENTO ---
     if st.session_state.abrir_sem_plan:
         cols_sp = st.columns([1.8, 0.8, 1.0, 1.3, 0.6, 0.5], vertical_alignment="center")
-        sp_desc = cols_sp[0].text_input("Descrição", key=f"sp_desc_{reset_key}", placeholder="Ex: Combustível")
-        sp_tipo = cols_sp[1].selectbox("E/S", ["Saída", "Entrada"], key=f"sp_tipo_{reset_key}")
-        sp_valor = cols_sp[2].text_input("Valor Real", key=f"sp_valor_{reset_key}", value="0,00")
+        
+        # Leitura e consumo de pré-preenchimento por voz (se houver)
+        voz_desc = st.session_state.pop('porvoz_descricao', '')
+        voz_valor = st.session_state.pop('porvoz_valor', '0,00')
+        voz_tipo = st.session_state.pop('porvoz_tipo', 'Saída')
+
+        sp_desc = cols_sp[0].text_input("Descrição", key=f"sp_desc_{reset_key}", value=voz_desc, placeholder="Ex: Combustível")
+        sp_tipo = cols_sp[1].selectbox("E/S", ["Saída", "Entrada"], index=0 if voz_tipo == "Saída" else 1, key=f"sp_tipo_{reset_key}")
+        sp_valor = cols_sp[2].text_input("Valor Real", key=f"sp_valor_{reset_key}", value=voz_valor)
         
         sp_cartao_sel = cols_sp[3].selectbox("Cartão", lista_cartoes_ccp, key=f"sp_cartao_sel_{reset_key}")
         sp_parc = cols_sp[4].number_input("Parc.", min_value=0, max_value=12, value=0, step=1, key=f"sp_parc_{reset_key}")
@@ -281,10 +293,10 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                         "data": hoje_c.strftime('%Y-%m-%d'),
                         "data_vencimento": hoje_c.strftime('%Y-%m-%d'),
                         "tipo": sp_tipo,
-                        "valor_plan": 0.0, 
+                        "valor_plan": 0.0,
                         "valor_real": v_real_lancamento,
-                        "status": status_lancamento, 
-                        "parcial_real": 0.0, 
+                        "status": status_lancamento,
+                        "parcial_real": 0.0,
                         "permite_parcial": False,
                         "cc_tipo": "LCL" if is_cc else None,
                         "cc_qtd_parcelas": qtd_p
@@ -341,11 +353,11 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
             df_f = df_base_tela[(df_base_tela['dt_obj'] >= ini_mes_c) & (df_base_tela['dt_obj'] <= fim_mes_c)].copy()
         else:
             df_f = df_base_tela[
-                (df_base_tela['dt_obj'] >= ini_mes_c) & 
-                (df_base_tela['dt_obj'] <= hoje_c) & 
+                (df_base_tela['dt_obj'] >= ini_mes_c) &
+                (df_base_tela['dt_obj'] <= hoje_c) &
                 (
-                    (df_base_tela['status'].isin(['Planejado', 'PLAN'])) | 
-                    ((df_base_tela['status'].isin(['Realizado', 'REAL'])) & (df_base_tela['dt_obj'] >= limite_c)) | 
+                    (df_base_tela['status'].isin(['Planejado', 'PLAN'])) |
+                    ((df_base_tela['status'].isin(['Realizado', 'REAL'])) & (df_base_tela['dt_obj'] >= limite_c)) |
                     ((df_base_tela['valor_plan'] == 0) & (df_base_tela['valor_real'] > 0))
                 )
             ].copy()
@@ -380,8 +392,8 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
             valor_exibicao_real = row['valor_real']
             if str(row.get('cc_tipo')).strip().upper() in ['$CCP', 'CCP', "'Z $CCP", "Z|$CCP"]:
                 soma_lcls = df[
-                    (df['cc_tipo'].fillna('').astype(str).str.strip().str.upper().str.contains('LCL|\$CCL', regex=True)) & 
-                    (df['descricao'].fillna('').astype(str).str.strip().str.upper() == str(row['descricao']).strip().upper()) & 
+                    (df['cc_tipo'].fillna('').astype(str).str.strip().str.upper().str.contains('LCL|\$CCL', regex=True)) &
+                    (df['descricao'].fillna('').astype(str).str.strip().str.upper() == str(row['descricao']).strip().upper()) &
                     (pd.to_datetime(df['data_vencimento']).dt.month == row['dt_obj'].month) &
                     (pd.to_datetime(df['data_vencimento']).dt.year == row['dt_obj'].year)
                 ]['valor_real'].sum()
@@ -392,7 +404,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                 c4.markdown(f"<span style='color:{cor_txt}'>{format_moeda(v_acumulado_desc)}</span>", unsafe_allow_html=True)
                 
                 v_key = f"v_p_{row['id']}"
-                if v_key not in st.session_state: 
+                if v_key not in st.session_state:
                     st.session_state[v_key] = 0
                 
                 v_parc_in = c5.text_input("", key=f"p_{row['id']}_{reset_key}_{st.session_state[v_key]}", value="0,00", label_visibility="collapsed")
@@ -414,16 +426,16 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                         try:
                             supabase.table("lancamentos").insert({
                                 "projeto_id": str(st.session_state.projeto_ativo),
-                                "usuario_id": str(ID_USUARIO_LOGADO), 
-                                "descricao": row['descricao'], 
-                                "data": ini_mes_c.strftime('%Y-%m-%d'), 
-                                "data_vencimento": ini_mes_c.strftime('%Y-%m-%d'), 
+                                "usuario_id": str(ID_USUARIO_LOGADO),
+                                "descricao": row['descricao'],
+                                "data": ini_mes_c.strftime('%Y-%m-%d'),
+                                "data_vencimento": ini_mes_c.strftime('%Y-%m-%d'),
                                 "tipo": row['tipo'],
-                                "valor_plan": 0.0, 
-                                "valor_real": 0.0 if is_cc else float(v_dig), 
+                                "valor_plan": 0.0,
+                                "valor_real": 0.0 if is_cc else float(v_dig),
                                 "status": "Planejado" if is_cc else "Realizado",
-                                "parcial_real": float(v_dig), 
-                                "parcial_data": hoje_c.strftime('%Y-%m-%d'), 
+                                "parcial_real": float(v_dig),
+                                "parcial_data": hoje_c.strftime('%Y-%m-%d'),
                                 "permite_parcial": False,
                                 "cc_tipo": "LCL" if is_cc else None,
                                 "cc_qtd_parcelas": qtd_p
@@ -485,7 +497,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
 
                     if c8.button("Ok", key=f"btn_n_{row['id']}", use_container_width=True):
                         v_para_gravar = parse_moeda(v_norm_in)
-                        if v_para_gravar == 0: 
+                        if v_para_gravar == 0:
                             v_para_gravar = row['valor_plan']
                         
                         nome_cartao_final = cc_norm_outro_nome.strip() if cc_norm_sel == "+ Outro Cartão..." else cc_norm_sel
@@ -499,7 +511,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                             status_update = "Planejado" if is_cc else "Realizado"
 
                             supabase.table("lancamentos").update({
-                                "valor_real": v_update_real, 
+                                "valor_real": v_update_real,
                                 "status": status_update,
                                 "cc_tipo": "LCL" if is_cc else None,
                                 "cc_qtd_parcelas": qtd_p
