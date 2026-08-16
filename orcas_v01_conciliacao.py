@@ -174,7 +174,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
     Sub-rotina da Tela Conciliação - Regras estritas de LOU, LPR e LCL com cartões $CCP.
     Suporte nativo para atalhos do porvoz via session_state.
     """
-    # Se o módulo porvoz sinalizar para abrir o lançamento sem planejamento[cite: 1]
+    # Integração porvoz x conciliação: ativação do painel sem planejamento
     if st.session_state.get('porvoz_acao') == 'sem_planejamento':
         st.session_state.abrir_sem_plan = True
         st.session_state['porvoz_acao'] = None
@@ -253,10 +253,18 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
     if st.session_state.abrir_sem_plan:
         cols_sp = st.columns([1.8, 0.8, 1.0, 1.3, 0.6, 0.5], vertical_alignment="center")
         
-        # Leitura e consumo de pré-preenchimento por voz (se houver)
-        voz_desc = st.session_state.pop('porvoz_descricao', '')
-        voz_valor = st.session_state.pop('porvoz_valor', '0,00')
-        voz_tipo = st.session_state.pop('porvoz_tipo', 'Saída')
+        # Leitura dos dados trazidos pelo porvoz
+        voz_desc = st.session_state.get('porvoz_descricao', '')
+        voz_valor = st.session_state.get('porvoz_valor', '0,00')
+        voz_tipo = st.session_state.get('porvoz_tipo', 'Saída')
+
+        # Limpa as variáveis de voz no session_state após carregar para não persistir em acessos manuais futuros
+        if 'porvoz_descricao' in st.session_state:
+            del st.session_state['porvoz_descricao']
+        if 'porvoz_valor' in st.session_state:
+            del st.session_state['porvoz_valor']
+        if 'porvoz_tipo' in st.session_state:
+            del st.session_state['porvoz_tipo']
 
         sp_desc = cols_sp[0].text_input("Descrição", key=f"sp_desc_{reset_key}", value=voz_desc, placeholder="Ex: Combustível")
         sp_tipo = cols_sp[1].selectbox("E/S", ["Saída", "Entrada"], index=0 if voz_tipo == "Saída" else 1, key=f"sp_tipo_{reset_key}")
@@ -282,7 +290,7 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                 qtd_p = int(sp_parc) if is_cc else 0
 
                 try:
-                    # Se for Cartão de Crédito, a compra original fica com valor_real = 0 para NÃO duplicar a saída no mês atual!
+                    # Se for Cartão de Crédito, a compra original fica com valor_real = 0 para NÃO duplicar a saída no mês atual
                     v_real_lancamento = 0.0 if is_cc else float(v_sp)
                     status_lancamento = "Planejado" if is_cc else "Realizado"
 
@@ -505,8 +513,6 @@ def exibir_conciliacao(df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moed
                         qtd_p = int(qtd_norm_in) if is_cc else 0
 
                         try:
-                            # Se for cartão de crédito, o lançamento original fica com valor_real = 0 e status "Planejado"
-                            # assim o gasto não entra como saída no mês atual e vai 100% para a fatura do cartão
                             v_update_real = 0.0 if is_cc else float(v_para_gravar)
                             status_update = "Planejado" if is_cc else "Realizado"
 
