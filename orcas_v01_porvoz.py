@@ -76,27 +76,24 @@ import re
 def processar_texto_groq(
     client_groq, texto_transcrito, planos_disponiveis, plano_ativo
 ):
+  """Processa a transcrição do comando de voz e retorna a estrutura JSON esperada."""
   hoje = obter_hoje_brasil()
 
   prompt = f"""
-    Você é o assistente financeiro inteligente do sistema ORCAS.
-    Sua tarefa é interpretar o comando de áudio do usuário e retornar EXCLUSIVAMENTE um objeto JSON válido (sem textos explicativos antes ou depois).
+    Você é o assistente financeiro do sistema ORCAS.
+    Interprete o áudio e retorne APENAS um JSON válido.
 
-    CONTEXTO DE HOJE:
-    - Data Atual: {hoje.strftime('%Y-%m-%d')} ({hoje.strftime('%A')})
-    - Projeto/Plano Ativo: "{plano_ativo}"
-    - Projetos Disponíveis: {planos_disponiveis}
+    HOJE: {hoje.strftime('%Y-%m-%d')} ({hoje.strftime('%A')}).
+    PLANO ATIVO: "{plano_ativo}".
+    PLANOS DISPONÍVEIS: {planos_disponiveis}.
+    ÁUDIO: "{texto_transcrito}"
 
-    COMANDO DE ÁUDIO DO USUÁRIO:
-    "{texto_transcrito}"
-
-    REGRAS DE ESTRUTURAÇÃO DO JSON:
-    Retorne estritamente a seguinte estrutura JSON:
+    Formato exato de resposta (JSON puro):
     {{
       "transcricao": "{texto_transcrito}",
       "intencao": "PROJETAR" | "REALIZAR" | "PARCIAL" | "ALTERAR" | "EXCLUIR",
       "projeto_id": "{plano_ativo}",
-      "descricao": "nome simples e limpo do gasto/conta",
+      "descricao": "nome da conta ou gasto",
       "valor": 0.00,
       "tipo": "Saída" | "Entrada",
       "data_vencimento": "YYYY-MM-DD",
@@ -106,16 +103,35 @@ def processar_texto_groq(
     }}
     """
 
-  # Chamada compatível com qualquer chave e modelo ativo na Groq
-  res = client_groq.chat.completions.create(
-      model="llama-3.3-70b-versatile",
-      messages=[{"role": "user", "content": prompt}],
-      temperature=0.1,
-  )
+  # Nomes ativos e oficiais mantidos pela Groq Cloud
+  modelos_disponiveis = [
+      "llama-3.3-70b-specdec",
+      "llama3-70b-8192",
+      "mixtral-8x7b-32768",
+  ]
 
-  conteudo_raw = res.choices[0].message.content.strip()
+  conteudo_raw = None
 
-  # Limpa delimitadores de bloco markdown ```json ... ``` caso a IA adicione
+  for mod in modelos_disponiveis:
+    try:
+      res = client_groq.chat.completions.create(
+          model=mod,
+          messages=[{"role": "user", "content": prompt}],
+          temperature=0.1,
+      )
+      conteudo_raw = res.choices[0].message.content.strip()
+      if conteudo_raw:
+        break
+    except Exception:
+      continue
+
+  if not conteudo_raw:
+    raise Exception(
+        "Não foi possível obter resposta de nenhum dos modelos Groq"
+        " configurados."
+    )
+
+  # Limpeza de formatação markdown ```json ... ``` se presente
   conteudo_limpo = re.sub(r"^```json\s*", "", conteudo_raw, flags=re.IGNORECASE)
   conteudo_limpo = re.sub(r"^```\s*", "", conteudo_limpo)
   conteudo_limpo = re.sub(r"\s*```$", "", conteudo_limpo).strip()
