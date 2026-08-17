@@ -69,7 +69,10 @@ def transcrever_audio_groq(client_groq, audio_bytes):
       response_format="text",
   ).strip()
 
+# ANTES:
+# model="llama-3.3-70b-versatile",
 
+# DEPOIS (Substitua por um modelo ativo):
 def processar_texto_groq(
     client_groq, texto_transcrito, planos_disponiveis, plano_ativo
 ):
@@ -95,13 +98,12 @@ def processar_texto_groq(
     }}
   """
   res = client_groq.chat.completions.create(
-      model="llama-3.3-70b-versatile",
+      model="llama-3.1-70b-versatile",  # <--- ALTERE AQUI (ou use "llama3-70b-8192")
       messages=[{"role": "user", "content": prompt}],
       temperature=0.1,
       response_format={"type": "json_object"},
   )
   return json.loads(res.choices[0].message.content.strip())
-
 
 def buscar_lancamento_no_banco(supabase, usuario_id, projeto_id, descricao):
   """Busca lançamento similar usando ilike diretamente no banco."""
