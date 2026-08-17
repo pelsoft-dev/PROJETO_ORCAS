@@ -99,8 +99,9 @@ def processar_texto_groq(
     }}
     """
 
+    # Ajustado modelo estável da Groq (evita o erro 404 da imagem)
     response = client_groq.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+        model="llama3-70b-8192",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.1,
         response_format={"type": "json_object"},
@@ -113,6 +114,7 @@ def fechar_modal_voz():
     st.session_state.dados_interpretados = None
     st.session_state.hash_ultimo_audio = None
     st.session_state.audio_key_id = st.session_state.get("audio_key_id", 0) + 1
+    # DESATIVA A FLAG PARA NÃO CONTINUAR REABRINDO NAS OUTRAS TELAS
     st.session_state.abrir_modal_voz = False
 
 
@@ -125,6 +127,7 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
 
     if not groq_key:
         st.error("❌ GROQ_API_KEY não configurada.")
+        fechar_modal_voz()
         return
 
     client_groq = Groq(api_key=groq_key.strip())
@@ -138,6 +141,9 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
         pode_usar, uso_atual, limite_max = verificar_limite_uso(supabase, id_usuario)
         if not pode_usar:
             st.error(f"⚠️ Limite mensal de voz atingido ({uso_atual}/{limite_max}).")
+            if st.button("Fechar"):
+                fechar_modal_voz()
+                st.rerun()
             return
 
         key_audio = f"audio_input_{st.session_state.get('audio_key_id', 0)}"
@@ -146,34 +152,37 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
         if audio_input is not None:
             audio_bytes = audio_input.getvalue()
             with st.spinner("🤖 Interpretando voz para a conciliação..."):
-                incrementar_uso_voz(supabase, id_usuario, uso_atual)
-                texto = transcrever_audio_groq(client_groq, audio_bytes)
-                dados = processar_texto_groq(
-                    client_groq, texto, planos_disponiveis, plano_ativo
-                )
-
-                item_existente = None
-                if 'buscar_planejamento_conciliacao' in globals():
-                    item_existente = buscar_planejamento_conciliacao(
-                        supabase, id_usuario, dados
+                try:
+                    incrementar_uso_voz(supabase, id_usuario, uso_atual)
+                    texto = transcrever_audio_groq(client_groq, audio_bytes)
+                    dados = processar_texto_groq(
+                        client_groq, texto, planos_disponiveis, plano_ativo
                     )
 
-                if item_existente:
-                    dados["id_existente"] = item_existente.get("id")
-                    dados["mensagem_orcas"] = (
-                        f"Localizei a conta **{item_existente.get('descricao')}** orçada "
-                        f"no valor de R$ {item_existente.get('valor_plan'):,.2f}. Confirmar a baixa pela conciliação?"
-                    )
-                else:
-                    dados["id_existente"] = None
-                    dados["mensagem_orcas"] = (
-                        f"Não encontrei conta orçada pendente para **{dados.get('descricao')}**. "
-                        f"Deseja realizar o lançamento direto via conciliação?"
-                    )
+                    item_existente = None
+                    if 'buscar_planejamento_conciliacao' in globals():
+                        item_existente = buscar_planejamento_conciliacao(
+                            supabase, id_usuario, dados
+                        )
 
-                st.session_state.dados_interpretados = dados
-                st.session_state.etapa_voz = "confirmacao"
-                st.rerun()
+                    if item_existente:
+                        dados["id_existente"] = item_existente.get("id")
+                        dados["mensagem_orcas"] = (
+                            f"Localizei a conta **{item_existente.get('descricao')}** orçada "
+                            f"no valor de R$ {item_existente.get('valor_plan'):,.2f}. Confirmar a baixa pela conciliação?"
+                        )
+                    else:
+                        dados["id_existente"] = None
+                        dados["mensagem_orcas"] = (
+                            f"Não encontrei conta orçada pendente para **{dados.get('descricao')}**. "
+                            f"Deseja realizar o lançamento direto via conciliação?"
+                        )
+
+                    st.session_state.dados_interpretados = dados
+                    st.session_state.etapa_voz = "confirmacao"
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Erro no processamento da voz: {e}")
 
     elif st.session_state.etapa_voz == "confirmacao":
         dados = st.session_state.dados_interpretados or {}
