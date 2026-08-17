@@ -70,30 +70,30 @@ def transcrever_audio_groq(client_groq, audio_bytes):
   ).strip()
 
 import json
-import re
 
 
 def processar_texto_groq(
     client_groq, texto_transcrito, planos_disponiveis, plano_ativo
 ):
-  """Processa a transcrição do comando de voz e retorna a estrutura JSON esperada."""
   hoje = obter_hoje_brasil()
 
+  # A Groq exige explicitamente a instrução em formato JSON
   prompt = f"""
-    Você é o assistente financeiro do sistema ORCAS.
-    Interprete o áudio e retorne APENAS um JSON válido.
+    Você é o assistente inteligente do ORCAS. 
+    Sua tarefa é extrair os dados do áudio e responder EXCLUSIVAMENTE em formato JSON.
 
-    HOJE: {hoje.strftime('%Y-%m-%d')} ({hoje.strftime('%A')}).
-    PLANO ATIVO: "{plano_ativo}".
-    PLANOS DISPONÍVEIS: {planos_disponiveis}.
-    ÁUDIO: "{texto_transcrito}"
+    CONTEXTO:
+    - Data Atual: {hoje.strftime('%Y-%m-%d')} ({hoje.strftime('%A')})
+    - Projeto Ativo: "{plano_ativo}"
+    - Projetos Disponíveis: {planos_disponiveis}
+    - Áudio do Usuário: "{texto_transcrito}"
 
-    Formato exato de resposta (JSON puro):
+    Estrutura do JSON esperada:
     {{
       "transcricao": "{texto_transcrito}",
       "intencao": "PROJETAR" | "REALIZAR" | "PARCIAL" | "ALTERAR" | "EXCLUIR",
       "projeto_id": "{plano_ativo}",
-      "descricao": "nome da conta ou gasto",
+      "descricao": "string",
       "valor": 0.00,
       "tipo": "Saída" | "Entrada",
       "data_vencimento": "YYYY-MM-DD",
@@ -103,40 +103,14 @@ def processar_texto_groq(
     }}
     """
 
-  # Nomes ativos e oficiais mantidos pela Groq Cloud
-  modelos_disponiveis = [
-      "llama-3.3-70b-specdec",
-      "llama3-70b-8192",
-      "mixtral-8x7b-32768",
-  ]
+  res = client_groq.chat.completions.create(
+      model="llama-3.3-70b-versatile",
+      messages=[{"role": "user", "content": prompt}],
+      temperature=0.1,
+      response_format={"type": "json_object"},
+  )
 
-  conteudo_raw = None
-
-  for mod in modelos_disponiveis:
-    try:
-      res = client_groq.chat.completions.create(
-          model=mod,
-          messages=[{"role": "user", "content": prompt}],
-          temperature=0.1,
-      )
-      conteudo_raw = res.choices[0].message.content.strip()
-      if conteudo_raw:
-        break
-    except Exception:
-      continue
-
-  if not conteudo_raw:
-    raise Exception(
-        "Não foi possível obter resposta de nenhum dos modelos Groq"
-        " configurados."
-    )
-
-  # Limpeza de formatação markdown ```json ... ``` se presente
-  conteudo_limpo = re.sub(r"^```json\s*", "", conteudo_raw, flags=re.IGNORECASE)
-  conteudo_limpo = re.sub(r"^```\s*", "", conteudo_limpo)
-  conteudo_limpo = re.sub(r"\s*```$", "", conteudo_limpo).strip()
-
-  return json.loads(conteudo_limpo)
+  return json.loads(res.choices[0].message.content.strip())
 
 def buscar_lancamento_no_banco(supabase, usuario_id, projeto_id, descricao):
   """Busca lançamento similar usando ilike diretamente no banco."""
