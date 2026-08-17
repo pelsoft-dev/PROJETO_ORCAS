@@ -73,29 +73,37 @@ def processar_texto_groq(
     client_groq, texto_transcrito, planos_disponiveis, plano_ativo
 ):
   hoje = obter_hoje_brasil()
-  prompt = f"""
-    Você é o assistente inteligente do ORCAS.
-    HOJE: {hoje.strftime('%Y-%m-%d')} ({hoje.strftime('%A')}).
-    PLANO ATIVO: "{plano_ativo}". PLANOS: {planos_disponiveis}.
-    ÁUDIO: "{texto_transcrito}"
 
-    Retorne APENAS um JSON válido:
+  system_prompt = (
+      "Você é o assistente inteligente do ORCAS. Responda ESTRITAMENTE com"
+      " um JSON válido."
+  )
+  user_prompt = f"""
+    HOJE: {hoje.strftime('%Y-%m-%d')} ({hoje.strftime('%A')}).
+    PLANO ATIVO: "{plano_ativo}". PLANOS DISPONÍVEIS: {planos_disponiveis}.
+    ÁUDIO DO USUÁRIO: "{texto_transcrito}"
+
+    Retorne APENAS um JSON no seguinte formato:
     {{
       "transcricao": "{texto_transcrito}",
       "intencao": "PROJETAR" | "REALIZAR" | "PARCIAL" | "ALTERAR" | "EXCLUIR",
       "projeto_id": "{plano_ativo}",
-      "descricao": "nome da conta/gasto",
-      "valor": float_ou_0,
+      "descricao": "nome da conta ou gasto",
+      "valor": 0.00,
       "tipo": "Saída" | "Entrada",
       "data_vencimento": "YYYY-MM-DD",
-      "permite_parcial": boolean,
-      "cartao": string_ou_null,
-      "parcelas": int_mínimo_1
+      "permite_parcial": false,
+      "cartao": null,
+      "parcelas": 1
     }}
-  """
+    """
+
   res = client_groq.chat.completions.create(
-      model="llama-3.3-70b-specdec",  # <--- MODELO ATIVO DA GROQ
-      messages=[{"role": "user", "content": prompt}],
+      model="llama-3.1-8b-instant",  # Modelo ativo, ultra-rápido e sem risco de depreciação
+      messages=[
+          {"role": "system", "content": system_prompt},
+          {"role": "user", "content": user_prompt},
+      ],
       temperature=0.1,
       response_format={"type": "json_object"},
   )
