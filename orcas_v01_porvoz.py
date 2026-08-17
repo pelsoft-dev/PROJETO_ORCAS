@@ -69,26 +69,34 @@ def transcrever_audio_groq(client_groq, audio_bytes):
       response_format="text",
   ).strip()
 
+import json
+import re
+
+
 def processar_texto_groq(
     client_groq, texto_transcrito, planos_disponiveis, plano_ativo
 ):
   hoje = obter_hoje_brasil()
 
-  system_prompt = (
-      "Você é o assistente inteligente do ORCAS. Responda ESTRITAMENTE com"
-      " um JSON válido."
-  )
-  user_prompt = f"""
-    HOJE: {hoje.strftime('%Y-%m-%d')} ({hoje.strftime('%A')}).
-    PLANO ATIVO: "{plano_ativo}". PLANOS DISPONÍVEIS: {planos_disponiveis}.
-    ÁUDIO DO USUÁRIO: "{texto_transcrito}"
+  prompt = f"""
+    Você é o assistente financeiro inteligente do sistema ORCAS.
+    Sua tarefa é interpretar o comando de áudio do usuário e retornar EXCLUSIVAMENTE um objeto JSON válido (sem textos explicativos antes ou depois).
 
-    Retorne APENAS um JSON no seguinte formato:
+    CONTEXTO DE HOJE:
+    - Data Atual: {hoje.strftime('%Y-%m-%d')} ({hoje.strftime('%A')})
+    - Projeto/Plano Ativo: "{plano_ativo}"
+    - Projetos Disponíveis: {planos_disponiveis}
+
+    COMANDO DE ÁUDIO DO USUÁRIO:
+    "{texto_transcrito}"
+
+    REGRAS DE ESTRUTURAÇÃO DO JSON:
+    Retorne estritamente a seguinte estrutura JSON:
     {{
       "transcricao": "{texto_transcrito}",
       "intencao": "PROJETAR" | "REALIZAR" | "PARCIAL" | "ALTERAR" | "EXCLUIR",
       "projeto_id": "{plano_ativo}",
-      "descricao": "nome da conta ou gasto",
+      "descricao": "nome simples e limpo do gasto/conta",
       "valor": 0.00,
       "tipo": "Saída" | "Entrada",
       "data_vencimento": "YYYY-MM-DD",
@@ -98,16 +106,21 @@ def processar_texto_groq(
     }}
     """
 
+  # Chamada compatível com qualquer chave e modelo ativo na Groq
   res = client_groq.chat.completions.create(
-      model="llama-3.1-8b-instant",  # Modelo ativo, ultra-rápido e sem risco de depreciação
-      messages=[
-          {"role": "system", "content": system_prompt},
-          {"role": "user", "content": user_prompt},
-      ],
+      model="llama-3.3-70b-versatile",
+      messages=[{"role": "user", "content": prompt}],
       temperature=0.1,
-      response_format={"type": "json_object"},
   )
-  return json.loads(res.choices[0].message.content.strip())
+
+  conteudo_raw = res.choices[0].message.content.strip()
+
+  # Limpa delimitadores de bloco markdown ```json ... ``` caso a IA adicione
+  conteudo_limpo = re.sub(r"^```json\s*", "", conteudo_raw, flags=re.IGNORECASE)
+  conteudo_limpo = re.sub(r"^```\s*", "", conteudo_limpo)
+  conteudo_limpo = re.sub(r"\s*```$", "", conteudo_limpo).strip()
+
+  return json.loads(conteudo_limpo)
 
 def buscar_lancamento_no_banco(supabase, usuario_id, projeto_id, descricao):
   """Busca lançamento similar usando ilike diretamente no banco."""
