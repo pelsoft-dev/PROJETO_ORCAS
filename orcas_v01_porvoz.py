@@ -1,392 +1,1102 @@
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 import json
+import re
 import time
+import unicodedata
 import zoneinfo
 from groq import Groq
-import pandas as pd
 import streamlit as st
 
-# Importa as engines centrais do módulo de conciliação
-from orcas_v01_conciliacao import (
-    atualizar_valor_plan_cartao,
-    buscar_dados_cartao,
-    calcular_vencimento_fatura,
-    somar_meses_data,
-)
+# Limites mensais de uso do recurso por voz
+LIMITES_USO = {
+    "PADRÃO": 30,
+    "INTERMEDIÁRIO": 100,
+    "ILIMITADO": 999999,
+}
 
-LIMITES_USO = {"PADRÃO": 30, "INTERMEDIÁRIO": 100, "ILIMITADO": 999999}
+# Palavras de preenchimento a serem ignoradas na busca de lançamentos
+STOPWORDS_FINANCEIRAS = {
+    "CONTA",
+    "CONTAS",
+    "LANCAMENTO",
+    "LANCAMENTOS",
+    "BOLETO",
+    "BOLETOS",
+    "FATURA",
+    "FATURAS",
+    "PAGAMENTO",
+    "PAGAMENTOS",
+    "PARCELA",
+    "PARCELAS",
+    "DE",
+    "DO",
+    "DA",
+    "DOS",
+    "DAS",
+    "E",
+    "A",
+    "O",
+}
 
 
 def obter_hoje_brasil():
-  """Garante que a data de HOJE respeite o fuso horário de Brasília."""
-  return datetime.now(zoneinfo.ZoneInfo("America/Sao_Paulo")).date()
+  """Garante que a data de HOJE respeite sempre o fuso horário de Brasília (GMT-3)."""
+  fuso_br = zoneinfo.ZoneInfo("America/Sao_Paulo")
+  return datetime.now(fuso_br).date()
 
 
-def formatar_moeda_br(valor):
-  try:
-    return (
-        f"R$ {float(valor or 0.0):,.2f}".replace(",", "X")
-        .replace(".", ",")
-        .replace("X", ".")
-    )
-  except Exception:
-    return "R$ 0,00"
+def normalizar_texto(texto):
+  """Remove acentos, pontos, traços e converte para maiúsculo para comparação precisa."""
+  if not texto:
+    return ""
+  nfkd = unicodedata.normalize("NFKD", str(texto))
+  texto_sem_acento = "".join([c for c in nfkd if not unicodedata.combining(c)])
+  texto_limpo = re.sub(r"[^a-zA-Z0-9\s]", " ", texto_sem_acento)
+  return " ".join(texto_limpo.split()).upper()
 
 
-def verificar_limite_uso(supabase, usuario_id):
+def limpar_descricao_busca(descricao):
+  """Remove palavras como 'conta', 'lançamento', 'fatura' para facilitar o match no banco."""
+  norma = normalizar_texto(descricao)
+  palavras = [p for p in norma.split() if p not in STOPWORDS_FINANCEIRAS]
+  return " ".join(palavras) if palavras else norma
+
+
+def adicionar_meses(data_origem, meses):
+  """Adiciona N meses a uma data respeitando viradas de ano e limites de dias no mês."""
+  ano = data_origem.year + (data_origem.month + meses - 1) // 12
+  mes = (data_origem.month + meses - 1) % 12 + 1
+  dias_no_mes = [
+      31,
+      29 if ano % 4 == 0 and (ano % 100 != 0 or ano % 400 == 0) else 28,
+      31,
+      30,
+      31,
+      30,
+      31,
+      31,
+      30,
+      31,
+      30,
+      31,
+  ]
+  dia = min(data_origem.day, dias_no_mes[mes - 1])
+  return date(ano, mes, dia)
+
+
+def buscar_cartoes_do_usuario(supabase, usuario_id, projeto_id):
+  """Busca as faturas de cartão de crédito ($CCP) cadastradas no plano."""
   try:
     res = (
-        supabase.table("usuarios")
-        .select("plano_ia, uso_voz_mes")
-        .eq("id", str(usuario_id))
+        supabase.table("lancamentos")
+        .select("descricao, cc_dia_corte, data_vencimento")
+        .eq("usuario_id", str(usuario_id))
+        .eq("projeto_id", str(projeto_id))
+        .eq("cc_tipo", "Z$CCP")
         .execute()
     )
     if res and res.data:
-      dados = res.data[0]
-      plano = str(dados.get("plano_ia") or "PADRAO").upper()
-      uso = int(dados.get("uso_voz_mes") or 0)
-      limite = LIMITES_USO.get(plano, 30)
-      return uso < limite, uso, limite
+      cartoes_dict = {}
+      for item in res.data:
+        nome_cartao = item.get("descricao")
+        if nome_cartao and nome_cartao not in cartoes_dict:
+          cartoes_dict[nome_cartao] = {
+              "dia_corte": int(item.get("cc_dia_corte") or 1)
+          }
+      return cartoes_dict
+  except Exception as e:
+    print(f"Erro ao buscar cartões: {e}")
+  return {}
+
+
+def buscar_vencimento_fatura_cartao(
+    supabase, usuario_id, projeto_id, nome_cartao, dt_compra_obj, dia_corte
+):
+  """Calcula para qual fatura (data_vencimento do Z$CCP) a compra deve ser direcionada."""
+  dt_base = dt_compra_obj
+  if dt_compra_obj.day >= dia_corte:
+    dt_base = adicionar_meses(dt_compra_obj, 1)
+
+  try:
+    res = (
+        supabase.table("lancamentos")
+        .select("data_vencimento")
+        .eq("usuario_id", str(usuario_id))
+        .eq("projeto_id", str(projeto_id))
+        .eq("descricao", nome_cartao)
+        .eq("cc_tipo", "Z$CCP")
+        .execute()
+    )
+    if res and res.data:
+      for r in res.data:
+        dt_venc_str = r.get("data_vencimento")
+        if dt_venc_str:
+          dt_venc_obj = datetime.strptime(str(dt_venc_str)[:10], "%Y-%m-%d").date()
+          if dt_venc_obj.year == dt_base.year and dt_venc_obj.month == dt_base.month:
+            return dt_venc_str[:10]
+  except Exception as e:
+    print(f"Erro ao buscar vencimento da fatura: {e}")
+
+  # Fallback caso não encontre a linha $CCP correspondente no mês
+  return dt_base.strftime("%Y-%m-%d")
+
+
+def buscar_planos_do_usuario(supabase, usuario_id):
+  """Busca no Supabase todos os planos/projetos vinculados ao usuário."""
+  try:
+    res = (
+        supabase.table("lancamentos")
+        .select("projeto_id")
+        .eq("usuario_id", str(usuario_id))
+        .execute()
+    )
+    if res and res.data:
+      planos = sorted(
+          list({
+              str(item["projeto_id"])
+              for item in res.data
+              if item.get("projeto_id")
+          })
+      )
+      if planos:
+        return planos
+  except Exception as e:
+    print(f"Erro ao buscar planos do usuário: {e}")
+  return ["Padrão"]
+
+
+def verificar_limite_uso(supabase, usuario_id):
+  """Verifica no Supabase se o usuário ainda possui cota de uso de voz no mês."""
+  try:
+    res = (
+        supabase.table("usuarios")
+        .select("*")
+        .eq("id", usuario_id)
+        .execute()
+    )
+
+    if res and hasattr(res, "data") and len(res.data) > 0:
+      dados_user = res.data[0]
+      plano_ia = str(dados_user.get("plano_ia") or "PADRAO").upper()
+      uso_atual = int(dados_user.get("uso_voz_mes") or 0)
+      limite_permitido = LIMITES_USO.get(plano_ia, 30)
+
+      return uso_atual < limite_permitido, uso_atual, limite_permitido
   except Exception:
     pass
   return True, 0, 30
 
 
 def incrementar_uso_voz(supabase, usuario_id, uso_atual):
+  """Incrementa a contagem de uso após o áudio ser processado com sucesso."""
   try:
     supabase.table("usuarios").update({"uso_voz_mes": uso_atual + 1}).eq(
-        "id", str(usuario_id)
+        "id", usuario_id
     ).execute()
   except Exception as e:
-    print(f"Erro ao incrementar uso: {e}")
+    print(f"Erro ao incrementar limite: {e}")
 
 
 def transcrever_audio_groq(client_groq, audio_bytes):
-  return client_groq.audio.transcriptions.create(
+  """Transcreve o áudio gravado usando o modelo Whisper no Groq."""
+  transcription = client_groq.audio.transcriptions.create(
       file=("audio.wav", audio_bytes),
       model="whisper-large-v3-turbo",
       language="pt",
       response_format="text",
-  ).strip()
-
-import json
+  )
+  return transcription.strip()
 
 
 def processar_texto_groq(
-    client_groq, texto_transcrito, planos_disponiveis, plano_ativo
+    client_groq, texto_transcrito, planos_disponiveis, plano_ativo=None
 ):
-  hoje = obter_hoje_brasil()
+  """Processa o texto no Groq (Llama 3.3 Versatile) para gerar a estrutura JSON."""
+  plano_referencia = (
+      plano_ativo
+      if plano_ativo
+      else (planos_disponiveis[0] if planos_disponiveis else "Padrão")
+  )
 
-  # A Groq exige explicitamente a instrução em formato JSON
+  # AJUSTE DE FUSO HORÁRIO BRASÍLIA (GMT-3)
+  hoje_dt = obter_hoje_brasil()
+  amanha_dt = hoje_dt + timedelta(days=1)
+  ontem_dt = hoje_dt - timedelta(days=1)
+
   prompt = f"""
-    Você é o assistente inteligente do ORCAS. 
-    Sua tarefa é extrair os dados do áudio e responder EXCLUSIVAMENTE em formato JSON.
+    Você é o assistente financeiro inteligente do aplicativo ORCAS.
+    
+    INFORMAÇÕES DE CONTEXTO TEMPORAL RIGOROSAS (FUSO HORÁRIO BRASÍLIA):
+    - Data de HOJE: {hoje_dt.strftime('%Y-%m-%d')} ({hoje_dt.strftime('%A')})
+    - Data de AMANHÃ: {amanha_dt.strftime('%Y-%m-%d')}
+    - Data de ONTEM: {ontem_dt.strftime('%Y-%m-%d')}
+    
+    CONTEXTO DE PLANOS:
+    - Plano ATUALMENTE SELECIONADO: "{plano_referencia}"
+    - Todos os planos disponíveis: {planos_disponiveis}
 
-    CONTEXTO:
-    - Data Atual: {hoje.strftime('%Y-%m-%d')} ({hoje.strftime('%A')})
-    - Projeto Ativo: "{plano_ativo}"
-    - Projetos Disponíveis: {planos_disponiveis}
-    - Áudio do Usuário: "{texto_transcrito}"
+    ÁUDIO DO USUÁRIO: "{texto_transcrito}"
 
-    Estrutura do JSON esperada:
+    REGRAS RÍGIDAS DE INTERPRETAÇÃO:
+    1. INTENÇÃO:
+       - "PROJETAR": Criar/incluir um novo lançamento futuro, agendamento ou conta a pagar/receber (ex: "planejar para dia X", "projetar gasto", "agendar para dia X").
+       - "REALIZAR": Baixar, pagar ou liquidar uma conta existente ou lançamento direto.
+       - "PARCIAL": Quando for um gasto do dia a dia (ex: Supermercado, Combustível, Farmácia, Restaurante) que abate/entra como lançamento parcial de uma projeção orçada.
+       - "ALTERAR": Modificar valor, nome, descrição ou data de uma conta existente.
+       - "EXCLUIR": APENAS quando o usuário usar termos explícitos como "deletar", "excluir", "apagar", "remover".
+       - "CONSULTAR": Perguntas sobre saldos, totais ou resumos.
+
+    2. PERMITE PARCIAIS E RECORRÊNCIA TEMPORAL (permite_parcial):
+       - Identifique se o usuário mencionou permitir parciais (ex: "permita parciais", "permita parcial", "aceita parcial", "com parcial"). Se sim, defina permite_parcial = true.
+       - Se o usuário disse "em todos os meses do meu plano" ou "em todos os meses", defina recorrencia_tipo = "TODOS".
+       - Se o usuário especificou um intervalo de meses (ex: "de agosto até dezembro de 2026", "de maio a outubro"), defina recorrencia_tipo = "PERIODO", e preencha mes_inicio e mes_fim no formato YYYY-MM-01.
+       - Quando permite_parcial for true, a data base do lançamento DEVE ser o dia 01 do mês correspondente (ex: YYYY-MM-01).
+
+    3. CARTÃO DE CRÉDITO E PARCELAMENTO:
+       - Se o usuário mencionou uso de cartão (ex: "no cartão master", "com o cartão xxxxxxxx", "paguei com cartão Visa"), preencha o campo "cartao" com o nome do cartão identificado.
+       - Se mencionou parcelas (ex: "em 3x", "em 5 parcelas", "em 6x sem juros"), preencha o campo "parcelas" com o número inteiro correspondente. Caso contrário, defina "parcelas" = 1.
+       - Exemplo Mercado Parcial: "gastei 190,80 no mercado e paguei com o cartão master em 3x" -> intencao = "PARCIAL", descricao = "mercado", cartao = "master", parcelas = 3.
+       - Exemplo Compra Não Planejada: "acabei de comprar um sapato por 630 no cartão master em 5 parcelas" -> intencao = "PROJETAR", descricao = "sapato", cartao = "master", parcelas = 5.
+       - Exemplo Conta Planejada: "paguei meu curso de inglês com meu cartão master em 6x" -> intencao = "REALIZAR", descricao = "curso de inglês", cartao = "master", parcelas = 6.
+
+    4. DATA DE VENCIMENTO OU DA OCORRÊNCIA (data_vencimento):
+       - PRIORIDADE MÁXIMA: Se o usuário mencionou uma data específica (ex: "dia 20 de agosto de 2026", "20/08/2026"), converter no formato YYYY-MM-DD.
+       - Se o usuário disse "amanhã", atribua OBRIGATORIAMENTE a data: "{amanha_dt.strftime('%Y-%m-%d')}".
+       - Se o usuário disse "hoje" ou "na data de hoje", atribua OBRIGATORIAMENTE a data: "{hoje_dt.strftime('%Y-%m-%d')}".
+       - Se o usuário disse "ontem", atribua OBRIGATORIAMENTE a data: "{ontem_dt.strftime('%Y-%m-%d')}".
+       - Se nenhuma data foi mencionada, use a data de HOJE: "{hoje_dt.strftime('%Y-%m-%d')}".
+
+    5. MÊS DE REFERÊNCIA (mes_referencia):
+       - Se o usuário mencionou um mês específico (ex: "em julho", "de setembro"), retorne o mês numérico (1 a 12). Caso contrário, retorne o mês da data_vencimento identificada.
+
+    6. DESCRIÇÃO:
+       - Extraia apenas o identificador/nome da conta ou serviço.
+       - Remova termos genéricos iniciais como "conta", "lançamento", "boleto", "fatura".
+
+    Responda EXCLUSIVAMENTE um objeto JSON válido no formato:
     {{
       "transcricao": "{texto_transcrito}",
-      "intencao": "PROJETAR" | "REALIZAR" | "PARCIAL" | "ALTERAR" | "EXCLUIR",
-      "projeto_id": "{plano_ativo}",
-      "descricao": "string",
-      "valor": 0.00,
-      "tipo": "Saída" | "Entrada",
+      "intencao": "PROJETAR" | "REALIZAR" | "PARCIAL" | "ALTERAR" | "EXCLUIR" | "CONSULTAR",
+      "projeto_id": "Plano citado ou '{plano_referencia}'",
+      "descricao": "Nome da conta",
+      "nova_descricao": "Caso a intenção seja ALTERAR e houver novo nome, caso contrário null",
+      "valor": float_ou_null,
+      "tipo": "Saída" ou "Entrada",
       "data_vencimento": "YYYY-MM-DD",
-      "permite_parcial": false,
-      "cartao": null,
-      "parcelas": 1
+      "mes_referencia": int_ou_null,
+      "permite_parcial": boolean,
+      "recorrencia_tipo": "TODOS" | "PERIODO" | null,
+      "mes_inicio": "YYYY-MM-01" | null,
+      "mes_fim": "YYYY-MM-01" | null,
+      "cartao": string_ou_null,
+      "parcelas": int
     }}
     """
 
-  res = client_groq.chat.completions.create(
+  response = client_groq.chat.completions.create(
       model="llama-3.3-70b-versatile",
       messages=[{"role": "user", "content": prompt}],
       temperature=0.1,
       response_format={"type": "json_object"},
   )
 
-  return json.loads(res.choices[0].message.content.strip())
+  texto_limpo = response.choices[0].message.content.strip()
+  return json.loads(texto_limpo)
 
-def buscar_lancamento_no_banco(supabase, usuario_id, projeto_id, descricao):
-  """Busca lançamento similar usando ilike diretamente no banco."""
-  if not descricao:
+
+def buscar_planejamento_existente(
+    supabase,
+    usuario_id,
+    projeto_id,
+    descricao,
+    incluir_realizados=False,
+    mes_referencia=None,
+    valor_filtro=None,
+    data_venc_filtro=None,
+):
+  """Busca lançamentos no Supabase com suporte a busca flexível."""
+  if not descricao or len(descricao.strip()) < 2:
     return None
+
   try:
-    res = (
-        supabase.table("lancamentos")
-        .select("*")
-        .eq("usuario_id", str(usuario_id))
-        .eq("projeto_id", str(projeto_id))
-        .ilike("descricao", f"%{descricao.strip()}%")
-        .execute()
+    desc_norm = normalizar_texto(descricao)
+    desc_limpa = limpar_descricao_busca(descricao)
+
+    query = supabase.table("lancamentos").select("*").eq(
+        "usuario_id", str(usuario_id)
     )
-    if res and res.data:
-      return res.data[0]
+
+    if not incluir_realizados:
+      query = query.neq("status", "Realizado")
+
+    if projeto_id and projeto_id != "Padrão":
+      query = query.eq("projeto_id", str(projeto_id))
+
+    res = query.execute()
+
+    if not res or not res.data:
+      if projeto_id and projeto_id != "Padrão":
+        res = (
+            supabase.table("lancamentos")
+            .select("*")
+            .eq("usuario_id", str(usuario_id))
+            .neq("status", "IGNORE" if incluir_realizados else "Realizado")
+            .execute()
+        )
+
+    if not res or not res.data:
+      return None
+
+    candidatos = res.data
+
+    # Filtragem por mês de referência
+    if mes_referencia is not None:
+      candidatos_mes = []
+      for item in candidatos:
+        dt_str = item.get("data_vencimento") or item.get("data")
+        if dt_str:
+          try:
+            dt_obj = datetime.strptime(str(dt_str)[:10], "%Y-%m-%d")
+            if dt_obj.month == int(mes_referencia):
+              candidatos_mes.append(item)
+          except Exception:
+            pass
+      if candidatos_mes:
+        candidatos = candidatos_mes
+
+    # Filtragem por correspondência de nomes
+    candidatos_nome = []
+    palavras_busca = [p for p in desc_limpa.split() if len(p) >= 2]
+
+    for item in candidatos:
+      d_banco = normalizar_texto(item.get("descricao", ""))
+      d_banco_limpo = limpar_descricao_busca(item.get("descricao", ""))
+      palavras_banco = [p for p in d_banco_limpo.split() if len(p) >= 2]
+
+      if (
+          desc_norm == d_banco
+          or desc_limpa == d_banco_limpo
+          or len(set(palavras_busca).intersection(set(palavras_banco))) >= 1
+      ):
+        candidatos_nome.append(item)
+
+    if not candidatos_nome:
+      return None
+
+    if valor_filtro and float(valor_filtro) > 0:
+      candidatos_valor = [
+          c
+          for c in candidatos_nome
+          if abs(
+              float(
+                  c.get("valor_plan") or c.get("valor_real") or c.get("valor") or 0
+              )
+              - float(valor_filtro)
+          )
+          < 0.01
+      ]
+      if candidatos_valor:
+        candidatos_nome = candidatos_valor
+
+    if data_venc_filtro:
+      candidatos_data = [
+          c
+          for c in candidatos_nome
+          if str(c.get("data_vencimento") or c.get("data"))[:10]
+          == str(data_venc_filtro)[:10]
+      ]
+      if candidatos_data:
+        return candidatos_data[0]
+
+    return candidatos_nome[0]
+
   except Exception as e:
-    print(f"Erro na busca: {e}")
+    print(f"Erro na busca de planejamento: {e}")
+
   return None
 
 
-def executar_acao_integrada(supabase, usuario_id, dados):
-  """Executa a gravação reaproveitando a engine de cartões/parcelas da Conciliação."""
+def formatar_moeda_br(valor):
+  """Auxiliar para formatar valores no padrão R$ 1.234,56."""
+  try:
+    val = float(valor or 0.0)
+    return (
+        f"R$ {val:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    )
+  except Exception:
+    return "R$ 0,00"
+
+
+def executar_acao_no_supabase(supabase, usuario_id, dados):
+  """Executa inclusão, alteração, baixa, lançamento parcial ou exclusão no Supabase."""
+  intencao = dados.get("intencao")
   projeto_id = str(dados.get("projeto_id"))
   descricao = dados.get("descricao")
-  valor = float(dados.get("valor") or 0.0)
-  tipo = dados.get("tipo", "Saída")
-  dt_venc = dados.get("data_vencimento") or str(obter_hoje_brasil())
+  valor_total = float(dados.get("valor") or 0.0)
+  
+  data_hoje = obter_hoje_brasil().strftime("%Y-%m-%d")
+  data_venc = dados.get("data_vencimento") or data_hoje
+  permite_parcial = bool(dados.get("permite_parcial", False))
+
   cartao = dados.get("cartao")
   parcelas = int(dados.get("parcelas") or 1)
-  intencao = dados.get("intencao")
+  if parcelas < 1:
+    parcelas = 1
+
+  valor_parcela = round(valor_total / parcelas, 2) if parcelas > 1 else valor_total
+
+  tipo_fluxo = dados.get("tipo", "Saída")
+  if tipo_fluxo not in ["Entrada", "Saída"]:
+    tipo_fluxo = "Saída"
+
   id_existente = dados.get("id_existente")
 
-  dt_compra = datetime.strptime(dt_venc, "%Y-%m-%d").date()
-
-  # 1. EXCLUIR
-  if intencao == "EXCLUIR" and id_existente:
-    supabase.table("lancamentos").delete().eq("id", id_existente).execute()
-    return f"🗑️ Lançamento **{descricao}** excluído!"
-
-  # 2. SE FOR COMPRA NO CARTÃO DE CRÉDITO (Usa Engine do Conciliação)
-  if cartao and cartao.upper() != "NENHUM":
-    corte, venc = buscar_dados_cartao(supabase, pd.DataFrame(), cartao)
-    dt_1_venc = calcular_vencimento_fatura(
-        dt_compra, dia_corte=corte, dia_vencimento=venc
-    )
-
-    base_val = round(valor / parcelas, 2)
-    residuo = round(valor - (base_val * parcelas), 2)
-
-    # Insere a compra de origem
-    supabase.table("lancamentos").insert({
-        "projeto_id": projeto_id,
-        "usuario_id": str(usuario_id),
-        "descricao": descricao,
-        "data": dt_compra.strftime("%Y-%m-%d"),
-        "data_vencimento": dt_compra.strftime("%Y-%m-%d"),
-        "tipo": tipo,
-        "valor_plan": 0.0,
-        "valor_real": 0.0,
-        "status": "Planejado",
-        "cc_tipo": "LCL",
-        "cc_qtd_parcelas": parcelas,
-    }).execute()
-
-    # Gera as parcelas LCL e atualiza o cartão pai $CCP
-    for i in range(parcelas):
-      v_parc = base_val + (residuo if i == (parcelas - 1) else 0.0)
-      dt_venc_p = somar_meses_data(dt_1_venc, i, dia_vencimento=venc)
-
-      supabase.table("lancamentos").insert({
-          "projeto_id": projeto_id,
-          "usuario_id": str(usuario_id),
-          "descricao": cartao,
-          "cc_descricao": f"{descricao} ({i+1:02d}/{parcelas:02d})",
-          "data": dt_venc_p.strftime("%Y-%m-%d"),
-          "data_vencimento": dt_venc_p.strftime("%Y-%m-%d"),
-          "cc_data_compra": dt_compra.strftime("%Y-%m-%d"),
-          "tipo": "Saída",
-          "valor_plan": round(v_parc, 2),
-          "valor_real": 0.0,
-          "status": "Planejado",
-          "cc_tipo": "LCL",
-          "cc_qtd_parcelas": 0,
-      }).execute()
-
-      atualizar_valor_plan_cartao(
-          supabase, pd.DataFrame(), cartao, dt_venc_p, usuario_id
+  # AÇÃO: EXCLUIR
+  if intencao == "EXCLUIR":
+    if id_existente:
+      supabase.table("lancamentos").delete().eq("id", id_existente).execute()
+      return f"🗑️ Lançamento **{descricao}** excluído com sucesso!"
+    else:
+      return (
+          f"⚠️ Não foi possível localizar o lançamento **{descricao}** para"
+          " exclusão."
       )
 
-    return f"✅ Compra **{descricao}** registrada no cartão **{cartao}** em {parcelas}x!"
+  # AÇÃO: ALTERAR
+  if intencao == "ALTERAR":
+    if id_existente:
+      nova_desc = dados.get("nova_descricao") or descricao
+      payload_alterar = {
+          "descricao": nova_desc,
+          "valor_plan": valor_total,
+          "data_vencimento": data_venc,
+          "data": data_venc,
+          "tipo": tipo_fluxo,
+          "projeto_id": projeto_id,
+          "permite_parcial": permite_parcial,
+      }
+      supabase.table("lancamentos").update(payload_alterar).eq(
+          "id", id_existente
+      ).execute()
+      return f"✏️ Lançamento **{nova_desc}** alterado com sucesso!"
+    else:
+      return (
+          f"⚠️ Não foi possível localizar o lançamento **{descricao}** para"
+          " alteração."
+      )
 
-  # 3. SEM CARTÃO (PROJETAR, REALIZAR OU PARCIAL)
+  # TRATAMENTO DE COMPRA NO CARTÃO DE CRÉDITO (LCL)
+  if cartao:
+    cartoes_usr = buscar_cartoes_do_usuario(supabase, usuario_id, projeto_id)
+    cartao_nome_banco = cartao
+    dia_corte = 21
+
+    if cartoes_usr:
+      c_norm = normalizar_texto(cartao)
+      for k, v in cartoes_usr.items():
+        if normalizar_texto(k) in c_norm or c_norm in normalizar_texto(k):
+          cartao_nome_banco = k
+          dia_corte = v["dia_corte"]
+          break
+
+    dt_compra_obj = datetime.strptime(data_venc, "%Y-%m-%d").date()
+
+    payloads_cartao = []
+    for i in range(parcelas):
+      dt_compra_parc = adicionar_meses(dt_compra_obj, i)
+      dt_venc_fatura = buscar_vencimento_fatura_cartao(
+          supabase, usuario_id, projeto_id, cartao_nome_banco, dt_compra_parc, dia_corte
+      )
+
+      desc_cc = (
+          f"{descricao} ({i+1:02d}/{parcelas:02d})"
+          if parcelas > 1
+          else descricao
+      )
+
+      payloads_cartao.append({
+          "projeto_id": projeto_id,
+          "usuario_id": str(usuario_id),
+          "descricao": cartao_nome_banco,
+          "data": dt_venc_fatura,
+          "data_vencimento": dt_venc_fatura,
+          "tipo": tipo_fluxo,
+          "valor_plan": valor_parcela,
+          "valor_real": 0,
+          "status": "Planejado",
+          "parcial_real": 0,
+          "permite_parcial": False,
+          "cc_tipo": "'Z LCL",
+          "cc_descricao": desc_cc,
+          "cc_data_compra": dt_compra_parc.strftime("%Y-%m-%d"),
+          "cc_qtd_parcelas": 0,
+      })
+
+    supabase.table("lancamentos").insert(payloads_cartao).execute()
+
+    str_parc = f" em **{parcelas}x** de **{formatar_moeda_br(valor_parcela)}**" if parcelas > 1 else ""
+    return (
+        f"✅ Compra **{descricao}** ({formatar_moeda_br(valor_total)}){str_parc}"
+        f" registrada no cartão **{cartao_nome_banco}** (`LCL`) com sucesso!"
+    )
+
+  # AÇÃO: PARCIAL (SEM CARTÃO)
   if intencao == "PARCIAL":
-    dt_1_dia = dt_compra.replace(day=1).strftime("%Y-%m-%d")
-    supabase.table("lancamentos").insert({
+    try:
+      dt_obj = datetime.strptime(data_venc, "%Y-%m-%d")
+      data_primeiro_dia = dt_obj.replace(day=1).strftime("%Y-%m-%d")
+    except Exception:
+      data_primeiro_dia = obter_hoje_brasil().replace(day=1).strftime("%Y-%m-%d")
+
+    payload_parcial = {
         "projeto_id": projeto_id,
         "usuario_id": str(usuario_id),
         "descricao": descricao,
-        "data": dt_1_dia,
-        "data_vencimento": dt_1_dia,
-        "tipo": tipo,
-        "valor_plan": 0.0,
-        "valor_real": valor,
-        "parcial_real": valor,
-        "parcial_data": dt_venc,
+        "data": data_primeiro_dia,
+        "data_vencimento": data_primeiro_dia,
+        "tipo": tipo_fluxo,
+        "valor_plan": 0,
+        "valor_real": 0,
+        "parcial_real": valor_total,
+        "parcial_data": data_venc,
         "status": "Realizado",
-    }).execute()
-    return f"✅ Lançamento parcial de **{formatar_moeda_br(valor)}** gravado!"
+        "permite_parcial": False,
+    }
+    supabase.table("lancamentos").insert(payload_parcial).execute()
 
-  elif id_existente and intencao == "REALIZAR":
-    supabase.table("lancamentos").update({
-        "valor_real": valor,
-        "status": "Realizado",
-        "data_vencimento": dt_venc,
-    }).eq("id", id_existente).execute()
-    return f"✅ Lançamento **{descricao}** baixado com sucesso!"
+    dt_efetiva_fmt = datetime.strptime(data_venc, "%Y-%m-%d").strftime("%d/%m/%Y")
+    return (
+        f"✅ Lançamento parcial de **{formatar_moeda_br(valor_total)}** registrado em"
+        f" **{descricao}** para o dia **{dt_efetiva_fmt}**!"
+    )
 
-  else:
-    status = "Realizado" if intencao == "REALIZAR" else "Planejado"
-    v_plan = valor if status == "Planejado" else 0.0
-    v_real = valor if status == "Realizado" else 0.0
+  # AÇÃO: REALIZAR / CONSULTAR (SEM CARTÃO)
+  if intencao in ["REALIZAR", "CONSULTAR"]:
+    if id_existente:
+      payload_update = {
+          "valor_real": valor_total,
+          "status": "Realizado",
+          "data_vencimento": data_venc,
+      }
+      supabase.table("lancamentos").update(payload_update).eq(
+          "id", id_existente
+      ).execute()
+      return (
+          f"✅ Lançamento **{descricao}** baixado como **Realizado** no valor"
+          f" de {formatar_moeda_br(valor_total)}!"
+      )
+    else:
+      payload_direto = {
+          "projeto_id": projeto_id,
+          "usuario_id": str(usuario_id),
+          "descricao": descricao,
+          "data": data_venc,
+          "data_vencimento": data_venc,
+          "tipo": tipo_fluxo,
+          "valor_plan": 0,
+          "valor_real": valor_total,
+          "status": "Realizado",
+          "parcial_real": 0,
+          "permite_parcial": False,
+      }
+      supabase.table("lancamentos").insert(payload_direto).execute()
+      return (
+          f"✅ Lançamento **{descricao}** ({formatar_moeda_br(valor_total)})"
+          " registrado e baixado com sucesso!"
+      )
 
-    supabase.table("lancamentos").insert({
-        "projeto_id": projeto_id,
-        "usuario_id": str(usuario_id),
-        "descricao": descricao,
-        "data": dt_venc,
-        "data_vencimento": dt_venc,
-        "tipo": tipo,
-        "valor_plan": v_plan,
-        "valor_real": v_real,
-        "status": status,
-        "permite_parcial": bool(dados.get("permite_parcial")),
-    }).execute()
-    return f"✅ Lançamento **{descricao}** ({formatar_moeda_br(valor)}) salvo!"
+  # AÇÃO: PROJETAR (SEM CARTÃO)
+  elif intencao == "PROJETAR":
+    recorrencia_tipo = dados.get("recorrencia_tipo")
+    mes_inicio_str = dados.get("mes_inicio")
+    mes_fim_str = dados.get("mes_fim")
+
+    datas_para_inserir = []
+
+    if permite_parcial:
+      try:
+        dt_base = datetime.strptime(data_venc, "%Y-%m-%d").replace(day=1)
+      except Exception:
+        dt_base = obter_hoje_brasil().replace(day=1)
+
+      if recorrencia_tipo == "TODOS":
+        ano_atual = dt_base.year
+        datas_para_inserir = [
+            date(ano_atual, m, 1).strftime("%Y-%m-%d") for m in range(1, 13)
+        ]
+
+      elif recorrencia_tipo == "PERIODO" and mes_inicio_str and mes_fim_str:
+        try:
+          dt_ini = datetime.strptime(mes_inicio_str, "%Y-%m-%d").replace(day=1)
+          dt_fim = datetime.strptime(mes_fim_str, "%Y-%m-%d").replace(day=1)
+          curr = dt_ini
+          while curr <= dt_fim:
+            datas_para_inserir.append(curr.strftime("%Y-%m-%d"))
+            if curr.month == 12:
+              curr = date(curr.year + 1, 1, 1)
+            else:
+              curr = date(curr.year, curr.month + 1, 1)
+        except Exception:
+          datas_para_inserir = [dt_base.strftime("%Y-%m-%d")]
+      else:
+        datas_para_inserir = [dt_base.strftime("%Y-%m-%d")]
+
+    else:
+      datas_para_inserir = [data_venc]
+
+    payloads = []
+    for dt_ins in datas_para_inserir:
+      payloads.append({
+          "projeto_id": projeto_id,
+          "usuario_id": str(usuario_id),
+          "descricao": descricao,
+          "data": dt_ins,
+          "data_vencimento": dt_ins,
+          "tipo": tipo_fluxo,
+          "valor_plan": valor_total,
+          "valor_real": 0,
+          "status": "Planejado",
+          "parcial_real": 0,
+          "permite_parcial": permite_parcial,
+      })
+
+    supabase.table("lancamentos").insert(payloads).execute()
+
+    qtd = len(payloads)
+    if qtd > 1:
+      return (
+          f"✅ {qtd} lançamentos de **{descricao}** ({formatar_moeda_br(valor_total)})"
+          " projetados com sucesso (Permite Parciais)!"
+      )
+
+    dt_venc_fmt = datetime.strptime(
+        datas_para_inserir[0], "%Y-%m-%d"
+    ).strftime("%d/%m/%Y")
+    info_parcial = " (Permite Parciais)" if permite_parcial else ""
+    return (
+        f"✅ Lançamento **{descricao}** ({formatar_moeda_br(valor_total)}) com"
+        f" vencimento para **{dt_venc_fmt}**{info_parcial} projetado com"
+        " sucesso!"
+    )
+
+  return "Ação realizada com sucesso!"
 
 
 def fechar_modal_voz():
-  """Reseta completamente o estado do modal no Streamlit."""
+  """Reset de estados ao fechar o modal e encerramento do diálogo."""
   st.session_state.etapa_voz = "gravacao"
   st.session_state.dados_interpretados = None
   st.session_state.hash_ultimo_audio = None
+  st.session_state.audio_key_id = st.session_state.get("audio_key_id", 0) + 1
+  st.session_state.abrir_modal_orcas = False
   st.session_state.abrir_modal_voz = False
 
 
 @st.dialog("🎙️ Conversar com o ORCAS")
 def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
+  st.write("👋 **Olá! Em que posso ajudar nos seus lançamentos hoje?**")
+
   if not planos_disponiveis:
-    planos_disponiveis = [
-        st.session_state.get("projeto_ativo") or "Padrão"
-    ]
-  plano_ativo = st.session_state.get("projeto_ativo", planos_disponiveis[0])
+    planos_disponiveis = buscar_planos_do_usuario(supabase, id_usuario)
+
+  plano_ativo = st.session_state.get("projeto_ativo") or st.session_state.get(
+      "plano_ativo"
+  )
+  if not plano_ativo and planos_disponiveis:
+    plano_ativo = planos_disponiveis[0]
 
   groq_key = st.secrets.get("GROQ_API_KEY")
   if not groq_key:
-    st.error("❌ Chave GROQ_API_KEY não configurada nos Secrets!")
+    st.error("❌ Chave GROQ_API_KEY não configurada nos Secrets do Streamlit!")
     return
 
   client_groq = Groq(api_key=groq_key.strip())
 
   if "etapa_voz" not in st.session_state:
     st.session_state.etapa_voz = "gravacao"
+  if "dados_interpretados" not in st.session_state:
+    st.session_state.dados_interpretados = None
+  if "hash_ultimo_audio" not in st.session_state:
+    st.session_state.hash_ultimo_audio = None
+  if "audio_key_id" not in st.session_state:
+    st.session_state.audio_key_id = 0
 
-  # TELA 1: CAPTURA DO ÁUDIO
+  # ETAPA 1: GRAVAÇÃO E PROCESSAMENTO
   if st.session_state.etapa_voz == "gravacao":
-    pode_usar, uso, limite = verificar_limite_uso(supabase, id_usuario)
-    if not pode_usar:
-      st.error(f"⚠️ Limite mensal atingido! ({uso}/{limite})")
-      return
-
-    st.caption(f"📊 Uso do recurso no mês: **{uso}/{limite}**")
-    audio = st.audio_input(
-        "Grave seu comando:", key=f"audio_{st.session_state.get('audio_key', 0)}"
+    pode_usar, uso_atual, limite_max = verificar_limite_uso(
+        supabase, id_usuario
     )
 
-    if audio:
-      audio_bytes = audio.getvalue()
-      if hash(audio_bytes) != st.session_state.get("hash_ultimo_audio"):
-        with st.spinner("🤖 ORCAS processando..."):
-          incrementar_uso_voz(supabase, id_usuario, uso)
-          texto = transcrever_audio_groq(client_groq, audio_bytes)
-          dados = processar_texto_groq(
-              client_groq, texto, planos_disponiveis, plano_ativo
-          )
+    if not pode_usar:
+      st.error(
+          "⚠️ **Você atingiu o limite mensal do recurso de voz!**\n\n"
+          f"Você utilizou **{uso_atual}/{limite_max}** comandos neste mês."
+      )
+      return
 
-          st.session_state.hash_ultimo_audio = hash(audio_bytes)
-          item_banco = buscar_lancamento_no_banco(
-              supabase, id_usuario, plano_ativo, dados.get("descricao")
-          )
+    st.caption(
+        f"📊 Uso do recurso de voz no mês: **{uso_atual}/{limite_max}**"
+        " chamadas."
+    )
 
-          if item_banco:
-            dados["id_existente"] = item_banco.get("id")
-            dados["descricao"] = item_banco.get("descricao")
-            if not dados.get("valor"):
-              dados["valor"] = float(
-                  item_banco.get("valor_plan")
-                  or item_banco.get("valor_real")
-                  or 0
+    key_audio = f"audio_input_{st.session_state.audio_key_id}"
+    audio_input = st.audio_input("Grave seu comando abaixo:", key=key_audio)
+
+    if audio_input is not None:
+      audio_bytes = audio_input.getvalue()
+      hash_atual = hash(audio_bytes)
+
+      if hash_atual != st.session_state.hash_ultimo_audio:
+        with st.spinner("🤖 ORCAS está processando o áudio..."):
+          try:
+            incrementar_uso_voz(supabase, id_usuario, uso_atual)
+
+            texto = transcrever_audio_groq(client_groq, audio_bytes)
+            dados = processar_texto_groq(
+                client_groq, texto, planos_disponiveis, plano_ativo
+            )
+
+            st.session_state.hash_ultimo_audio = hash_atual
+
+            intencao = dados.get("intencao")
+            incluir_realizados = intencao in ["EXCLUIR", "ALTERAR", "PARCIAL"]
+
+            data_identificada_ia = dados.get("data_vencimento")
+
+            item_existente = None
+            if intencao not in ["PROJETAR"]:
+              item_existente = buscar_planejamento_existente(
+                  supabase,
+                  id_usuario,
+                  dados.get("projeto_id"),
+                  dados.get("descricao", ""),
+                  incluir_realizados=incluir_realizados,
+                  mes_referencia=dados.get("mes_referencia"),
+                  valor_filtro=dados.get("valor"),
+                  data_venc_filtro=dados.get("data_vencimento"),
               )
 
-          st.session_state.dados_interpretados = dados
-          st.session_state.etapa_voz = "confirmacao"
-          st.rerun()
+            valor_falado = float(dados.get("valor") or 0.0)
+            cartao_falado = dados.get("cartao")
+            parcelas_faladas = int(dados.get("parcelas") or 1)
 
-  # TELA 2: CONFIRMAÇÃO E AJUSTE
+            if item_existente:
+              dados["id_existente"] = item_existente.get("id")
+              desc_cadastrada = item_existente.get(
+                  "descricao"
+              ) or dados.get("descricao")
+              dados["descricao"] = desc_cadastrada
+
+              if item_existente.get("projeto_id"):
+                dados["projeto_id"] = item_existente.get("projeto_id")
+
+              valor_planejado = float(
+                  item_existente.get("valor_plan")
+                  or item_existente.get("valor_real")
+                  or item_existente.get("valor")
+                  or 0.0
+              )
+
+              dt_banco = item_existente.get(
+                  "data_vencimento"
+              ) or item_existente.get("data")
+
+              permite_parcial = item_existente.get("permite_parcial", False)
+              if permite_parcial or intencao == "PARCIAL":
+                dados["intencao"] = "PARCIAL"
+                dados["valor"] = valor_falado
+                if not data_identificada_ia:
+                  dados["data_vencimento"] = obter_hoje_brasil().strftime("%Y-%m-%d")
+                else:
+                  dados["data_vencimento"] = data_identificada_ia
+
+                dt_venc_fmt = datetime.strptime(
+                    dados["data_vencimento"], "%Y-%m-%d"
+                ).strftime("%d/%m/%Y")
+
+                str_cartao = f" no cartão **{cartao_falado}**" if cartao_falado else ""
+                str_parc = (
+                    f" em **{parcelas_faladas}x** de **{formatar_moeda_br(valor_falado / parcelas_faladas)}** (Total: {formatar_moeda_br(valor_falado)})"
+                    if parcelas_faladas > 1
+                    else f" de **{formatar_moeda_br(valor_falado)}**"
+                )
+
+                dados["mensagem_orcas"] = (
+                    f"Identifiquei a conta orçada **{desc_cadastrada}**"
+                    f" (Permite Parcial).\n\nConfirmar o lançamento parcial"
+                    f"{str_parc}{str_cartao} na data **{dt_venc_fmt}**?"
+                )
+
+              elif intencao == "EXCLUIR":
+                dados["valor"] = valor_planejado
+                if dt_banco:
+                  dados["data_vencimento"] = str(dt_banco)[:10]
+
+                dt_venc_fmt = datetime.strptime(
+                    dados["data_vencimento"], "%Y-%m-%d"
+                ).strftime("%d/%m/%Y")
+                dados["mensagem_orcas"] = (
+                    f"Encontrei o lançamento **{desc_cadastrada}** no valor"
+                    f" de **{formatar_moeda_br(valor_planejado)}**"
+                    f" (Vencimento: **{dt_venc_fmt}**).\n\nDeseja realmente"
+                    " **EXCLUIR** este lançamento?"
+                )
+
+              elif intencao == "ALTERAR":
+                if not data_identificada_ia and dt_banco:
+                  dados["data_vencimento"] = str(dt_banco)[:10]
+
+                dados["valor"] = (
+                    valor_falado if valor_falado > 0.0 else valor_planejado
+                )
+                dados["mensagem_orcas"] = (
+                    f"Encontrei o lançamento **{desc_cadastrada}**. Você pode"
+                    " ajustar os dados abaixo para confirmar a alteração:"
+                )
+
+              else:
+                if not data_identificada_ia and dt_banco:
+                  dados["data_vencimento"] = str(dt_banco)[:10]
+
+                valor_final = (
+                    valor_falado if valor_falado > 0.0 else valor_planejado
+                )
+                dados["valor"] = valor_final
+                dt_venc_fmt = datetime.strptime(
+                    dados["data_vencimento"], "%Y-%m-%d"
+                ).strftime("%d/%m/%Y")
+
+                str_cartao = f" no cartão **{cartao_falado}**" if cartao_falado else ""
+                str_parc = (
+                    f" em **{parcelas_faladas}x** de **{formatar_moeda_br(valor_final / parcelas_faladas)}**"
+                    if parcelas_faladas > 1
+                    else ""
+                )
+
+                dados["mensagem_orcas"] = (
+                    f"Encontrei a conta **{desc_cadastrada}** com o valor"
+                    f" planejado de **{formatar_moeda_br(valor_planejado)}**"
+                    f" (Vencimento: **{dt_venc_fmt}**).\n\nEsta é a conta a"
+                    f" que você se refere e confirma a baixa{str_parc}{str_cartao}?"
+                )
+
+            else:
+              dados["id_existente"] = None
+              dados["valor"] = valor_falado
+
+              if not dados.get("data_vencimento"):
+                dados["data_vencimento"] = obter_hoje_brasil().strftime("%Y-%m-%d")
+
+              dt_venc_fmt = datetime.strptime(
+                  dados["data_vencimento"], "%Y-%m-%d"
+              ).strftime("%d/%m/%Y")
+
+              str_cartao = f" no cartão **{cartao_falado}**" if cartao_falado else ""
+              str_parc = (
+                  f" em **{parcelas_faladas}x** de **{formatar_moeda_br(valor_falado / parcelas_faladas)}**"
+                  if parcelas_faladas > 1
+                  else ""
+              )
+
+              if intencao == "EXCLUIR":
+                dados["mensagem_orcas"] = (
+                    "Não encontrei nenhum lançamento com o nome"
+                    f" **{dados.get('descricao')}** para ser excluído."
+                )
+              elif intencao == "ALTERAR":
+                dados["mensagem_orcas"] = (
+                    "Não encontrei o lançamento"
+                    f" **{dados.get('descricao')}** para ser alterado."
+                )
+              elif intencao == "PROJETAR":
+                str_parcial = (
+                    " (Permite Parciais)"
+                    if dados.get("permite_parcial")
+                    else ""
+                )
+                dados["mensagem_orcas"] = (
+                    f"Deseja incluir o lançamento **{dados.get('descricao')}**"
+                    f" no valor de **{formatar_moeda_br(valor_falado)}**{str_parc}{str_cartao} com"
+                    f" vencimento para **{dt_venc_fmt}**{str_parcial}?"
+                )
+              elif valor_falado > 0.0:
+                dados["mensagem_orcas"] = (
+                    "Não encontrei um planejamento pendente para"
+                    f" **{dados.get('descricao')}**. Deseja realizar um novo"
+                    " lançamento direto no valor de"
+                    f" **{formatar_moeda_br(valor_falado)}**{str_parc}{str_cartao}?"
+                )
+              else:
+                dados["mensagem_orcas"] = (
+                    f"Não encontrei a conta **{dados.get('descricao')}**"
+                    " pendente nos planejamentos e nenhum valor foi informado."
+                    " Por favor, tente novamente informando o valor pago."
+                )
+
+            st.session_state.dados_interpretados = dados
+            st.session_state.etapa_voz = "confirmacao"
+            st.rerun()
+
+          except Exception as e:
+            st.error(f"Erro no processamento: {e}")
+
+  # ETAPA 2: CONFIRMAÇÃO E EDIÇÃO DOS DADOS PELO USUÁRIO
   elif st.session_state.etapa_voz == "confirmacao":
     dados = st.session_state.dados_interpretados or {}
-    st.info(f'🗣️ **Você disse:** "{dados.get("transcricao")}"')
 
-    with st.form("form_confirmacao_voz"):
-      c1, c2 = st.columns(2)
-      with c1:
-        intencao = st.selectbox(
-            "Ação",
-            ["REALIZAR", "PROJETAR", "PARCIAL", "ALTERAR", "EXCLUIR"],
-            index=0,
-        )
-        descricao = st.text_input("Descrição", value=dados.get("descricao", ""))
-        cartao = st.text_input(
-            "Cartão de Crédito", value=dados.get("cartao") or "Nenhum"
-        )
-      with c2:
-        valor = st.number_input(
-            "Valor Total (R$)",
-            value=float(dados.get("valor") or 0.0),
-            format="%.2f",
-        )
-        dt_venc = st.date_input(
-            "Vencimento",
-            value=datetime.strptime(
-                dados.get("data_vencimento", str(obter_hoje_brasil())),
-                "%Y-%m-%d",
-            ).date(),
-            format="DD/MM/YYYY",
-        )
-        parcelas = st.number_input(
-            "Parcelas", value=int(dados.get("parcelas") or 1), min_value=1
+    st.info(f'🗣️ **Você disse:** "{dados.get("transcricao", "")}"')
+
+    with st.container(border=True):
+      st.markdown(f"🤖 **ORCAS:** {dados.get('mensagem_orcas')}")
+      st.markdown("---")
+
+      with st.form("form_confirmacao_orcas"):
+        col_1, col_2 = st.columns(2)
+
+        acoes_opcoes = ["REALIZAR", "PROJETAR", "PARCIAL", "ALTERAR", "EXCLUIR"]
+        intencao_atual = dados.get("intencao", "REALIZAR")
+        idx_acao = (
+            acoes_opcoes.index(intencao_atual)
+            if intencao_atual in acoes_opcoes
+            else 0
         )
 
-      b_salvar, b_refazer, b_sair = st.columns(3)
-      sub_salvar = b_salvar.form_submit_button(
-          "✅ Confirmar", type="primary", use_container_width=True
-      )
-      sub_refazer = b_refazer.form_submit_button(
-          "🔄 Refazer", use_container_width=True
-      )
-      sub_sair = b_sair.form_submit_button(
-          "❌ Sair", use_container_width=True
-      )
+        with col_1:
+          nova_intencao = st.selectbox("Ação", acoes_opcoes, index=idx_acao)
 
-      if sub_salvar:
-        dados_finais = {
-            "intencao": intencao,
-            "projeto_id": plano_ativo,
-            "descricao": descricao,
-            "valor": valor,
-            "tipo": dados.get("tipo", "Saída"),
-            "data_vencimento": dt_venc.strftime("%Y-%m-%d"),
-            "cartao": cartao,
-            "parcelas": parcelas,
+          idx_plano = 0
+          if dados.get("projeto_id") in planos_disponiveis:
+            idx_plano = planos_disponiveis.index(dados.get("projeto_id"))
+
+          novo_plano = st.selectbox(
+              "Plano / Projeto", planos_disponiveis, index=idx_plano
+          )
+
+          desc_inicial = (
+              dados.get("nova_descricao")
+              if dados.get("nova_descricao")
+              else dados.get("descricao", "")
+          )
+          nova_descricao = st.text_input("Descrição", value=desc_inicial)
+
+          # Lista de cartões ($CCP) do plano ativo para seleção no dropdown
+          cartoes_cadastrados = list(
+              buscar_cartoes_do_usuario(supabase, id_usuario, novo_plano).keys()
+          )
+          cartoes_opcoes = ["(Nenhum / Dinheiro / Pix)"] + cartoes_cadastrados
+
+          cartao_sugerido = dados.get("cartao") or ""
+          idx_cartao = 0
+          if cartao_sugerido and cartoes_cadastrados:
+            c_sug_norm = normalizar_texto(cartao_sugerido)
+            for idx_c, c_nome in enumerate(cartoes_cadastrados, start=1):
+              if normalizar_texto(c_nome) in c_sug_norm or c_sug_norm in normalizar_texto(c_nome):
+                idx_cartao = idx_c
+                break
+
+          novo_cartao_sel = st.selectbox(
+              "Cartão de Crédito", cartoes_opcoes, index=idx_cartao
+          )
+
+        with col_2:
+          tipo_opcoes = ["Saída", "Entrada"]
+          idx_tipo = 0 if dados.get("tipo", "Saída") == "Saída" else 1
+          novo_tipo = st.selectbox("Tipo", tipo_opcoes, index=idx_tipo)
+
+          valor_inicial = float(dados.get("valor") or 0.0)
+          novo_valor = st.number_input(
+              "Valor Total (R$)", value=valor_inicial, step=5.0, format="%.2f"
+          )
+
+          try:
+            dt_val = datetime.strptime(
+                dados.get("data_vencimento", str(obter_hoje_brasil())), "%Y-%m-%d"
+            ).date()
+          except Exception:
+            dt_val = obter_hoje_brasil()
+
+          nova_data_venc = st.date_input(
+              "Data de Vencimento / Ocorrência",
+              value=dt_val,
+              format="DD/MM/YYYY",
+          )
+
+          novas_parcelas = st.number_input(
+              "Parcelas",
+              value=int(dados.get("parcelas") or 1),
+              min_value=1,
+              max_value=72,
+              step=1,
+          )
+
+        novo_permite_parcial = st.checkbox(
+            "Permite Lançamento Parcial?",
+            value=bool(dados.get("permite_parcial", False)),
+        )
+
+        st.markdown("---")
+        btn_salvar, btn_refazer, btn_cancelar = st.columns(3)
+
+        with btn_salvar:
+          texto_botao = (
+              "🗑️ Confirmar Exclusão"
+              if nova_intencao == "EXCLUIR"
+              else "✅ Confirmar e Gravar"
+          )
+          submit_salvar = st.form_submit_button(
+              texto_botao, type="primary", use_container_width=True
+          )
+
+        with btn_refazer:
+          submit_refazer = st.form_submit_button(
+              "🔄 Falar Novamente", use_container_width=True
+          )
+
+        with btn_cancelar:
+          submit_cancelar = st.form_submit_button(
+              "❌ Cancelar / Sair", use_container_width=True
+          )
+
+      if submit_salvar:
+        cartao_final = (
+            novo_cartao_sel
+            if novo_cartao_sel != "(Nenhum / Dinheiro / Pix)"
+            else None
+        )
+
+        dados_atualizados = {
+            "intencao": nova_intencao,
+            "projeto_id": novo_plano,
+            "descricao": nova_descricao,
+            "valor": novo_valor,
+            "tipo": novo_tipo,
+            "data_vencimento": nova_data_venc.strftime("%Y-%m-%d"),
+            "permite_parcial": novo_permite_parcial,
+            "recorrencia_tipo": dados.get("recorrencia_tipo"),
+            "mes_inicio": dados.get("mes_inicio"),
+            "mes_fim": dados.get("mes_fim"),
             "id_existente": dados.get("id_existente"),
-            "permite_parcial": dados.get("permite_parcial"),
+            "cartao": cartao_final,
+            "parcelas": novas_parcelas,
         }
-        st.success(
-            executar_acao_integrada(supabase, id_usuario, dados_finais)
-        )
-        time.sleep(1)
-        fechar_modal_voz()
-        st.rerun()
+        try:
+          msg_sucesso = executar_acao_no_supabase(
+              supabase, id_usuario, dados_atualizados
+          )
+          st.success(msg_sucesso)
+          time.sleep(1.2)
+          fechar_modal_voz()
+          st.rerun()
+        except Exception as e:
+          st.error(f"❌ Erro ao processar ação: {e}")
 
-      elif sub_refazer:
+      elif submit_refazer:
         st.session_state.etapa_voz = "gravacao"
-        st.session_state.audio_key = st.session_state.get("audio_key", 0) + 1
+        st.session_state.dados_interpretados = None
+        st.session_state.hash_ultimo_audio = None
+        st.session_state.audio_key_id += 1
         st.rerun()
 
-      elif sub_sair:
+      elif submit_cancelar:
         fechar_modal_voz()
         st.rerun()
