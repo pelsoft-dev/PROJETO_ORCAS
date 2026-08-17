@@ -99,9 +99,9 @@ def processar_texto_groq(
     }}
     """
 
-    # Ajustado modelo estável da Groq (evita o erro 404 da imagem)
+    # Modelo atualizado e ativo na API da Groq
     response = client_groq.chat.completions.create(
-        model="llama3-70b-8192",
+        model="llama-3.1-8b-instant",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.1,
         response_format={"type": "json_object"},
@@ -114,7 +114,7 @@ def fechar_modal_voz():
     st.session_state.dados_interpretados = None
     st.session_state.hash_ultimo_audio = None
     st.session_state.audio_key_id = st.session_state.get("audio_key_id", 0) + 1
-    # DESATIVA A FLAG PARA NÃO CONTINUAR REABRINDO NAS OUTRAS TELAS
+    # Garante que a janela não permaneça aberta na troca de telas
     st.session_state.abrir_modal_voz = False
 
 
