@@ -75,23 +75,7 @@ def processar_texto_groq(
 ):
   hoje = obter_hoje_brasil()
 
-  # Modelos Groq ativos que aceitam nativamente o response_format JSON
-  modelos_validos_json = [
-      "llama-3.3-70b-versatile",
-      "llama-3.1-8b-instant",
-      "mixtral-8x7b-32768",
-  ]
-
-  modelo_escolhido = "llama-3.1-8b-instant"
-  try:
-    modelos_conta = [m.id for m in client_groq.models.list().data]
-    for m in modelos_validos_json:
-      if m in modelos_conta:
-        modelo_escolhido = m
-        break
-  except Exception as e:
-    print(f"Erro ao validar modelos na Groq: {e}")
-
+  # Prompt estruturado exigindo resposta exclusivamente em JSON
   prompt = f"""
     Você é o assistente inteligente do ORCAS. 
     Interprete o áudio do usuário e retorne um objeto json com os dados extraídos.
@@ -117,8 +101,9 @@ def processar_texto_groq(
     }}
   """
 
+  # Utiliza o modelo Llama 3.3 70B (modelo estável e ativo de produção na Groq)
   res = client_groq.chat.completions.create(
-      model=modelo_escolhido,
+      model="llama-3.3-70b-versatile",
       messages=[{"role": "user", "content": prompt}],
       temperature=0.1,
       response_format={"type": "json_object"},
