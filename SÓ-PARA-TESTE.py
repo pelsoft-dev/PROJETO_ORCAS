@@ -32,46 +32,34 @@ def formatar_moeda_br(valor):
     return "R$ 0,00"
 
 
-def extrair_dados_por_codigo(texto):
-  """Extrai o valor e limpa a descrição usando regras Python determinísticas sem depender do LLM."""
-  txt = texto.strip()
+def normalizar_valor_moeda(valor_str):
+  """Converte formatos pt-BR de números (ex: '5.880', '5.880,00', '5880,00', '99,35') para float correto."""
+  if not valor_str:
+    return 0.0
 
-  # 1. Busca qualquer padrão monetário/numérico no texto (Ex: 99,35 / 99.35 / 500)
-  match_valor = re.search(
-      r"(?:R\$\s*|R\$\s*|no valor de\s*|por\s*)?(\d+(?:[.,]\d{1,2})?)",
-      txt,
-      flags=re.IGNORECASE,
-  )
+  if isinstance(valor_str, (int, float)):
+    return float(valor_str)
 
-  valor_extraido = 0.0
-  if match_valor:
-    try:
-      val_str = match_valor.group(1).replace(",", ".")
-      valor_extraido = float(val_str)
-    except Exception:
-      valor_extraido = 0.0
+  s = str(valor_str).strip().replace("R$", "").strip()
 
-  # 2. Corta o texto onde começa o valor ou marcadores de preço ("por", "no valor de", "custa", "R$")
-  desc_limpa = re.split(
-      r"\b(por|no valor de|valor de|custou|custa|r\$)\b",
-      txt,
-      flags=re.IGNORECASE,
-  )[0]
+  # Se tem ponto e vírgula (ex: 5.880,00)
+  if "." in s and "," in s:
+    s = s.replace(".", "").replace(",", ".")
+  # Se tem vírgula como decimal (ex: 99,35 ou 5880,00)
+  elif "," in s:
+    s = s.replace(",", ".")
+  # Se tem ponto (ex: 5.880 ou 5.88)
+  elif "." in s:
+    partes = s.split(".")
+    # Se a parte após o ponto tiver 3 dígitos, é ponto de milhar! Ex: 5.880 -> 5880
+    if len(partes[-1]) == 3:
+      s = "".join(partes)
+    # Se tiver 2 dígitos, é decimal americano! Ex: 5.88 -> 5.88
 
-  # 3. Remove verbos e artigos do início da descrição
-  padrao_inicio = (
-      r"^\b(comprei|paguei|gastei|coloque|registre|adicione|lance|um|uma|uns|umas|o|a|os|as)\b\s*"
-  )
-  while re.search(padrao_inicio, desc_limpa, flags=re.IGNORECASE):
-    desc_limpa = re.sub(padrao_inicio, "", desc_limpa, flags=re.IGNORECASE)
-
-  # Limpeza final de caracteres residuais
-  desc_limpa = re.sub(r"[.,;!?]+$", "", desc_limpa).strip()
-
-  return (
-      desc_limpa.capitalize() if desc_limpa else "Novo Lançamento",
-      valor_extraido,
-  )
+  try:
+    return float(s)
+  except ValueError:
+    return 0.0
 
 
 def processar_texto_groq(
@@ -79,37 +67,49 @@ def processar_texto_groq(
 ):
   hoje = obter_hoje_brasil()
 
-  # Passo 1: Executa a extração determinística por Python (Garante 100% de acerto no 'Sapato', 'Gravata', etc)
-  desc_python, valor_python = extrair_dados_por_codigo(texto_transcrito)
+  system_prompt = (
+      "Você é o assistente financeiro do software ORCAS. "
+      "Sua missão é interpretar o comando de áudio do usuário e retornar EXCLUSIVAMENTE "
+      "um objeto JSON válido preenchido com extrema precisão."
+  )
 
-  # Prompt ultra-direto para pegar apenas metadados (Intenção/Cartão/Parcelas)
-  system_prompt = "Você é um assistente financeiro JSON. Responda apenas o JSON solicitado."
   user_prompt = f"""
-    Áudio: "{texto_transcrito}"
-    Data Hoje: {hoje.strftime('%Y-%m-%d')}
-    Projeto: "{plano_ativo}"
+    CONTEXTO DO SISTEMA:
+    - Data Atual: {hoje.strftime('%Y-%m-%d')}
+    - Projeto Ativo: "{plano_ativo}"
+    - Áudio do Usuário: "{texto_transcrito}"
 
-    Analise a intenção e responda APENAS o JSON:
+    REGRAS DE INTERPRETAÇÃO E EXTRAÇÃO:
+    1. "descricao": O nome limpo do produto/serviço. Remova verbos de compra ("Comprei", "Paguei"), artigos ("o", "a", "um"), e todo o trecho sobre valores ou formas de pagamento.
+       - Exemplo: "Comprei o terno Armani por R$ 5.880 e paguei no cartão Visa em 3x" -> "Terno Armani"
+       - Exemplo: "Paguei a conta de luz 180" -> "Conta de luz"
+
+    2. "valor": O valor numérico total em formato float (PONTO como separador decimal).
+       - ATENÇÃO A PONTOS DE MILHAR BRASILEIROS: "5.880" ou "5.880,00" SIGNIFICA 5880.0 (cinco mil oitocentos e oitenta).
+       - Exemplo: "R$ 5.880" -> 5880.0
+       - Exemplo: "99,35" -> 99.35
+
+    3. "cartao": Extraia o nome do cartão de crédito mencionado (ex: "Visa", "Mastercard", "Nubank", "Itaucard"). Se nenhum cartão for falado, retorne null.
+
+    4. "parcelas": Quantidade de parcelas como número inteiro.
+       - Exemplo: "em três vezes", "em 3x", "parcelado em 3 vezes" -> 3. Se não mencionar parcelamento, retorne 1.
+
+    5. "intencao": "REALIZAR" (se a compra/pagamento já ocorreu ou foi feita no cartão) ou "PROJETAR" (para lançamentos futuros).
+
+    FORMATO EXATO DA SAÍDA JSON:
     {{
-      "intencao": "REALIZAR" | "PROJETAR" | "PARCIAL" | "ALTERAR" | "EXCLUIR",
-      "tipo": "Saída" | "Entrada",
-      "cartao": null,
+      "transcricao": "{texto_transcrito}",
+      "intencao": "REALIZAR",
+      "projeto_id": "{plano_ativo}",
+      "descricao": "Nome limpo do produto",
+      "valor": 5880.00,
+      "tipo": "Saída",
+      "data_vencimento": "{hoje.strftime('%Y-%m-%d')}",
+      "permite_parcial": false,
+      "cartao": "Visa" ou null,
       "parcelas": 1
     }}
   """
-
-  dados_final = {
-      "transcricao": texto_transcrito,
-      "intencao": "REALIZAR",
-      "projeto_id": plano_ativo,
-      "descricao": desc_python,
-      "valor": valor_python,
-      "tipo": "Saída",
-      "data_vencimento": str(hoje),
-      "permite_parcial": False,
-      "cartao": None,
-      "parcelas": 1,
-  }
 
   try:
     res = client_groq.chat.completions.create(
@@ -121,18 +121,36 @@ def processar_texto_groq(
         temperature=0.0,
         response_format={"type": "json_object"},
     )
-    res_json = json.loads(res.choices[0].message.content.strip())
-    if isinstance(res_json, dict):
-      dados_final.update({
-          "intencao": res_json.get("intencao", "REALIZAR"),
-          "tipo": res_json.get("tipo", "Saída"),
-          "cartao": res_json.get("cartao"),
-          "parcelas": int(res_json.get("parcelas") or 1),
-      })
-  except Exception as e:
-    print(f"Aviso LLM: {e}")
+    conteudo = res.choices[0].message.content.strip()
+    dados_parsed = json.loads(conteudo)
 
-  return dados_final
+    if isinstance(dados_parsed, dict):
+      # Garante a formatação numérica adequada para o Python
+      dados_parsed["valor"] = normalizar_valor_moeda(dados_parsed.get("valor"))
+
+      # Limpeza de garantia de pontuação final da descrição
+      if dados_parsed.get("descricao"):
+        desc = dados_parsed["descricao"].strip()
+        desc = re.sub(r"[.,;!?]+$", "", desc).strip()
+        dados_parsed["descricao"] = desc.capitalize()
+
+      return dados_parsed
+  except Exception as e:
+    print(f"Erro no processamento LLM: {e}")
+
+  # Fallback básico em caso de falha de comunicação com a API
+  return {
+      "transcricao": texto_transcrito,
+      "intencao": "REALIZAR",
+      "projeto_id": plano_ativo,
+      "descricao": "Novo Lançamento",
+      "valor": 0.0,
+      "tipo": "Saída",
+      "data_vencimento": str(hoje),
+      "permite_parcial": False,
+      "cartao": None,
+      "parcelas": 1,
+  }
 
 
 def verificar_limite_uso(supabase, usuario_id):
@@ -212,10 +230,12 @@ def executar_acao_integrada(supabase, usuario_id, dados):
 
   dt_compra = datetime.strptime(dt_venc, "%Y-%m-%d").date()
 
+  # 1. EXCLUIR
   if intencao == "EXCLUIR" and id_existente:
     supabase.table("lancamentos").delete().eq("id", id_existente).execute()
     return f"🗑️ Lançamento **{descricao}** excluído!"
 
+  # 2. CARTÃO DE CRÉDITO
   if cartao and str(cartao).upper() != "NENHUM":
     corte, venc = buscar_dados_cartao(supabase, pd.DataFrame(), cartao)
 
@@ -269,6 +289,7 @@ def executar_acao_integrada(supabase, usuario_id, dados):
 
     return f"✅ Compra **{descricao}** registrada no cartão **{cartao}** em {parcelas}x!"
 
+  # 3. SEM CARTÃO
   if intencao == "PARCIAL":
     dt_1_dia = dt_compra.replace(day=1).strftime("%Y-%m-%d")
     supabase.table("lancamentos").insert({
@@ -316,7 +337,7 @@ def executar_acao_integrada(supabase, usuario_id, dados):
 
 
 def fechar_modal_voz():
-  """Reseta completamente o estado no Streamlit para fechar o dialog e não abrir sozinho."""
+  """Limpa estados da sessão para fechar o dialog do Streamlit e resetar o gravador."""
   st.session_state.etapa_voz = "gravacao"
   st.session_state.dados_interpretados = None
   st.session_state.hash_ultimo_audio = None
@@ -348,6 +369,7 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
   if "etapa_voz" not in st.session_state:
     st.session_state.etapa_voz = "gravacao"
 
+  # TELA 1: GRAVAÇÃO
   if st.session_state.etapa_voz == "gravacao":
     pode_usar, uso, limite = verificar_limite_uso(supabase, id_usuario)
     if not pode_usar:
@@ -392,6 +414,7 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
           st.session_state.etapa_voz = "confirmacao"
           st.rerun()
 
+  # TELA 2: CONFIRMAÇÃO
   elif st.session_state.etapa_voz == "confirmacao":
     dados = st.session_state.dados_interpretados or {}
     st.info(f'🗣️ **Você disse:** "{dados.get("transcricao")}"')
