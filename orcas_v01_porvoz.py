@@ -75,10 +75,18 @@ def processar_texto_groq(
 ):
   hoje = obter_hoje_brasil()
 
-  # Prompt estruturado exigindo resposta exclusivamente em JSON
+  # 1. Busca dinamicamente os modelos disponíveis diretamente da chave do usuário
+  try:
+    todos_modelos = [m.id for m in client_groq.models.list().data]
+    modelos_chat = [m for m in todos_modelos if "whisper" not in m.lower()]
+    modelo_escolhido = modelos_chat[0] if modelos_chat else "llama3-8b-8192"
+  except Exception as e:
+    print(f"Erro ao listar modelos: {e}")
+    modelo_escolhido = "llama3-8b-8192"
+
   prompt = f"""
     Você é o assistente inteligente do ORCAS. 
-    Interprete o áudio do usuário e retorne um objeto json com os dados extraídos.
+    Interprete o áudio do usuário e retorne EXCLUSIVAMENTE um objeto JSON válido, sem textos antes ou depois.
 
     CONTEXTO:
     - Data Atual: {hoje.strftime('%Y-%m-%d')} ({hoje.strftime('%A')})
@@ -86,7 +94,7 @@ def processar_texto_groq(
     - Projetos Disponíveis: {planos_disponiveis}
     - Áudio do Usuário: "{texto_transcrito}"
 
-    Estrutura do json esperada:
+    Estrutura do JSON esperada:
     {{
       "transcricao": "{texto_transcrito}",
       "intencao": "PROJETAR" | "REALIZAR" | "PARCIAL" | "ALTERAR" | "EXCLUIR",
@@ -101,15 +109,23 @@ def processar_texto_groq(
     }}
   """
 
-  # Utiliza o modelo Llama 3.3 70B (modelo estável e ativo de produção na Groq)
+  # Chamada limpa sem restrição de modelo estático ou de tipo de resposta
   res = client_groq.chat.completions.create(
-      model="llama-3.3-70b-versatile",
+      model=modelo_escolhido,
       messages=[{"role": "user", "content": prompt}],
       temperature=0.1,
-      response_format={"type": "json_object"},
   )
 
-  return json.loads(res.choices[0].message.content.strip())
+  conteudo = res.choices[0].message.content.strip()
+
+  # Limpa possíveis marcações de bloco de código markdown ```json ... ```
+  if conteudo.startswith("```"):
+    conteudo = conteudo.split("```")[1]
+    if conteudo.startswith("json"):
+      conteudo = conteudo[4:]
+  conteudo = conteudo.strip()
+
+  return json.loads(conteudo)
 
 
 def buscar_lancamento_no_banco(supabase, usuario_id, projeto_id, descricao):
