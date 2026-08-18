@@ -75,7 +75,21 @@ def processar_texto_groq(
 ):
   hoje = obter_hoje_brasil()
 
-  # A palavra 'json' precisa estar obrigatoriamente no prompt para o response_format funcionar na Groq
+  # 1. Consulta dinamicamente os modelos ativos na sua chave de API
+  try:
+    modelos_disponiveis = [m.id for m in client_groq.models.list().data]
+    # Filtra apenas modelos de texto/chat, ignorando os modelos de transcrição (whisper)
+    modelos_chat = [
+        m for m in modelos_disponiveis if "whisper" not in m.lower()
+    ]
+    modelo_escolhido = (
+        modelos_chat[0] if modelos_chat else "llama-3.3-70b-versatile"
+    )
+  except Exception as e:
+    print(f"Erro ao listar modelos da Groq: {e}")
+    modelo_escolhido = "llama-3.3-70b-versatile"
+
+  # 2. Prompt estruturado exigindo formato json
   prompt = f"""
     Você é o assistente inteligente do ORCAS. 
     Interprete o áudio do usuário e retorne um objeto json com os dados extraídos.
@@ -86,7 +100,7 @@ def processar_texto_groq(
     - Projetos Disponíveis: {planos_disponiveis}
     - Áudio do Usuário: "{texto_transcrito}"
 
-    Estrutura exata do json esperada:
+    Estrutura do json esperada:
     {{
       "transcricao": "{texto_transcrito}",
       "intencao": "PROJETAR" | "REALIZAR" | "PARCIAL" | "ALTERAR" | "EXCLUIR",
@@ -99,10 +113,10 @@ def processar_texto_groq(
       "cartao": null,
       "parcelas": 1
     }}
-  """
+    """
 
   res = client_groq.chat.completions.create(
-      model="llama-3.3-70b-versatile",
+      model=modelo_escolhido,
       messages=[{"role": "user", "content": prompt}],
       temperature=0.1,
       response_format={"type": "json_object"},
