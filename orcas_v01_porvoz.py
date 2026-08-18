@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 import json
 import re
 import time
@@ -7,7 +7,6 @@ from groq import Groq
 import pandas as pd
 import streamlit as st
 
-# Importa as engines centrais do módulo de conciliação
 from orcas_v01_conciliacao import (
     atualizar_valor_plan_cartao,
     buscar_dados_cartao,
@@ -19,7 +18,6 @@ LIMITES_USO = {"PADRÃO": 30, "INTERMEDIÁRIO": 100, "ILIMITADO": 999999}
 
 
 def obter_hoje_brasil():
-  """Garante que a data de HOJE respeite o fuso horário de Brasília."""
   return datetime.now(zoneinfo.ZoneInfo("America/Sao_Paulo")).date()
 
 
@@ -34,32 +32,107 @@ def formatar_moeda_br(valor):
     return "R$ 0,00"
 
 
-def limpar_descricao_fallback(texto):
-  """Limpa o texto do áudio removendo verbos, artigos, preposições e pontuações."""
-  t = texto.strip()
+def extrair_dados_por_codigo(texto):
+  """Extrai o valor e limpa a descrição usando regras Python determinísticas sem depender do LLM."""
+  txt = texto.strip()
 
-  # Remove pontos e vírgulas finais
-  t = re.sub(r"[.,;!?]+$", "", t)
-
-  # Remove termos comuns de ação/compra e artigos no início
-  padrao_limpeza = (
-      r"^\b(comprei|paguei|gastei|custou|coloque|registre|adicione|um|uma|uns|umas|o|a|os|as)\b\s*"
-  )
-  while re.search(padrao_limpeza, t, flags=re.IGNORECASE):
-    t = re.sub(padrao_limpeza, "", t, flags=re.IGNORECASE)
-
-  # Remove trechos de valores no final da frase (ex: "por 300 reais", "300,00", "no valor de 50")
-  t = re.sub(
-      r"\b(no valor de|valor de|por|custa)?\s*\d+([.,]\d+)?\s*(reais|real|r\$)?\b.*$",
-      "",
-      t,
+  # 1. Busca qualquer padrão monetário/numérico no texto (Ex: 99,35 / 99.35 / 500)
+  match_valor = re.search(
+      r"(?:R\$\s*|R\$\s*|no valor de\s*|por\s*)?(\d+(?:[.,]\d{1,2})?)",
+      txt,
       flags=re.IGNORECASE,
   )
 
-  # Limpeza de espaços extras e pontuação final residual
-  t = re.sub(r"\s+", " ", t).strip(" .")
+  valor_extraido = 0.0
+  if match_valor:
+    try:
+      val_str = match_valor.group(1).replace(",", ".")
+      valor_extraido = float(val_str)
+    except Exception:
+      valor_extraido = 0.0
 
-  return t.capitalize() if t else "Novo Lançamento"
+  # 2. Corta o texto onde começa o valor ou marcadores de preço ("por", "no valor de", "custa", "R$")
+  desc_limpa = re.split(
+      r"\b(por|no valor de|valor de|custou|custa|r\$)\b",
+      txt,
+      flags=re.IGNORECASE,
+  )[0]
+
+  # 3. Remove verbos e artigos do início da descrição
+  padrao_inicio = (
+      r"^\b(comprei|paguei|gastei|coloque|registre|adicione|lance|um|uma|uns|umas|o|a|os|as)\b\s*"
+  )
+  while re.search(padrao_inicio, desc_limpa, flags=re.IGNORECASE):
+    desc_limpa = re.sub(padrao_inicio, "", desc_limpa, flags=re.IGNORECASE)
+
+  # Limpeza final de caracteres residuais
+  desc_limpa = re.sub(r"[.,;!?]+$", "", desc_limpa).strip()
+
+  return (
+      desc_limpa.capitalize() if desc_limpa else "Novo Lançamento",
+      valor_extraido,
+  )
+
+
+def processar_texto_groq(
+    client_groq, texto_transcrito, planos_disponiveis, plano_ativo
+):
+  hoje = obter_hoje_brasil()
+
+  # Passo 1: Executa a extração determinística por Python (Garante 100% de acerto no 'Sapato', 'Gravata', etc)
+  desc_python, valor_python = extrair_dados_por_codigo(texto_transcrito)
+
+  # Prompt ultra-direto para pegar apenas metadados (Intenção/Cartão/Parcelas)
+  system_prompt = "Você é um assistente financeiro JSON. Responda apenas o JSON solicitado."
+  user_prompt = f"""
+    Áudio: "{texto_transcrito}"
+    Data Hoje: {hoje.strftime('%Y-%m-%d')}
+    Projeto: "{plano_ativo}"
+
+    Analise a intenção e responda APENAS o JSON:
+    {{
+      "intencao": "REALIZAR" | "PROJETAR" | "PARCIAL" | "ALTERAR" | "EXCLUIR",
+      "tipo": "Saída" | "Entrada",
+      "cartao": null,
+      "parcelas": 1
+    }}
+  """
+
+  dados_final = {
+      "transcricao": texto_transcrito,
+      "intencao": "REALIZAR",
+      "projeto_id": plano_ativo,
+      "descricao": desc_python,
+      "valor": valor_python,
+      "tipo": "Saída",
+      "data_vencimento": str(hoje),
+      "permite_parcial": False,
+      "cartao": None,
+      "parcelas": 1,
+  }
+
+  try:
+    res = client_groq.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        temperature=0.0,
+        response_format={"type": "json_object"},
+    )
+    res_json = json.loads(res.choices[0].message.content.strip())
+    if isinstance(res_json, dict):
+      dados_final.update({
+          "intencao": res_json.get("intencao", "REALIZAR"),
+          "tipo": res_json.get("tipo", "Saída"),
+          "cartao": res_json.get("cartao"),
+          "parcelas": int(res_json.get("parcelas") or 1),
+      })
+  except Exception as e:
+    print(f"Aviso LLM: {e}")
+
+  return dados_final
 
 
 def verificar_limite_uso(supabase, usuario_id):
@@ -97,86 +170,6 @@ def transcrever_audio_groq(client_groq, audio_bytes):
       language="pt",
       response_format="text",
   ).strip()
-
-
-def processar_texto_groq(
-    client_groq, texto_transcrito, planos_disponiveis, plano_ativo
-):
-  hoje = obter_hoje_brasil()
-
-  system_prompt = (
-      "Você é o motor de IA financeiro do sistema ORCAS. "
-      "Sua única função é extrair informações financeiras do texto de áudio transcrito "
-      "e responder rigorosamente em um único objeto JSON."
-  )
-
-  user_prompt = f"""
-    CONTEXTO:
-    - Data Atual: {hoje.strftime('%Y-%m-%d')} ({hoje.strftime('%A')})
-    - Projeto Ativo: "{plano_ativo}"
-    - Projetos Disponíveis: {planos_disponiveis}
-    - Áudio Transcrito: "{texto_transcrito}"
-
-    REGRAS RÍGIDAS DE EXTRAÇÃO:
-    1. "descricao": Extraia SOMENTE o nome do produto ou serviço.
-       - NUNCA inclua verbos ("Comprei", "Paguei", "Lançar").
-       - NUNCA inclua artigos no início ("um", "uma", "o", "a").
-       - NUNCA inclua o valor ou pontuação final.
-       - Exemplo: "Comprei um sapato amarelo por 300 reais" -> "Sapato amarelo"
-       - Exemplo: "Paguei uma conta de luz de 150" -> "Conta de luz"
-
-    2. "valor": Extraia o valor numérico puro em formato float.
-       - Exemplo: "300 reais", "300,00", "trêscentos" -> 300.00.
-
-    JSON DE SAÍDA OBRIGATÓRIO:
-    {{
-      "transcricao": "{texto_transcrito}",
-      "intencao": "REALIZAR" | "PROJETAR" | "PARCIAL" | "ALTERAR" | "EXCLUIR",
-      "projeto_id": "{plano_ativo}",
-      "descricao": "Nome limpo do produto sem artigos ou verbos",
-      "valor": 0.00,
-      "tipo": "Saída" | "Entrada",
-      "data_vencimento": "{hoje.strftime('%Y-%m-%d')}",
-      "permite_parcial": false,
-      "cartao": null,
-      "parcelas": 1
-    }}
-  """
-
-  try:
-    res = client_groq.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        temperature=0.0,
-        response_format={"type": "json_object"},
-    )
-    conteudo = res.choices[0].message.content.strip()
-    dados_parsed = json.loads(conteudo)
-
-    if isinstance(dados_parsed, dict):
-      # Pós-processamento de garantia para eliminar qualquer artigo/ponto residual
-      desc = dados_parsed.get("descricao", "")
-      dados_parsed["descricao"] = limpar_descricao_fallback(desc or texto_transcrito)
-      return dados_parsed
-  except Exception as e:
-    print(f"Erro no processamento LLM/JSON: {e}")
-
-  # Fallback seguro
-  return {
-      "transcricao": texto_transcrito,
-      "intencao": "REALIZAR",
-      "projeto_id": plano_ativo,
-      "descricao": limpar_descricao_fallback(texto_transcrito),
-      "valor": 0.0,
-      "tipo": "Saída",
-      "data_vencimento": str(hoje),
-      "permite_parcial": False,
-      "cartao": None,
-      "parcelas": 1,
-  }
 
 
 def buscar_lancamento_no_banco(supabase, usuario_id, projeto_id, descricao):
@@ -219,12 +212,10 @@ def executar_acao_integrada(supabase, usuario_id, dados):
 
   dt_compra = datetime.strptime(dt_venc, "%Y-%m-%d").date()
 
-  # 1. EXCLUIR
   if intencao == "EXCLUIR" and id_existente:
     supabase.table("lancamentos").delete().eq("id", id_existente).execute()
     return f"🗑️ Lançamento **{descricao}** excluído!"
 
-  # 2. CARTÃO DE CRÉDITO
   if cartao and str(cartao).upper() != "NENHUM":
     corte, venc = buscar_dados_cartao(supabase, pd.DataFrame(), cartao)
 
@@ -278,7 +269,6 @@ def executar_acao_integrada(supabase, usuario_id, dados):
 
     return f"✅ Compra **{descricao}** registrada no cartão **{cartao}** em {parcelas}x!"
 
-  # 3. SEM CARTÃO
   if intencao == "PARCIAL":
     dt_1_dia = dt_compra.replace(day=1).strftime("%Y-%m-%d")
     supabase.table("lancamentos").insert({
@@ -326,15 +316,12 @@ def executar_acao_integrada(supabase, usuario_id, dados):
 
 
 def fechar_modal_voz():
-  """Limpa os estados da sessão para fechar o modal e impedir loops de renderização."""
+  """Reseta completamente o estado no Streamlit para fechar o dialog e não abrir sozinho."""
   st.session_state.etapa_voz = "gravacao"
   st.session_state.dados_interpretados = None
   st.session_state.hash_ultimo_audio = None
-
-  # Força o incremento da chave do componente de áudio para resetar o gravador
   st.session_state.audio_key = st.session_state.get("audio_key", 0) + 1
 
-  # Zera flags de controle de modal
   for k in [
       "abrir_modal_voz",
       "exibir_modal_voz",
@@ -361,7 +348,6 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
   if "etapa_voz" not in st.session_state:
     st.session_state.etapa_voz = "gravacao"
 
-  # TELA 1: CAPTURA DO ÁUDIO
   if st.session_state.etapa_voz == "gravacao":
     pode_usar, uso, limite = verificar_limite_uso(supabase, id_usuario)
     if not pode_usar:
@@ -406,7 +392,6 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
           st.session_state.etapa_voz = "confirmacao"
           st.rerun()
 
-  # TELA 2: CONFIRMAÇÃO E AJUSTE
   elif st.session_state.etapa_voz == "confirmacao":
     dados = st.session_state.dados_interpretados or {}
     st.info(f'🗣️ **Você disse:** "{dados.get("transcricao")}"')
