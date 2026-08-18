@@ -53,12 +53,13 @@ def verificar_limite_uso(supabase, usuario_id):
 
 
 def incrementar_uso_voz(supabase, usuario_id, uso_atual):
+  """Incrementa o uso sem derrubar a aplicação caso a coluna não exista no Supabase."""
   try:
     supabase.table("usuarios").update({"uso_voz_mes": uso_atual + 1}).eq(
         "id", str(usuario_id)
     ).execute()
   except Exception as e:
-    print(f"Erro ao incrementar uso: {e}")
+    print(f"Aviso Supabase (uso_voz_mes): {e}")
 
 
 def transcrever_audio_groq(client_groq, audio_bytes):
@@ -75,10 +76,9 @@ def processar_texto_groq(
 ):
   hoje = obter_hoje_brasil()
 
-  # Prompt estruturado exigindo resposta exclusivamente em JSON
   prompt = f"""
-    Você é o assistente inteligente do ORCAS. 
-    Interprete o áudio do usuário e retorne um objeto json com os dados extraídos.
+    Você é o assistente financeiro do ORCAS. 
+    Sua tarefa é extrair os dados do áudio do usuário e responder EXCLUSIVAMENTE em formato JSON.
 
     CONTEXTO:
     - Data Atual: {hoje.strftime('%Y-%m-%d')} ({hoje.strftime('%A')})
@@ -86,12 +86,12 @@ def processar_texto_groq(
     - Projetos Disponíveis: {planos_disponiveis}
     - Áudio do Usuário: "{texto_transcrito}"
 
-    Estrutura do json esperada:
+    Esquema JSON obrigatório:
     {{
       "transcricao": "{texto_transcrito}",
       "intencao": "PROJETAR" | "REALIZAR" | "PARCIAL" | "ALTERAR" | "EXCLUIR",
       "projeto_id": "{plano_ativo}",
-      "descricao": "nome da conta ou gasto",
+      "descricao": "Nome do gasto ou receita",
       "valor": 0.00,
       "tipo": "Saída" | "Entrada",
       "data_vencimento": "YYYY-MM-DD",
@@ -101,20 +101,40 @@ def processar_texto_groq(
     }}
   """
 
-  # Utiliza o modelo Llama 3.3 70B (modelo estável e ativo de produção na Groq)
-  res = client_groq.chat.completions.create(
-      model="llama-3.3-70b-versatile",
-      messages=[{"role": "user", "content": prompt}],
-      temperature=0.1,
-      response_format={"type": "json_object"},
-  )
+  try:
+    res = client_groq.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.1,
+        response_format={"type": "json_object"},
+    )
+    conteudo = res.choices[0].message.content.strip()
+    dados_parsed = json.loads(conteudo)
 
-  return json.loads(res.choices[0].message.content.strip())
+    # Garante que o retorno é obrigatoriamente um dicionário
+    if isinstance(dados_parsed, dict):
+      return dados_parsed
+  except Exception as e:
+    print(f"Erro no processamento LLM/JSON: {e}")
+
+  # Retorno fallback de segurança se o JSON falhar
+  return {
+      "transcricao": texto_transcrito,
+      "intencao": "PROJETAR",
+      "projeto_id": plano_ativo,
+      "descricao": texto_transcrito,
+      "valor": 0.0,
+      "tipo": "Saída",
+      "data_vencimento": str(hoje),
+      "permite_parcial": False,
+      "cartao": None,
+      "parcelas": 1,
+  }
 
 
 def buscar_lancamento_no_banco(supabase, usuario_id, projeto_id, descricao):
   """Busca lançamento similar usando ilike diretamente no banco."""
-  if not descricao:
+  if not descricao or not isinstance(descricao, str):
     return None
   try:
     res = (
@@ -134,6 +154,9 @@ def buscar_lancamento_no_banco(supabase, usuario_id, projeto_id, descricao):
 
 def executar_acao_integrada(supabase, usuario_id, dados):
   """Executa a gravação reaproveitando a engine de cartões/parcelas da Conciliação."""
+  if not isinstance(dados, dict):
+    return "❌ Erro nos dados do lançamento."
+
   projeto_id = str(dados.get("projeto_id"))
   descricao = dados.get("descricao")
   valor = float(dados.get("valor") or 0.0)
@@ -152,7 +175,7 @@ def executar_acao_integrada(supabase, usuario_id, dados):
     return f"🗑️ Lançamento **{descricao}** excluído!"
 
   # 2. SE FOR COMPRA NO CARTÃO DE CRÉDITO (Usa Engine do Conciliação)
-  if cartao and cartao.upper() != "NENHUM":
+  if cartao and str(cartao).upper() != "NENHUM":
     corte, venc = buscar_dados_cartao(supabase, pd.DataFrame(), cartao)
     dt_1_venc = calcular_vencimento_fatura(
         dt_compra, dia_corte=corte, dia_vencimento=venc
@@ -298,19 +321,21 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
           )
 
           st.session_state.hash_ultimo_audio = hash(audio_bytes)
-          item_banco = buscar_lancamento_no_banco(
-              supabase, id_usuario, plano_ativo, dados.get("descricao")
-          )
 
-          if item_banco:
-            dados["id_existente"] = item_banco.get("id")
-            dados["descricao"] = item_banco.get("descricao")
-            if not dados.get("valor"):
-              dados["valor"] = float(
-                  item_banco.get("valor_plan")
-                  or item_banco.get("valor_real")
-                  or 0
-              )
+          # Garantia extra de tipo dicionário
+          if isinstance(dados, dict):
+            item_banco = buscar_lancamento_no_banco(
+                supabase, id_usuario, plano_ativo, dados.get("descricao")
+            )
+            if item_banco:
+              dados["id_existente"] = item_banco.get("id")
+              dados["descricao"] = item_banco.get("descricao")
+              if not dados.get("valor"):
+                dados["valor"] = float(
+                    item_banco.get("valor_plan")
+                    or item_banco.get("valor_real")
+                    or 0
+                )
 
           st.session_state.dados_interpretados = dados
           st.session_state.etapa_voz = "confirmacao"
