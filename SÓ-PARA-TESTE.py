@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 import json
+import re
 import time
 import zoneinfo
 from groq import Groq
@@ -31,6 +32,19 @@ def formatar_moeda_br(valor):
     )
   except Exception:
     return "R$ 0,00"
+
+
+def limpar_descricao_fallback(texto):
+  """Limpa o texto do áudio em caso de falha na IA para evitar frases completas."""
+  t = re.sub(
+      r"\b(comprei|paguei|gastei|custou|no valor de|valor de|por|reais|r\$)\b",
+      "",
+      texto,
+      flags=re.IGNORECASE,
+  )
+  t = re.sub(r"\d+([.,]\d+)?", "", t)  # Remove números/valores
+  t = re.sub(r"\s+", " ", t).strip()
+  return t.capitalize() if t else "Novo Lançamento"
 
 
 def verificar_limite_uso(supabase, usuario_id):
@@ -75,26 +89,37 @@ def processar_texto_groq(
 ):
   hoje = obter_hoje_brasil()
 
-  prompt = f"""
-    Você é o assistente financeiro do ORCAS. 
-    Sua tarefa é extrair os dados do áudio do usuário e responder EXCLUSIVAMENTE em formato JSON.
+  system_prompt = (
+      "Você é um extrator de dados financeiros de alta precisão. Sua única"
+      " tarefa é extrair os dados do áudio do usuário e retornar EXCLUSIVAMENTE"
+      " um JSON válido."
+  )
 
-    REGRAS RÍGIDAS DE EXTRAÇÃO:
-    1. "descricao": Remova verbos e palavras de preenchimento ("Comprei", "paguei", "no valor de", "R$"). Extraia APENAS o nome do produto/serviço (Exemplo: de "Comprei um blazer e paguei 259", extraia "Blazer").
-    2. "valor": Extraia apenas o valor numérico puro float (exemplo: 259.00).
-
-    CONTEXTO:
-    - Data Atual: {hoje.strftime('%Y-%m-%d')} ({hoje.strftime('%A')})
+  user_prompt = f"""
+    CONTEXTO DA APLICAÇÃO:
+    - Data de Hoje: {hoje.strftime('%Y-%m-%d')} ({hoje.strftime('%A')})
     - Projeto Ativo: "{plano_ativo}"
-    - Projetos Disponíveis: {planos_disponiveis}
-    - Áudio do Usuário: "{texto_transcrito}"
+    - Lista de Projetos: {planos_disponiveis}
+    - Áudio Transcrito: "{texto_transcrito}"
 
-    Esquema JSON obrigatório:
+    REGRAS DE EXTRAÇÃO:
+    1. "descricao": Extraia APENAS o nome limpo do item, produto ou serviço. Remova expressamente verbos e conectivos ("comprei", "paguei", "um", "uma", "por", "de", "no valor de", "reais").
+    2. "valor": Extraia apenas o número do valor total como float (ex: 500.00). Se não informado, retorne 0.0.
+
+    EXEMPLOS DE EXTRAÇÃO:
+    - Entrada: "Comprei um sapato azul por 500,00"
+      -> "descricao": "Sapato azul", "valor": 500.00
+    - Entrada: "Paguei a conta de luz no valor de 180 reais"
+      -> "descricao": "Conta de luz", "valor": 180.00
+    - Entrada: "Almoço no restaurante 45,90"
+      -> "descricao": "Almoço no restaurante", "valor": 45.90
+
+    FORMATO OBRIGATÓRIO DE SAÍDA (JSON):
     {{
       "transcricao": "{texto_transcrito}",
-      "intencao": "PROJETAR" | "REALIZAR" | "PARCIAL" | "ALTERAR" | "EXCLUIR",
+      "intencao": "REALIZAR" | "PROJETAR" | "PARCIAL" | "ALTERAR" | "EXCLUIR",
       "projeto_id": "{plano_ativo}",
-      "descricao": "Nome limpo do produto/serviço",
+      "descricao": "Nome do item",
       "valor": 0.00,
       "tipo": "Saída" | "Entrada",
       "data_vencimento": "{hoje.strftime('%Y-%m-%d')}",
@@ -107,23 +132,31 @@ def processar_texto_groq(
   try:
     res = client_groq.chat.completions.create(
         model="llama-3.3-70b-versatile",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.1,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        temperature=0.0,
         response_format={"type": "json_object"},
     )
     conteudo = res.choices[0].message.content.strip()
     dados_parsed = json.loads(conteudo)
 
     if isinstance(dados_parsed, dict):
+      # Garante limpeza adicional na descrição
+      desc = dados_parsed.get("descricao", "")
+      if desc.lower().startswith(("comprei ", "paguei ", "gastei ")):
+        dados_parsed["descricao"] = limpar_descricao_fallback(desc)
       return dados_parsed
   except Exception as e:
     print(f"Erro no processamento LLM/JSON: {e}")
 
+  # Fallback caso ocorra erro no LLM
   return {
       "transcricao": texto_transcrito,
       "intencao": "REALIZAR",
       "projeto_id": plano_ativo,
-      "descricao": texto_transcrito,
+      "descricao": limpar_descricao_fallback(texto_transcrito),
       "valor": 0.0,
       "tipo": "Saída",
       "data_vencimento": str(hoje),
@@ -186,7 +219,6 @@ def executar_acao_integrada(supabase, usuario_id, dados):
         dt_compra, dia_corte=corte, dia_vencimento=venc
     )
 
-    # CORREÇÃO PONTO 3: Se o vencimento da fatura deste mês já passou (ex: 10/08 e hoje é 18/08), joga para o mês seguinte
     if dt_1_venc < hoje:
       dt_1_venc = somar_meses_data(dt_1_venc, 1, dia_vencimento=venc)
 
@@ -281,12 +313,10 @@ def executar_acao_integrada(supabase, usuario_id, dados):
 
 
 def fechar_modal_voz():
-  """Limpa completamente o estado para impedir que o modal abra sozinho nas próximas iterações."""
   st.session_state.etapa_voz = "gravacao"
   st.session_state.dados_interpretados = None
   st.session_state.hash_ultimo_audio = None
 
-  # Força o fechamento das flags que controlam o modal no Streamlit
   for k in ["abrir_modal_voz", "exibir_modal_voz", "modal_voz_aberto"]:
     if k in st.session_state:
       st.session_state[k] = False
@@ -332,12 +362,10 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
 
           st.session_state.hash_ultimo_audio = hash(audio_bytes)
 
-          # CORREÇÃO PONTO 1: Não sobrescreve a descrição e o valor limpos da IA
           if isinstance(dados, dict):
             item_banco = buscar_lancamento_no_banco(
                 supabase, id_usuario, plano_ativo, dados.get("descricao")
             )
-            # Só associa o ID antigo se a intenção for alterar/excluir
             if item_banco and dados.get("intencao") in [
                 "ALTERAR",
                 "EXCLUIR",
