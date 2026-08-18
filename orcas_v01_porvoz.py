@@ -74,9 +74,11 @@ def processar_texto_groq(
     client_groq, texto_transcrito, planos_disponiveis, plano_ativo
 ):
   hoje = obter_hoje_brasil()
+
+  # A palavra 'json' precisa estar obrigatoriamente no prompt para o response_format funcionar na Groq
   prompt = f"""
     Você é o assistente inteligente do ORCAS. 
-    Sua tarefa é extrair os dados do áudio e responder EXCLUSIVAMENTE em formato JSON.
+    Interprete o áudio do usuário e retorne um objeto json com os dados extraídos.
 
     CONTEXTO:
     - Data Atual: {hoje.strftime('%Y-%m-%d')} ({hoje.strftime('%A')})
@@ -84,7 +86,7 @@ def processar_texto_groq(
     - Projetos Disponíveis: {planos_disponiveis}
     - Áudio do Usuário: "{texto_transcrito}"
 
-    Estrutura do JSON esperada:
+    Estrutura exata do json esperada:
     {{
       "transcricao": "{texto_transcrito}",
       "intencao": "PROJETAR" | "REALIZAR" | "PARCIAL" | "ALTERAR" | "EXCLUIR",
@@ -99,9 +101,8 @@ def processar_texto_groq(
     }}
   """
 
-  # Usando o slug legado que NUNCA dá 404 na Groq:
   res = client_groq.chat.completions.create(
-      model="llama3-8b-8192",
+      model="llama-3.3-70b-versatile",
       messages=[{"role": "user", "content": prompt}],
       temperature=0.1,
       response_format={"type": "json_object"},
