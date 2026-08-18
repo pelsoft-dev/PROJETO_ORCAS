@@ -35,15 +35,30 @@ def formatar_moeda_br(valor):
 
 
 def limpar_descricao_fallback(texto):
-  """Limpa o texto do áudio em caso de falha na IA para evitar frases completas."""
+  """Limpa o texto do áudio removendo verbos, artigos, preposições e pontuações."""
+  t = texto.strip()
+
+  # Remove pontos e vírgulas finais
+  t = re.sub(r"[.,;!?]+$", "", t)
+
+  # Remove termos comuns de ação/compra e artigos no início
+  padrao_limpeza = (
+      r"^\b(comprei|paguei|gastei|custou|coloque|registre|adicione|um|uma|uns|umas|o|a|os|as)\b\s*"
+  )
+  while re.search(padrao_limpeza, t, flags=re.IGNORECASE):
+    t = re.sub(padrao_limpeza, "", t, flags=re.IGNORECASE)
+
+  # Remove trechos de valores no final da frase (ex: "por 300 reais", "300,00", "no valor de 50")
   t = re.sub(
-      r"\b(comprei|paguei|gastei|custou|no valor de|valor de|por|reais|r\$)\b",
+      r"\b(no valor de|valor de|por|custa)?\s*\d+([.,]\d+)?\s*(reais|real|r\$)?\b.*$",
       "",
-      texto,
+      t,
       flags=re.IGNORECASE,
   )
-  t = re.sub(r"\d+([.,]\d+)?", "", t)  # Remove números/valores
-  t = re.sub(r"\s+", " ", t).strip()
+
+  # Limpeza de espaços extras e pontuação final residual
+  t = re.sub(r"\s+", " ", t).strip(" .")
+
   return t.capitalize() if t else "Novo Lançamento"
 
 
@@ -90,36 +105,35 @@ def processar_texto_groq(
   hoje = obter_hoje_brasil()
 
   system_prompt = (
-      "Você é um extrator de dados financeiros de alta precisão. Sua única"
-      " tarefa é extrair os dados do áudio do usuário e retornar EXCLUSIVAMENTE"
-      " um JSON válido."
+      "Você é o motor de IA financeiro do sistema ORCAS. "
+      "Sua única função é extrair informações financeiras do texto de áudio transcrito "
+      "e responder rigorosamente em um único objeto JSON."
   )
 
   user_prompt = f"""
-    CONTEXTO DA APLICAÇÃO:
-    - Data de Hoje: {hoje.strftime('%Y-%m-%d')} ({hoje.strftime('%A')})
+    CONTEXTO:
+    - Data Atual: {hoje.strftime('%Y-%m-%d')} ({hoje.strftime('%A')})
     - Projeto Ativo: "{plano_ativo}"
-    - Lista de Projetos: {planos_disponiveis}
+    - Projetos Disponíveis: {planos_disponiveis}
     - Áudio Transcrito: "{texto_transcrito}"
 
-    REGRAS DE EXTRAÇÃO:
-    1. "descricao": Extraia APENAS o nome limpo do item, produto ou serviço. Remova expressamente verbos e conectivos ("comprei", "paguei", "um", "uma", "por", "de", "no valor de", "reais").
-    2. "valor": Extraia apenas o número do valor total como float (ex: 500.00). Se não informado, retorne 0.0.
+    REGRAS RÍGIDAS DE EXTRAÇÃO:
+    1. "descricao": Extraia SOMENTE o nome do produto ou serviço.
+       - NUNCA inclua verbos ("Comprei", "Paguei", "Lançar").
+       - NUNCA inclua artigos no início ("um", "uma", "o", "a").
+       - NUNCA inclua o valor ou pontuação final.
+       - Exemplo: "Comprei um sapato amarelo por 300 reais" -> "Sapato amarelo"
+       - Exemplo: "Paguei uma conta de luz de 150" -> "Conta de luz"
 
-    EXEMPLOS DE EXTRAÇÃO:
-    - Entrada: "Comprei um sapato azul por 500,00"
-      -> "descricao": "Sapato azul", "valor": 500.00
-    - Entrada: "Paguei a conta de luz no valor de 180 reais"
-      -> "descricao": "Conta de luz", "valor": 180.00
-    - Entrada: "Almoço no restaurante 45,90"
-      -> "descricao": "Almoço no restaurante", "valor": 45.90
+    2. "valor": Extraia o valor numérico puro em formato float.
+       - Exemplo: "300 reais", "300,00", "trêscentos" -> 300.00.
 
-    FORMATO OBRIGATÓRIO DE SAÍDA (JSON):
+    JSON DE SAÍDA OBRIGATÓRIO:
     {{
       "transcricao": "{texto_transcrito}",
       "intencao": "REALIZAR" | "PROJETAR" | "PARCIAL" | "ALTERAR" | "EXCLUIR",
       "projeto_id": "{plano_ativo}",
-      "descricao": "Nome do item",
+      "descricao": "Nome limpo do produto sem artigos ou verbos",
       "valor": 0.00,
       "tipo": "Saída" | "Entrada",
       "data_vencimento": "{hoje.strftime('%Y-%m-%d')}",
@@ -143,15 +157,14 @@ def processar_texto_groq(
     dados_parsed = json.loads(conteudo)
 
     if isinstance(dados_parsed, dict):
-      # Garante limpeza adicional na descrição
+      # Pós-processamento de garantia para eliminar qualquer artigo/ponto residual
       desc = dados_parsed.get("descricao", "")
-      if desc.lower().startswith(("comprei ", "paguei ", "gastei ")):
-        dados_parsed["descricao"] = limpar_descricao_fallback(desc)
+      dados_parsed["descricao"] = limpar_descricao_fallback(desc or texto_transcrito)
       return dados_parsed
   except Exception as e:
     print(f"Erro no processamento LLM/JSON: {e}")
 
-  # Fallback caso ocorra erro no LLM
+  # Fallback seguro
   return {
       "transcricao": texto_transcrito,
       "intencao": "REALIZAR",
@@ -313,11 +326,21 @@ def executar_acao_integrada(supabase, usuario_id, dados):
 
 
 def fechar_modal_voz():
+  """Limpa os estados da sessão para fechar o modal e impedir loops de renderização."""
   st.session_state.etapa_voz = "gravacao"
   st.session_state.dados_interpretados = None
   st.session_state.hash_ultimo_audio = None
 
-  for k in ["abrir_modal_voz", "exibir_modal_voz", "modal_voz_aberto"]:
+  # Força o incremento da chave do componente de áudio para resetar o gravador
+  st.session_state.audio_key = st.session_state.get("audio_key", 0) + 1
+
+  # Zera flags de controle de modal
+  for k in [
+      "abrir_modal_voz",
+      "exibir_modal_voz",
+      "modal_voz_aberto",
+      "show_voice_modal",
+  ]:
     if k in st.session_state:
       st.session_state[k] = False
 
