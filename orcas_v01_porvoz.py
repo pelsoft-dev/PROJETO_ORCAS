@@ -75,21 +75,23 @@ def processar_texto_groq(
 ):
   hoje = obter_hoje_brasil()
 
-  # 1. Consulta dinamicamente os modelos ativos na sua chave de API
-  try:
-    modelos_disponiveis = [m.id for m in client_groq.models.list().data]
-    # Filtra apenas modelos de texto/chat, ignorando os modelos de transcrição (whisper)
-    modelos_chat = [
-        m for m in modelos_disponiveis if "whisper" not in m.lower()
-    ]
-    modelo_escolhido = (
-        modelos_chat[0] if modelos_chat else "llama-3.3-70b-versatile"
-    )
-  except Exception as e:
-    print(f"Erro ao listar modelos da Groq: {e}")
-    modelo_escolhido = "llama-3.3-70b-versatile"
+  # Modelos Groq ativos que aceitam nativamente o response_format JSON
+  modelos_validos_json = [
+      "llama-3.3-70b-versatile",
+      "llama-3.1-8b-instant",
+      "mixtral-8x7b-32768",
+  ]
 
-  # 2. Prompt estruturado exigindo formato json
+  modelo_escolhido = "llama-3.1-8b-instant"
+  try:
+    modelos_conta = [m.id for m in client_groq.models.list().data]
+    for m in modelos_validos_json:
+      if m in modelos_conta:
+        modelo_escolhido = m
+        break
+  except Exception as e:
+    print(f"Erro ao validar modelos na Groq: {e}")
+
   prompt = f"""
     Você é o assistente inteligente do ORCAS. 
     Interprete o áudio do usuário e retorne um objeto json com os dados extraídos.
@@ -113,7 +115,7 @@ def processar_texto_groq(
       "cartao": null,
       "parcelas": 1
     }}
-    """
+  """
 
   res = client_groq.chat.completions.create(
       model=modelo_escolhido,
@@ -268,6 +270,8 @@ def fechar_modal_voz():
   st.session_state.dados_interpretados = None
   st.session_state.hash_ultimo_audio = None
   st.session_state.abrir_modal_voz = False
+  if "exibir_modal_voz" in st.session_state:
+    st.session_state.exibir_modal_voz = False
 
 
 @st.dialog("🎙️ Conversar com o ORCAS")
