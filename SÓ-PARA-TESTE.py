@@ -53,7 +53,6 @@ def verificar_limite_uso(supabase, usuario_id):
 
 
 def incrementar_uso_voz(supabase, usuario_id, uso_atual):
-  """Incrementa o uso sem derrubar a aplicação caso a coluna não exista no Supabase."""
   try:
     supabase.table("usuarios").update({"uso_voz_mes": uso_atual + 1}).eq(
         "id", str(usuario_id)
@@ -80,6 +79,10 @@ def processar_texto_groq(
     Você é o assistente financeiro do ORCAS. 
     Sua tarefa é extrair os dados do áudio do usuário e responder EXCLUSIVAMENTE em formato JSON.
 
+    REGRAS RÍGIDAS DE EXTRAÇÃO:
+    1. "descricao": Remova verbos e palavras de preenchimento ("Comprei", "paguei", "no valor de", "R$"). Extraia APENAS o nome do produto/serviço (Exemplo: de "Comprei um blazer e paguei 259", extraia "Blazer").
+    2. "valor": Extraia apenas o valor numérico puro float (exemplo: 259.00).
+
     CONTEXTO:
     - Data Atual: {hoje.strftime('%Y-%m-%d')} ({hoje.strftime('%A')})
     - Projeto Ativo: "{plano_ativo}"
@@ -91,10 +94,10 @@ def processar_texto_groq(
       "transcricao": "{texto_transcrito}",
       "intencao": "PROJETAR" | "REALIZAR" | "PARCIAL" | "ALTERAR" | "EXCLUIR",
       "projeto_id": "{plano_ativo}",
-      "descricao": "Nome do gasto ou receita",
+      "descricao": "Nome limpo do produto/serviço",
       "valor": 0.00,
       "tipo": "Saída" | "Entrada",
-      "data_vencimento": "YYYY-MM-DD",
+      "data_vencimento": "{hoje.strftime('%Y-%m-%d')}",
       "permite_parcial": false,
       "cartao": null,
       "parcelas": 1
@@ -111,16 +114,14 @@ def processar_texto_groq(
     conteudo = res.choices[0].message.content.strip()
     dados_parsed = json.loads(conteudo)
 
-    # Garante que o retorno é obrigatoriamente um dicionário
     if isinstance(dados_parsed, dict):
       return dados_parsed
   except Exception as e:
     print(f"Erro no processamento LLM/JSON: {e}")
 
-  # Retorno fallback de segurança se o JSON falhar
   return {
       "transcricao": texto_transcrito,
-      "intencao": "PROJETAR",
+      "intencao": "REALIZAR",
       "projeto_id": plano_ativo,
       "descricao": texto_transcrito,
       "valor": 0.0,
@@ -133,8 +134,11 @@ def processar_texto_groq(
 
 
 def buscar_lancamento_no_banco(supabase, usuario_id, projeto_id, descricao):
-  """Busca lançamento similar usando ilike diretamente no banco."""
-  if not descricao or not isinstance(descricao, str):
+  if (
+      not descricao
+      or not isinstance(descricao, str)
+      or len(descricao.strip()) < 3
+  ):
     return None
   try:
     res = (
@@ -153,15 +157,15 @@ def buscar_lancamento_no_banco(supabase, usuario_id, projeto_id, descricao):
 
 
 def executar_acao_integrada(supabase, usuario_id, dados):
-  """Executa a gravação reaproveitando a engine de cartões/parcelas da Conciliação."""
   if not isinstance(dados, dict):
     return "❌ Erro nos dados do lançamento."
 
+  hoje = obter_hoje_brasil()
   projeto_id = str(dados.get("projeto_id"))
   descricao = dados.get("descricao")
   valor = float(dados.get("valor") or 0.0)
   tipo = dados.get("tipo", "Saída")
-  dt_venc = dados.get("data_vencimento") or str(obter_hoje_brasil())
+  dt_venc = dados.get("data_vencimento") or str(hoje)
   cartao = dados.get("cartao")
   parcelas = int(dados.get("parcelas") or 1)
   intencao = dados.get("intencao")
@@ -174,17 +178,21 @@ def executar_acao_integrada(supabase, usuario_id, dados):
     supabase.table("lancamentos").delete().eq("id", id_existente).execute()
     return f"🗑️ Lançamento **{descricao}** excluído!"
 
-  # 2. SE FOR COMPRA NO CARTÃO DE CRÉDITO (Usa Engine do Conciliação)
+  # 2. CARTÃO DE CRÉDITO
   if cartao and str(cartao).upper() != "NENHUM":
     corte, venc = buscar_dados_cartao(supabase, pd.DataFrame(), cartao)
+
     dt_1_venc = calcular_vencimento_fatura(
         dt_compra, dia_corte=corte, dia_vencimento=venc
     )
 
+    # CORREÇÃO PONTO 3: Se o vencimento da fatura deste mês já passou (ex: 10/08 e hoje é 18/08), joga para o mês seguinte
+    if dt_1_venc < hoje:
+      dt_1_venc = somar_meses_data(dt_1_venc, 1, dia_vencimento=venc)
+
     base_val = round(valor / parcelas, 2)
     residuo = round(valor - (base_val * parcelas), 2)
 
-    # Insere a compra de origem
     supabase.table("lancamentos").insert({
         "projeto_id": projeto_id,
         "usuario_id": str(usuario_id),
@@ -199,7 +207,6 @@ def executar_acao_integrada(supabase, usuario_id, dados):
         "cc_qtd_parcelas": parcelas,
     }).execute()
 
-    # Gera as parcelas LCL e atualiza o cartão pai $CCP
     for i in range(parcelas):
       v_parc = base_val + (residuo if i == (parcelas - 1) else 0.0)
       dt_venc_p = somar_meses_data(dt_1_venc, i, dia_vencimento=venc)
@@ -226,7 +233,7 @@ def executar_acao_integrada(supabase, usuario_id, dados):
 
     return f"✅ Compra **{descricao}** registrada no cartão **{cartao}** em {parcelas}x!"
 
-  # 3. SEM CARTÃO (PROJETAR, REALIZAR OU PARCIAL)
+  # 3. SEM CARTÃO
   if intencao == "PARCIAL":
     dt_1_dia = dt_compra.replace(day=1).strftime("%Y-%m-%d")
     supabase.table("lancamentos").insert({
@@ -244,13 +251,14 @@ def executar_acao_integrada(supabase, usuario_id, dados):
     }).execute()
     return f"✅ Lançamento parcial de **{formatar_moeda_br(valor)}** gravado!"
 
-  elif id_existente and intencao == "REALIZAR":
+  elif id_existente and intencao in ["REALIZAR", "ALTERAR"]:
     supabase.table("lancamentos").update({
-        "valor_real": valor,
-        "status": "Realizado",
+        "valor_real": valor if intencao == "REALIZAR" else 0.0,
+        "valor_plan": valor if intencao == "ALTERAR" else 0.0,
+        "status": "Realizado" if intencao == "REALIZAR" else "Planejado",
         "data_vencimento": dt_venc,
     }).eq("id", id_existente).execute()
-    return f"✅ Lançamento **{descricao}** baixado com sucesso!"
+    return f"✅ Lançamento **{descricao}** atualizado!"
 
   else:
     status = "Realizado" if intencao == "REALIZAR" else "Planejado"
@@ -273,13 +281,15 @@ def executar_acao_integrada(supabase, usuario_id, dados):
 
 
 def fechar_modal_voz():
-  """Reseta completamente o estado do modal no Streamlit."""
+  """Limpa completamente o estado para impedir que o modal abra sozinho nas próximas iterações."""
   st.session_state.etapa_voz = "gravacao"
   st.session_state.dados_interpretados = None
   st.session_state.hash_ultimo_audio = None
-  st.session_state.abrir_modal_voz = False
-  if "exibir_modal_voz" in st.session_state:
-    st.session_state.exibir_modal_voz = False
+
+  # Força o fechamento das flags que controlam o modal no Streamlit
+  for k in ["abrir_modal_voz", "exibir_modal_voz", "modal_voz_aberto"]:
+    if k in st.session_state:
+      st.session_state[k] = False
 
 
 @st.dialog("🎙️ Conversar com o ORCAS")
@@ -322,15 +332,19 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
 
           st.session_state.hash_ultimo_audio = hash(audio_bytes)
 
-          # Garantia extra de tipo dicionário
+          # CORREÇÃO PONTO 1: Não sobrescreve a descrição e o valor limpos da IA
           if isinstance(dados, dict):
             item_banco = buscar_lancamento_no_banco(
                 supabase, id_usuario, plano_ativo, dados.get("descricao")
             )
-            if item_banco:
+            # Só associa o ID antigo se a intenção for alterar/excluir
+            if item_banco and dados.get("intencao") in [
+                "ALTERAR",
+                "EXCLUIR",
+                "PARCIAL",
+            ]:
               dados["id_existente"] = item_banco.get("id")
-              dados["descricao"] = item_banco.get("descricao")
-              if not dados.get("valor"):
+              if not dados.get("valor") or dados.get("valor") == 0:
                 dados["valor"] = float(
                     item_banco.get("valor_plan")
                     or item_banco.get("valor_real")
@@ -352,7 +366,7 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
         intencao = st.selectbox(
             "Ação",
             ["REALIZAR", "PROJETAR", "PARCIAL", "ALTERAR", "EXCLUIR"],
-            index=0,
+            index=0 if dados.get("intencao") == "REALIZAR" else 1,
         )
         descricao = st.text_input("Descrição", value=dados.get("descricao", ""))
         cartao = st.text_input(
