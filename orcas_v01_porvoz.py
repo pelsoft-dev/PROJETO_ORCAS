@@ -99,8 +99,9 @@ def processar_texto_groq(
     }}
   """
 
+  # Usando o slug legado que NUNCA dá 404 na Groq:
   res = client_groq.chat.completions.create(
-      model="llama-3.1-8b-instant",
+      model="llama3-8b-8192",
       messages=[{"role": "user", "content": prompt}],
       temperature=0.1,
       response_format={"type": "json_object"},
