@@ -33,8 +33,8 @@ def formatar_moeda_br(valor):
 
 
 def normalizar_valor_moeda(valor_str):
-  """Converte formatos pt-BR de números (ex: '5.880', '5.880,00', '5880,00', '99,35') para float correto."""
-  if not valor_str:
+  """Converte formatos pt-BR de números (ex: '3.880', '3.880,00', '99,35') para float correto."""
+  if valor_str is None:
     return 0.0
 
   if isinstance(valor_str, (int, float)):
@@ -42,19 +42,17 @@ def normalizar_valor_moeda(valor_str):
 
   s = str(valor_str).strip().replace("R$", "").strip()
 
-  # Se tem ponto e vírgula (ex: 5.880,00)
+  # Exemplo: 3.880,00
   if "." in s and "," in s:
     s = s.replace(".", "").replace(",", ".")
-  # Se tem vírgula como decimal (ex: 99,35 ou 5880,00)
+  # Exemplo: 99,35 ou 3880,00
   elif "," in s:
     s = s.replace(",", ".")
-  # Se tem ponto (ex: 5.880 ou 5.88)
+  # Exemplo: 3.880 (ponto de milhar)
   elif "." in s:
     partes = s.split(".")
-    # Se a parte após o ponto tiver 3 dígitos, é ponto de milhar! Ex: 5.880 -> 5880
     if len(partes[-1]) == 3:
       s = "".join(partes)
-    # Se tiver 2 dígitos, é decimal americano! Ex: 5.88 -> 5.88
 
   try:
     return float(s)
@@ -67,49 +65,33 @@ def processar_texto_groq(
 ):
   hoje = obter_hoje_brasil()
 
-  system_prompt = (
-      "Você é o assistente financeiro do software ORCAS. "
-      "Sua missão é interpretar o comando de áudio do usuário e retornar EXCLUSIVAMENTE "
-      "um objeto JSON válido preenchido com extrema precisão."
-  )
+  system_prompt = """Você é um assistente especializado em extração de dados financeiros em formato JSON para o software ORCAS.
+Sua tarefa é analisar o comando de voz do usuário e extrair os dados EXATAMENTE no formato JSON solicitado.
+
+Siga estas regras estritas:
+1. "descricao": O nome do produto ou serviço limpo (Ex: "Comprei um terno azul por..." -> "Terno azul"). Remova verbos, artigos, preços e detalhes de pagamento.
+2. "valor": Valor numérico total (float). Lembre-se que no Brasil "3.880" ou "3.880,00" representa 3880.0.
+3. "cartao": O nome da bandeira/banco do cartão de crédito citado (Ex: "Visa", "Mastercard", "Nubank"). Se nenhum for citado, retorne null.
+4. "parcelas": Quantidade de parcelas (inteiro). Considere expressões como "3x", "três vezes" E TAMBÉM "três meses" ou "em 3 meses" como parcelas (Ex: 3). Se não for parcelado, retorne 1.
+5. "intencao": Use "REALIZAR" para compras/pagamentos já efetuados ou no cartão, e "PROJETAR" para previsões de gastos futuros.
+6. "tipo": "Saída" para compras/gastos e "Entrada" para receitas/recebimentos.
+"""
 
   user_prompt = f"""
-    CONTEXTO DO SISTEMA:
-    - Data Atual: {hoje.strftime('%Y-%m-%d')}
-    - Projeto Ativo: "{plano_ativo}"
-    - Áudio do Usuário: "{texto_transcrito}"
+Texto Transcrito: "{texto_transcrito}"
+Data Atual: {hoje.strftime('%Y-%m-%d')}
+Projeto Ativo: "{plano_ativo}"
 
-    REGRAS DE INTERPRETAÇÃO E EXTRAÇÃO:
-    1. "descricao": O nome limpo do produto/serviço. Remova verbos de compra ("Comprei", "Paguei"), artigos ("o", "a", "um"), e todo o trecho sobre valores ou formas de pagamento.
-       - Exemplo: "Comprei o terno Armani por R$ 5.880 e paguei no cartão Visa em 3x" -> "Terno Armani"
-       - Exemplo: "Paguei a conta de luz 180" -> "Conta de luz"
-
-    2. "valor": O valor numérico total em formato float (PONTO como separador decimal).
-       - ATENÇÃO A PONTOS DE MILHAR BRASILEIROS: "5.880" ou "5.880,00" SIGNIFICA 5880.0 (cinco mil oitocentos e oitenta).
-       - Exemplo: "R$ 5.880" -> 5880.0
-       - Exemplo: "99,35" -> 99.35
-
-    3. "cartao": Extraia o nome do cartão de crédito mencionado (ex: "Visa", "Mastercard", "Nubank", "Itaucard"). Se nenhum cartão for falado, retorne null.
-
-    4. "parcelas": Quantidade de parcelas como número inteiro.
-       - Exemplo: "em três vezes", "em 3x", "parcelado em 3 vezes" -> 3. Se não mencionar parcelamento, retorne 1.
-
-    5. "intencao": "REALIZAR" (se a compra/pagamento já ocorreu ou foi feita no cartão) ou "PROJETAR" (para lançamentos futuros).
-
-    FORMATO EXATO DA SAÍDA JSON:
-    {{
-      "transcricao": "{texto_transcrito}",
-      "intencao": "REALIZAR",
-      "projeto_id": "{plano_ativo}",
-      "descricao": "Nome limpo do produto",
-      "valor": 5880.00,
-      "tipo": "Saída",
-      "data_vencimento": "{hoje.strftime('%Y-%m-%d')}",
-      "permite_parcial": false,
-      "cartao": "Visa" ou null,
-      "parcelas": 1
-    }}
-  """
+Retorne APENAS o JSON com a estrutura:
+{{
+  "descricao": "Terno azul",
+  "valor": 3880.0,
+  "cartao": "Visa",
+  "parcelas": 3,
+  "intencao": "REALIZAR",
+  "tipo": "Saída"
+}}
+"""
 
   try:
     res = client_groq.chat.completions.create(
@@ -121,36 +103,51 @@ def processar_texto_groq(
         temperature=0.0,
         response_format={"type": "json_object"},
     )
+
     conteudo = res.choices[0].message.content.strip()
     dados_parsed = json.loads(conteudo)
 
-    if isinstance(dados_parsed, dict):
-      # Garante a formatação numérica adequada para o Python
-      dados_parsed["valor"] = normalizar_valor_moeda(dados_parsed.get("valor"))
+    # Tratamento de segurança dos campos extraídos
+    valor_float = normalizar_valor_moeda(dados_parsed.get("valor"))
 
-      # Limpeza de garantia de pontuação final da descrição
-      if dados_parsed.get("descricao"):
-        desc = dados_parsed["descricao"].strip()
-        desc = re.sub(r"[.,;!?]+$", "", desc).strip()
-        dados_parsed["descricao"] = desc.capitalize()
+    desc = str(dados_parsed.get("descricao") or "Novo Lançamento").strip()
+    desc = re.sub(r"[.,;!?]+$", "", desc).strip()
 
-      return dados_parsed
+    cartao_extraido = dados_parsed.get("cartao")
+    if (
+        isinstance(cartao_extraido, str)
+        and cartao_extraido.lower() == "nenhum"
+    ):
+      cartao_extraido = None
+
+    return {
+        "transcricao": texto_transcrito,
+        "intencao": dados_parsed.get("intencao", "REALIZAR"),
+        "projeto_id": plano_ativo,
+        "descricao": desc.capitalize(),
+        "valor": valor_float,
+        "tipo": dados_parsed.get("tipo", "Saída"),
+        "data_vencimento": str(hoje),
+        "permite_parcial": False,
+        "cartao": cartao_extraido,
+        "parcelas": int(dados_parsed.get("parcelas") or 1),
+    }
+
   except Exception as e:
-    print(f"Erro no processamento LLM: {e}")
-
-  # Fallback básico em caso de falha de comunicação com a API
-  return {
-      "transcricao": texto_transcrito,
-      "intencao": "REALIZAR",
-      "projeto_id": plano_ativo,
-      "descricao": "Novo Lançamento",
-      "valor": 0.0,
-      "tipo": "Saída",
-      "data_vencimento": str(hoje),
-      "permite_parcial": False,
-      "cartao": None,
-      "parcelas": 1,
-  }
+    # Exibe a exceção real para sabermos se foi chave de API, quota ou JSON inválido
+    st.error(f"⚠️ Erro ao processar o áudio via IA: {e}")
+    return {
+        "transcricao": texto_transcrito,
+        "intencao": "REALIZAR",
+        "projeto_id": plano_ativo,
+        "descricao": "Erro ao Interpretar",
+        "valor": 0.0,
+        "tipo": "Saída",
+        "data_vencimento": str(hoje),
+        "permite_parcial": False,
+        "cartao": None,
+        "parcelas": 1,
+    }
 
 
 def verificar_limite_uso(supabase, usuario_id):
