@@ -33,7 +33,7 @@ def formatar_moeda_br(valor):
 
 
 def normalizar_valor_moeda(valor_str):
-  """Converte formatos pt-BR de números (ex: '3.880', '90,00', '90') para float correto."""
+  """Converte formatos pt-BR de números (ex: '3.880', '90,00', '388,88') para float correto."""
   if valor_str is None:
     return 0.0
 
@@ -76,8 +76,8 @@ def processar_texto_groq(
     Projeto Ativo: "{plano_ativo}"
 
     Regras de extração:
-    1. "descricao": Nome limpo do item (ex: "Bermuda florida"). Remova verbos ("comprei"), artigos, preços e formas de pagamento.
-    2. "valor": Valor numérico total em float. Ex: "90,00" ou "90" -> 90.0. "3.880" -> 3880.0.
+    1. "descricao": Nome limpo do item (ex: "Camisa roxa"). Remova verbos ("comprei"), artigos, preços e formas de pagamento.
+    2. "valor": Valor numérico total em float. Ex: "388,88" -> 388.88. "3.880" -> 3880.0.
     3. "cartao": Nome da bandeira/banco do cartão de crédito citado (ex: "Visa", "Mastercard"). Se nenhum for citado, retorne null.
     4. "parcelas": Quantidade de parcelas como inteiro. Considerar "3x", "3 vezes" e "3 meses" como 3. Padrão: 1.
     5. "intencao": "REALIZAR" para compras efetuadas, "PROJETAR" para gastos futuros.
@@ -85,8 +85,8 @@ def processar_texto_groq(
 
     Retorne o JSON com esta estrutura exata:
     {{
-      "descricao": "Bermuda florida",
-      "valor": 90.0,
+      "descricao": "Camisa roxa",
+      "valor": 388.88,
       "cartao": null,
       "parcelas": 1,
       "intencao": "REALIZAR",
@@ -94,20 +94,46 @@ def processar_texto_groq(
     }}
   """
 
-  try:
-    res = client_groq.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        temperature=0.0,
-        response_format={"type": "json_object"},
-    )
+  # Tenta primeiro o modelo Llama 3.1 70B, se falhar cai para o Llama 3 70B
+  modelos_para_testar = ["llama-3.1-70b-versatile", "llama3-70b-8192"]
+  res = None
+  ultimo_erro = None
 
+  for modelo in modelos_para_testar:
+    try:
+      res = client_groq.chat.completions.create(
+          model=modelo,
+          messages=[
+              {"role": "system", "content": system_prompt},
+              {"role": "user", "content": user_prompt},
+          ],
+          temperature=0.0,
+          response_format={"type": "json_object"},
+      )
+      if res:
+        break
+    except Exception as err:
+      ultimo_erro = err
+
+  if not res:
+    return {
+        "transcricao": texto_transcrito,
+        "intencao": "REALIZAR",
+        "projeto_id": plano_ativo,
+        "descricao": "Erro de Modelo",
+        "valor": 0.0,
+        "tipo": "Saída",
+        "data_vencimento": str(hoje),
+        "permite_parcial": False,
+        "cartao": None,
+        "parcelas": 1,
+        "erro": f"Modelos indisponíveis: {ultimo_erro}",
+    }
+
+  try:
     conteudo = res.choices[0].message.content.strip()
 
-    # Limpeza rigorosa de marcadores markdown (```json ... ```)
+    # Limpeza de marcadores markdown (```json ... ```)
     conteudo_limpo = re.sub(
         r"^```json\s*|^```\s*|\s*```$", "", conteudo, flags=re.MULTILINE
     ).strip()
