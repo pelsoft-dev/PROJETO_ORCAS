@@ -65,9 +65,8 @@ def processar_texto_groq(
   system_prompt = (
       "Você é o assistente financeiro do software ORCAS.\n"
       "Sua tarefa é analisar a frase gravada pelo usuário e responder"
-      " EXCLUSIVAMENTE com um objeto JSON válido.\n"
-      "Não inclua nenhum texto adicional, explicações ou marcadores markdown"
-      " (como ```json)."
+      " EXCLUSIVAMENTE com um objeto JSON válido contendo a estrutura"
+      ' solicitada.\nNão inclua explicações ou formatação markdown como ```json.'
   )
 
   user_prompt = f"""
@@ -76,17 +75,17 @@ def processar_texto_groq(
     Projeto Ativo: "{plano_ativo}"
 
     Regras de extração:
-    1. "descricao": Nome limpo do item (ex: "Calça roxa"). Remova verbos ("cumpre", "comprei"), artigos, preços e formas de pagamento.
-    2. "valor": Valor numérico total em float. Ex: "568" -> 568.0.
+    1. "descricao": Nome limpo do item (ex: "Guarda-chuva"). Remova verbos ("comprei"), artigos, preços e formas de pagamento.
+    2. "valor": Valor numérico total em float. Ex: "69,00" -> 69.0.
     3. "cartao": Nome da bandeira/banco do cartão de crédito citado (ex: "Visa", "Mastercard"). Se nenhum for citado, retorne null.
     4. "parcelas": Quantidade de parcelas como inteiro. Considerar "3x", "3 vezes" e "3 meses" como 3. Padrão: 1.
     5. "intencao": "REALIZAR" para compras efetuadas, "PROJETAR" para gastos futuros.
     6. "tipo": "Saída" para compras/gastos e "Entrada" para receitas.
 
-    Retorne o JSON com esta estrutura exata:
+    Retorne exatamente esta estrutura JSON:
     {{
-      "descricao": "Calça roxa",
-      "valor": 568.0,
+      "descricao": "Guarda-chuva",
+      "valor": 69.0,
       "cartao": null,
       "parcelas": 1,
       "intencao": "REALIZAR",
@@ -94,12 +93,12 @@ def processar_texto_groq(
     }}
   """
 
-  # Modelos mantidos e ativos na Groq
-  modelos_para_testar = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
+  # Nomes exatos e válidos mantidos na infraestrutura da Groq
+  modelos_validos = ["llama-3.3-70b-versatile", "llama3-8b-8192"]
   res = None
   ultimo_erro = None
 
-  for modelo in modelos_para_testar:
+  for modelo in modelos_validos:
     try:
       res = client_groq.chat.completions.create(
           model=modelo,
@@ -110,7 +109,7 @@ def processar_texto_groq(
           temperature=0.0,
           response_format={"type": "json_object"},
       )
-      if res:
+      if res and res.choices:
         break
     except Exception as err:
       ultimo_erro = err
@@ -127,13 +126,13 @@ def processar_texto_groq(
         "permite_parcial": False,
         "cartao": None,
         "parcelas": 1,
-        "erro": f"Modelos indisponíveis: {ultimo_erro}",
+        "erro": f"Erro na API Groq: {ultimo_erro}",
     }
 
   try:
     conteudo = res.choices[0].message.content.strip()
 
-    # Limpeza de marcadores markdown (```json ... ```)
+    # Tratamento contra eventuais tags Markdown
     conteudo_limpo = re.sub(
         r"^```json\s*|^```\s*|\s*```$", "", conteudo, flags=re.MULTILINE
     ).strip()
@@ -184,7 +183,7 @@ def processar_texto_groq(
         "permite_parcial": False,
         "cartao": None,
         "parcelas": 1,
-        "erro": str(e),
+        "erro": f"Erro na conversão do JSON: {e}",
     }
 
 
