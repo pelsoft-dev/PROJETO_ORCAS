@@ -75,8 +75,8 @@ def processar_texto_groq(
     Projeto Ativo: "{plano_ativo}"
 
     Regras de extração:
-    1. "descricao": Nome limpo do item (ex: "Guarda-chuva"). Remova verbos ("comprei"), artigos, preços e formas de pagamento.
-    2. "valor": Valor numérico total em float. Ex: "69,00" -> 69.0.
+    1. "descricao": Nome limpo do item (ex: "Tênis"). Remova verbos ("comprei"), marcas não essenciais, artigos e preços.
+    2. "valor": Valor numérico total em float. Ex: "238,35" -> 238.35.
     3. "cartao": Nome da bandeira/banco do cartão de crédito citado (ex: "Visa", "Mastercard"). Se nenhum for citado, retorne null.
     4. "parcelas": Quantidade de parcelas como inteiro. Considerar "3x", "3 vezes" e "3 meses" como 3. Padrão: 1.
     5. "intencao": "REALIZAR" para compras efetuadas, "PROJETAR" para gastos futuros.
@@ -84,8 +84,8 @@ def processar_texto_groq(
 
     Retorne exatamente esta estrutura JSON:
     {{
-      "descricao": "Guarda-chuva",
-      "valor": 69.0,
+      "descricao": "Tênis",
+      "valor": 238.35,
       "cartao": null,
       "parcelas": 1,
       "intencao": "REALIZAR",
@@ -93,28 +93,25 @@ def processar_texto_groq(
     }}
   """
 
-  # Modelos atualizados e ativos na API Groq
-  modelos_validos = ["llama-3.1-8b-instant", "llama-3.3-70b-specdec"]
+  # Modelo ativo, ultra-rápido e padronizado na API do Groq
+  modelo_oficial = "llama-3.1-8b-instant"
   res = None
   ultimo_erro = None
 
-  for modelo in modelos_validos:
-    try:
-      res = client_groq.chat.completions.create(
-          model=modelo,
-          messages=[
-              {"role": "system", "content": system_prompt},
-              {"role": "user", "content": user_prompt},
-          ],
-          temperature=0.0,
-          response_format={"type": "json_object"},
-      )
-      if res and res.choices:
-        break
-    except Exception as err:
-      ultimo_erro = err
+  try:
+    res = client_groq.chat.completions.create(
+        model=modelo_oficial,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        temperature=0.0,
+        response_format={"type": "json_object"},
+    )
+  except Exception as err:
+    ultimo_erro = err
 
-  if not res:
+  if not res or not res.choices:
     return {
         "transcricao": texto_transcrito,
         "intencao": "REALIZAR",
