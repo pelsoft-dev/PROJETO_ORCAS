@@ -76,8 +76,8 @@ def processar_texto_groq(
     Projeto Ativo: "{plano_ativo}"
 
     Regras de extração:
-    1. "descricao": Nome limpo do item (ex: "Camisa roxa"). Remova verbos ("comprei"), artigos, preços e formas de pagamento.
-    2. "valor": Valor numérico total em float. Ex: "388,88" -> 388.88. "3.880" -> 3880.0.
+    1. "descricao": Nome limpo do item (ex: "Calça roxa"). Remova verbos ("cumpre", "comprei"), artigos, preços e formas de pagamento.
+    2. "valor": Valor numérico total em float. Ex: "568" -> 568.0.
     3. "cartao": Nome da bandeira/banco do cartão de crédito citado (ex: "Visa", "Mastercard"). Se nenhum for citado, retorne null.
     4. "parcelas": Quantidade de parcelas como inteiro. Considerar "3x", "3 vezes" e "3 meses" como 3. Padrão: 1.
     5. "intencao": "REALIZAR" para compras efetuadas, "PROJETAR" para gastos futuros.
@@ -85,8 +85,8 @@ def processar_texto_groq(
 
     Retorne o JSON com esta estrutura exata:
     {{
-      "descricao": "Camisa roxa",
-      "valor": 388.88,
+      "descricao": "Calça roxa",
+      "valor": 568.0,
       "cartao": null,
       "parcelas": 1,
       "intencao": "REALIZAR",
@@ -94,8 +94,8 @@ def processar_texto_groq(
     }}
   """
 
-  # Tenta primeiro o modelo Llama 3.1 70B, se falhar cai para o Llama 3 70B
-  modelos_para_testar = ["llama-3.1-70b-versatile", "llama3-70b-8192"]
+  # Modelos mantidos e ativos na Groq
+  modelos_para_testar = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
   res = None
   ultimo_erro = None
 
