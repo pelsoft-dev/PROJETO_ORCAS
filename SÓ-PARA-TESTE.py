@@ -93,8 +93,8 @@ def processar_texto_groq(
     }}
   """
 
-  # Modelos mantidos ativos e suportados na API Groq
-  modelos_validos = ["llama-3.1-8b-instant", "llama-3.3-70b-versatile"]
+  # Modelos atualizados e ativos na API Groq
+  modelos_validos = ["llama-3.1-8b-instant", "llama-3.3-70b-specdec"]
   res = None
   ultimo_erro = None
 
