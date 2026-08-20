@@ -74,13 +74,14 @@ def buscar_dados_cartao(supabase, df, nome_cartao):
 
 
 def calcular_vencimento_fatura(data_compra, dia_corte=21, dia_vencimento=27):
-  """Calcula a data de vencimento da 1ª parcela com base no dia de corte da fatura."""
+  """Calcula a data exata de vencimento da 1ª parcela com base no dia de corte da fatura."""
   corte = int(dia_corte)
   venc = int(dia_vencimento)
 
   ano = data_compra.year
   mes = data_compra.month
 
+  # Se a compra foi feita no dia do corte ou após, entra na fatura do mês seguinte
   if data_compra.day >= corte:
     mes += 1
     if mes > 12:
@@ -91,12 +92,14 @@ def calcular_vencimento_fatura(data_compra, dia_corte=21, dia_vencimento=27):
   return datetime(ano, mes, dia_final).date()
 
 
-def somar_meses_data(data_base, qtd_meses, dia_vencimento=27):
-  """Avança N meses mantendo o dia de vencimento exato do cartão."""
-  ano = data_base.year + ((data_base.month + qtd_meses - 1) // 12)
-  mes = ((data_base.month + qtd_meses - 1) % 12) + 1
-  dia = min(dia_vencimento, calendar.monthrange(ano, mes)[1])
-  return datetime(ano, mes, dia).date()
+def somar_meses_data(data_fatura_base, i_parcela, dia_vencimento=27):
+  """Gera a data de vencimento da N-ésima parcela mantendo o dia fixo da fatura."""
+  ano = data_fatura_base.year + (
+      (data_fatura_base.month + i_parcela - 1) // 12
+  )
+  mes = ((data_fatura_base.month + i_parcela - 1) % 12) + 1
+  dia_final = min(int(dia_vencimento), calendar.monthrange(ano, mes)[1])
+  return datetime(ano, mes, dia_final).date()
 
 
 def buscar_cartoes_lcp(df):
@@ -209,12 +212,12 @@ def atualizar_valor_plan_cartao(
 
 
 def salvar_lancamento_oficial(supabase, usuario_id, dados):
-  """MOTOR ÚNICO DE CRIAÇÃO/EDIÇÃO DE LANÇAMENTOS."""
+  """MOTOR ÚNICO DE CRIAÇÃO/EDIÇÃO DE LANÇAMENTOS (USADO NA CONCILIAÇÃO E NO PORVOZ)."""
   hoje = datetime.now(zoneinfo.ZoneInfo("America/Sao_Paulo")).date()
   projeto_id = str(
       dados.get("projeto_id") or st.session_state.get("projeto_ativo")
   )
-  descricao = dados.get("descricao")
+  descricao = str(dados.get("descricao") or "").strip()
   valor = float(dados.get("valor") or 0.0)
   tipo = dados.get("tipo", "Saída")
   dt_venc = dados.get("data_vencimento") or str(hoje)
@@ -235,10 +238,16 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
     return f"🗑️ Lançamento **{descricao}** excluído!"
 
   # 2. CARTÃO DE CRÉDITO
-  if cartao and str(cartao).upper() != "NENHUM":
+  is_cartao_valido = (
+      cartao
+      and str(cartao).strip().upper() not in ["NENHUM", "NONE", "NULL", ""]
+      and parcelas >= 1
+  )
+
+  if is_cartao_valido:
     corte, venc = buscar_dados_cartao(supabase, None, cartao)
 
-    # CORREÇÃO 2: Vencimento da 1ª parcela considerando a regra do dia de corte
+    # Vencimento da 1ª parcela considerando o dia de corte da fatura
     dt_1_venc = calcular_vencimento_fatura(
         dt_compra, dia_corte=corte, dia_vencimento=venc
     )
@@ -246,7 +255,7 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
     base_val = round(valor / parcelas, 2)
     residuo = round(valor - (base_val * parcelas), 2)
 
-    # CORREÇÃO 1: Trata o item mestre/existente ou insere novo como LCL com valor_real = total
+    # Item mestre: valor_plan = 0, valor_real = total da compra, cc_tipo = LCL
     payload_mestre = {
         "projeto_id": projeto_id,
         "usuario_id": str(usuario_id),
@@ -255,9 +264,9 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
         "data_vencimento": dt_compra.strftime("%Y-%m-%d"),
         "tipo": tipo,
         "valor_plan": 0.0,
-        "valor_real": valor,  # Registra o valor total da compra (ex: R$ 2.500,00)
+        "valor_real": valor,
         "status": "Realizado",
-        "cc_tipo": "LCL",  # Garante isolamento do fluxo mestre
+        "cc_tipo": "LCL",
         "cc_qtd_parcelas": parcelas,
         "permite_parcial": permite_parcial,
     }
@@ -273,10 +282,10 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
     else:
       supabase.table("lancamentos").insert(payload_mestre).execute()
 
-    # Gerar cada uma das parcelas nas faturas corretas
+    # Gerar parcelas sequenciais nas faturas
     for i in range(parcelas):
       v_parc = base_val + (residuo if i == (parcelas - 1) else 0.0)
-      dt_venc_p = somar_meses_data(dt_1_venc, i, dia_vencimento=venc)
+      dt_venc_p = somar_meses_data(dt_1_venc, i + 1, dia_vencimento=venc)
 
       supabase.table("lancamentos").insert({
           "projeto_id": projeto_id,
