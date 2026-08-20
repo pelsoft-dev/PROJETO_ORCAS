@@ -93,7 +93,6 @@ def processar_texto_groq(
     }}
   """
 
-  # Lista de modelos ativos no Groq com fallback automático
   modelos_candidatos = [
       "openai/gpt-oss-20b",
       "llama-3.3-70b-versatile",
@@ -142,7 +141,6 @@ def processar_texto_groq(
   try:
     conteudo = res.choices[0].message.content.strip()
 
-    # Tratamento contra tags Markdown
     conteudo_limpo = re.sub(
         r"^```json\s*|^```\s*|\s*```$", "", conteudo, flags=re.MULTILINE
     ).strip()
@@ -279,16 +277,27 @@ def executar_acao_integrada(supabase, usuario_id, dados):
     supabase.table("lancamentos").delete().eq("id", id_existente).execute()
     return f"🗑️ Lançamento **{descricao}** excluído!"
 
-  # 2. CARTÃO DE CRÉDITO
+  # 2. CARTÃO DE CRÉDITO (CORREÇÃO DA REGRA DO DIA DE CORTE)
   if cartao and str(cartao).upper() != "NENHUM":
     corte, venc = buscar_dados_cartao(supabase, pd.DataFrame(), cartao)
 
-    dt_1_venc = calcular_vencimento_fatura(
-        dt_compra, dia_corte=corte, dia_vencimento=venc
-    )
+    # Determina o mês base para o vencimento da 1ª parcela
+    # Se o dia da compra for >= ao dia de corte, o vencimento cai no mês SEGUINTE ao mês da compra.
+    # Se o dia da compra for < ao dia de corte, o vencimento cai no PRÓPRIO mês da compra.
+    ano_venc = dt_compra.year
+    mes_venc = dt_compra.month
 
-    if dt_1_venc < hoje:
-      dt_1_venc = somar_meses_data(dt_1_venc, 1, dia_vencimento=venc)
+    if dt_compra.day >= corte:
+      mes_venc += 1
+      if mes_venc > 12:
+        mes_venc = 1
+        ano_venc += 1
+
+    # Ajuste para dia de vencimento em relação ao mês correto
+    dia_venc_final = min(
+        venc, 28
+    )  # Evita erro em meses curtos como fevereiro
+    dt_1_venc = datetime(ano_venc, mes_venc, dia_venc_final).date()
 
     base_val = round(valor / parcelas, 2)
     residuo = round(valor - (base_val * parcelas), 2)
@@ -381,20 +390,20 @@ def executar_acao_integrada(supabase, usuario_id, dados):
 
 
 def fechar_modal_voz():
-  """Limpa estados da sessão para fechar o dialog do Streamlit e resetar o gravador."""
-  st.session_state.etapa_voz = "gravacao"
+  """Encerra a sessão do modal zerando o estado para evitar a reabertura automática nas interações da página."""
+  st.session_state.etapa_voz = None
   st.session_state.dados_interpretados = None
   st.session_state.hash_ultimo_audio = None
   st.session_state.audio_key = st.session_state.get("audio_key", 0) + 1
 
-  for k in [
+  chaves_modal = [
       "abrir_modal_voz",
       "exibir_modal_voz",
       "modal_voz_aberto",
       "show_voice_modal",
-  ]:
-    if k in st.session_state:
-      st.session_state[k] = False
+  ]
+  for k in chaves_modal:
+    st.session_state[k] = False
 
 
 @st.dialog("🎙️ Conversar com o ORCAS")
@@ -410,7 +419,10 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
 
   client_groq = Groq(api_key=groq_key.strip())
 
-  if "etapa_voz" not in st.session_state:
+  if (
+      "etapa_voz" not in st.session_state
+      or st.session_state.etapa_voz is None
+  ):
     st.session_state.etapa_voz = "gravacao"
 
   # TELA 1: GRAVAÇÃO
