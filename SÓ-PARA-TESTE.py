@@ -9,8 +9,6 @@ import streamlit as st
 
 from orcas_v01_conciliacao import (
     atualizar_valor_plan_cartao,
-    buscar_dados_cartao,
-    calcular_vencimento_fatura,
     somar_meses_data,
 )
 
@@ -33,15 +31,12 @@ def formatar_moeda_br(valor):
 
 
 def normalizar_valor_moeda(valor_str):
-  """Converte formatos pt-BR de números (ex: '3.880', '90,00', '388,88') para float correto."""
   if valor_str is None:
     return 0.0
-
   if isinstance(valor_str, (int, float)):
     return float(valor_str)
 
   s = str(valor_str).strip().replace("R$", "").strip()
-
   if "." in s and "," in s:
     s = s.replace(".", "").replace(",", ".")
   elif "," in s:
@@ -140,7 +135,6 @@ def processar_texto_groq(
 
   try:
     conteudo = res.choices[0].message.content.strip()
-
     conteudo_limpo = re.sub(
         r"^```json\s*|^```\s*|\s*```$", "", conteudo, flags=re.MULTILINE
     ).strip()
@@ -255,6 +249,72 @@ def buscar_lancamento_no_banco(supabase, usuario_id, projeto_id, descricao):
   return None
 
 
+def buscar_dados_cartao_seguro(supabase, nome_cartao):
+  """Busca o dia de corte e vencimento no Supabase com tolerância a maiúsculas/minúsculas."""
+  if supabase and nome_cartao:
+    try:
+      res = (
+          supabase.table("cartoes")
+          .select("*")
+          .ilike("nome", f"%{str(nome_cartao).strip()}%")
+          .execute()
+      )
+      if res and res.data and len(res.data) > 0:
+        c = res.data[0]
+        corte = int(
+            c.get("cc_dia_corte")
+            or c.get("dia_corte")
+            or c.get("corte")
+            or c.get("dia_fechamento")
+            or 3
+        )
+        venc = int(
+            c.get("cc_dia_vencimento")
+            or c.get("dia_vencimento")
+            or c.get("vencimento")
+            or 10
+        )
+        return corte, venc
+    except Exception as err:
+      print(f"Aviso busca de cartão: {err}")
+  return 3, 10  # Padrão seguro se não encontrar no banco
+
+
+def calcular_vencimento_fatura_robusto(dt_compra, dia_corte, dia_vencimento):
+  """Calcula a 1ª parcela. Compras a partir do dia de corte caem no vencimento do mês seguinte."""
+  corte = int(dia_corte or 3)
+  venc = int(dia_vencimento or 10)
+
+  ano = dt_compra.year
+  mes = dt_compra.month
+
+  # Compra realizada no dia de corte ou após: vai para a fatura do mês seguinte
+  if dt_compra.day >= corte:
+    mes += 1
+    if mes > 12:
+      mes = 1
+      ano += 1
+
+  # Se o vencimento é numericamente menor que o corte (ex: corte 25, vencimento 5)
+  if venc < corte:
+    mes += 1
+    if mes > 12:
+      mes = 1
+      ano += 1
+
+  dia_final = min(venc, 28)
+  dt_1_venc = datetime(ano, mes, dia_final).date()
+
+  if dt_1_venc <= dt_compra:
+    mes += 1
+    if mes > 12:
+      mes = 1
+      ano += 1
+    dt_1_venc = datetime(ano, mes, dia_final).date()
+
+  return dt_1_venc
+
+
 def executar_acao_integrada(supabase, usuario_id, dados):
   if not isinstance(dados, dict):
     return "❌ Erro nos dados do lançamento."
@@ -277,31 +337,17 @@ def executar_acao_integrada(supabase, usuario_id, dados):
     supabase.table("lancamentos").delete().eq("id", id_existente).execute()
     return f"🗑️ Lançamento **{descricao}** excluído!"
 
-  # 2. CARTÃO DE CRÉDITO (CORREÇÃO DA REGRA DO DIA DE CORTE)
+  # 2. CARTÃO DE CRÉDITO (CÁLCULO DE VENCIMENTO CORRIGIDO)
   if cartao and str(cartao).upper() != "NENHUM":
-    corte, venc = buscar_dados_cartao(supabase, pd.DataFrame(), cartao)
+    corte, venc = buscar_dados_cartao_seguro(supabase, cartao)
 
-    # Determina o mês base para o vencimento da 1ª parcela
-    # Se o dia da compra for >= ao dia de corte, o vencimento cai no mês SEGUINTE ao mês da compra.
-    # Se o dia da compra for < ao dia de corte, o vencimento cai no PRÓPRIO mês da compra.
-    ano_venc = dt_compra.year
-    mes_venc = dt_compra.month
-
-    if dt_compra.day >= corte:
-      mes_venc += 1
-      if mes_venc > 12:
-        mes_venc = 1
-        ano_venc += 1
-
-    # Ajuste para dia de vencimento em relação ao mês correto
-    dia_venc_final = min(
-        venc, 28
-    )  # Evita erro em meses curtos como fevereiro
-    dt_1_venc = datetime(ano_venc, mes_venc, dia_venc_final).date()
+    # 1ª Parcela calculada com a regra exata do dia de corte
+    dt_1_venc = calcular_vencimento_fatura_robusto(dt_compra, corte, venc)
 
     base_val = round(valor / parcelas, 2)
     residuo = round(valor - (base_val * parcelas), 2)
 
+    # Lançamento principal (Informativo)
     supabase.table("lancamentos").insert({
         "projeto_id": projeto_id,
         "usuario_id": str(usuario_id),
@@ -316,6 +362,7 @@ def executar_acao_integrada(supabase, usuario_id, dados):
         "cc_qtd_parcelas": parcelas,
     }).execute()
 
+    # Inserção das parcelas
     for i in range(parcelas):
       v_parc = base_val + (residuo if i == (parcelas - 1) else 0.0)
       dt_venc_p = somar_meses_data(dt_1_venc, i, dia_vencimento=venc)
@@ -340,7 +387,7 @@ def executar_acao_integrada(supabase, usuario_id, dados):
           supabase, pd.DataFrame(), cartao, dt_venc_p, usuario_id
       )
 
-    return f"✅ Compra **{descricao}** registrada no cartão **{cartao}** em {parcelas}x!"
+    return f"✅ Compra **{descricao}** registrada no cartão **{cartao}** em {parcelas}x! Primeira parcela em {dt_1_venc.strftime('%d/%m/%Y')}."
 
   # 3. SEM CARTÃO
   if intencao == "PARCIAL":
@@ -390,8 +437,8 @@ def executar_acao_integrada(supabase, usuario_id, dados):
 
 
 def fechar_modal_voz():
-  """Encerra a sessão do modal zerando o estado para evitar a reabertura automática nas interações da página."""
-  st.session_state.etapa_voz = None
+  """Zera os estados para garantir o encerramento absoluto do modal."""
+  st.session_state.etapa_voz = "fechado"
   st.session_state.dados_interpretados = None
   st.session_state.hash_ultimo_audio = None
   st.session_state.audio_key = st.session_state.get("audio_key", 0) + 1
@@ -401,6 +448,7 @@ def fechar_modal_voz():
       "exibir_modal_voz",
       "modal_voz_aberto",
       "show_voice_modal",
+      "abrir_voz",
   ]
   for k in chaves_modal:
     st.session_state[k] = False
@@ -408,6 +456,27 @@ def fechar_modal_voz():
 
 @st.dialog("🎙️ Conversar com o ORCAS")
 def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
+  # BLOQUEIO ABSOLUTO: Se o estado for 'fechado', encerra a função na primeira linha
+  chaves_abertura = [
+      "abrir_modal_voz",
+      "exibir_modal_voz",
+      "modal_voz_aberto",
+      "show_voice_modal",
+      "abrir_voz",
+  ]
+  if any(st.session_state.get(k, False) for k in chaves_abertura):
+    if st.session_state.get("etapa_voz") == "fechado":
+      st.session_state.etapa_voz = "gravacao"
+
+  if st.session_state.get("etapa_voz") == "fechado":
+    return
+
+  if (
+      "etapa_voz" not in st.session_state
+      or st.session_state.etapa_voz is None
+  ):
+    st.session_state.etapa_voz = "gravacao"
+
   if not planos_disponiveis:
     planos_disponiveis = [st.session_state.get("projeto_ativo") or "Padrão"]
   plano_ativo = st.session_state.get("projeto_ativo", planos_disponiveis[0])
@@ -418,12 +487,6 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
     return
 
   client_groq = Groq(api_key=groq_key.strip())
-
-  if (
-      "etapa_voz" not in st.session_state
-      or st.session_state.etapa_voz is None
-  ):
-    st.session_state.etapa_voz = "gravacao"
 
   # TELA 1: GRAVAÇÃO
   if st.session_state.etapa_voz == "gravacao":
@@ -497,7 +560,7 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
             format="%.2f",
         )
         dt_venc = st.date_input(
-            "Vencimento",
+            "Data da Compra",
             value=datetime.strptime(
                 dados.get("data_vencimento", str(obter_hoje_brasil())),
                 "%Y-%m-%d",

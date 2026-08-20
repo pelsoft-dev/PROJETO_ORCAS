@@ -76,19 +76,22 @@ def buscar_dados_cartao(supabase, df, nome_cartao):
 def calcular_vencimento_fatura(data_compra, dia_corte=21, dia_vencimento=27):
   """Calcula a data de vencimento da 1ª parcela com base no dia de corte da fatura.
 
-  Se data_compra.day >= dia_corte, a compra entra no faturamento do mês
-  seguinte.
+  Regra: Compras a partir do dia de corte (inclusive) vão para a fatura do mês
+  seguinte. Compras antes do dia de corte permanecem no vencimento do mês atual.
   """
+  corte = int(dia_corte)
+  venc = int(dia_vencimento)
+
   ano = data_compra.year
   mes = data_compra.month
 
-  if data_compra.day >= dia_corte:
+  if data_compra.day >= corte:
     mes += 1
     if mes > 12:
       mes = 1
       ano += 1
 
-  dia_final = min(dia_vencimento, calendar.monthrange(ano, mes)[1])
+  dia_final = min(venc, calendar.monthrange(ano, mes)[1])
   return datetime(ano, mes, dia_final).date()
 
 
