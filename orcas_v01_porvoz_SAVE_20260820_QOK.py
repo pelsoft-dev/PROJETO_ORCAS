@@ -7,7 +7,6 @@ from groq import Groq
 import pandas as pd
 import streamlit as st
 
-# MOTOR DE CONCILIAÇÃO COMPARTILHADO
 from orcas_v01_conciliacao import (
     atualizar_valor_plan_cartao,
     somar_meses_data,
@@ -128,7 +127,10 @@ def processar_texto_groq(
         "permite_parcial": False,
         "cartao": None,
         "parcelas": 1,
-        "erro": f"Nenhum modelo Groq respondeu. Último erro: {ultimo_erro}.",
+        "erro": (
+            f"Nenhum modelo Groq respondeu. Último erro: {ultimo_erro}. Verifique"
+            " suas permissões de API no console do Groq."
+        ),
     }
 
   try:
@@ -225,6 +227,7 @@ def transcrever_audio_groq(client_groq, audio_bytes):
 
 
 def buscar_lancamento_no_banco(supabase, usuario_id, projeto_id, descricao):
+  """Busca case-insensitive no banco de dados para coincidir termos como 'mercado' e 'Mercado'."""
   if (
       not descricao
       or not isinstance(descricao, str)
@@ -277,6 +280,38 @@ def buscar_dados_cartao_seguro(supabase, nome_cartao):
   return 3, 10
 
 
+def calcular_vencimento_fatura_robusto(dt_compra, dia_corte, dia_vencimento):
+  corte = int(dia_corte or 3)
+  venc = int(dia_vencimento or 10)
+
+  ano = dt_compra.year
+  mes = dt_compra.month
+
+  if dt_compra.day >= corte:
+    mes += 1
+    if mes > 12:
+      mes = 1
+      ano += 1
+
+  if venc < corte:
+    mes += 1
+    if mes > 12:
+      mes = 1
+      ano += 1
+
+  dia_final = min(venc, 28)
+  dt_1_venc = datetime(ano, mes, dia_final).date()
+
+  if dt_1_venc <= dt_compra:
+    mes += 1
+    if mes > 12:
+      mes = 1
+      ano += 1
+    dt_1_venc = datetime(ano, mes, dia_final).date()
+
+  return dt_1_venc
+
+
 def executar_acao_integrada(supabase, usuario_id, dados):
   if not isinstance(dados, dict):
     return "❌ Erro nos dados do lançamento."
@@ -298,19 +333,9 @@ def executar_acao_integrada(supabase, usuario_id, dados):
     supabase.table("lancamentos").delete().eq("id", id_existente).execute()
     return f"🗑️ Lançamento **{descricao}** excluído!"
 
-  # CÁLCULO DE CARTÃO DE CRÉDITO - INTEGRADO AO CONCILIAÇÃO
   if cartao and str(cartao).upper() != "NENHUM":
     corte, venc = buscar_dados_cartao_seguro(supabase, cartao)
-
-    ano = dt_compra.year
-    mes = dt_compra.month
-    if dt_compra.day >= corte:
-      mes += 1
-      if mes > 12:
-        mes = 1
-        ano += 1
-
-    dt_1_venc = datetime(ano, mes, min(venc, 28)).date()
+    dt_1_venc = calcular_vencimento_fatura_robusto(dt_compra, corte, venc)
 
     base_val = round(valor / parcelas, 2)
     residuo = round(valor - (base_val * parcelas), 2)
@@ -402,14 +427,24 @@ def executar_acao_integrada(supabase, usuario_id, dados):
 
 
 def fechar_modal_voz():
-  """Reseta as flags para permitir reabertura sem mexer no orcasapp.py."""
-  st.session_state.abrir_modal_orcas = False
-  st.session_state.etapa_voz = "gravacao"
+  """Zera os estados para encerrar o modal totalmente."""
+  st.session_state.etapa_voz = "fechado"
   st.session_state.dados_interpretados = None
   st.session_state.hash_ultimo_audio = None
   st.session_state.audio_key = st.session_state.get("audio_key", 0) + 1
 
+  chaves_modal = [
+      "abrir_modal_voz",
+      "exibir_modal_voz",
+      "modal_voz_aberto",
+      "show_voice_modal",
+      "abrir_voz",
+  ]
+  for k in chaves_modal:
+    st.session_state[k] = False
 
+
+# FUNÇÃO INTERNA DO DIÁLOGO
 @st.dialog("🎙️ Conversar com o ORCAS")
 def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
   plano_ativo = st.session_state.get("projeto_ativo", planos_disponiveis[0])
@@ -421,7 +456,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
 
   client_groq = Groq(api_key=groq_key.strip())
 
-  # ETAPA 1: GRAVAÇÃO
+  # TELA 1: GRAVAÇÃO
   if st.session_state.etapa_voz == "gravacao":
     pode_usar, uso, limite = verificar_limite_uso(supabase, id_usuario)
     if not pode_usar:
@@ -446,12 +481,14 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
           st.session_state.hash_ultimo_audio = hash(audio_bytes)
 
           if isinstance(dados, dict):
+            # Busca lançamento no banco (case-insensitive)
             item_banco = buscar_lancamento_no_banco(
                 supabase, id_usuario, plano_ativo, dados.get("descricao")
             )
             if item_banco:
               dados["id_existente"] = item_banco.get("id")
 
+              # CORREÇÃO (2): Se o item no banco aceita parciais, força a intenção PARCIAL
               if item_banco.get("permite_parcial") or item_banco.get(
                   "parcial_real"
               ):
@@ -469,7 +506,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
           st.session_state.etapa_voz = "confirmacao"
           st.rerun()
 
-  # ETAPA 2: CONFIRMAÇÃO
+  # TELA 2: CONFIRMAÇÃO
   elif st.session_state.etapa_voz == "confirmacao":
     dados = st.session_state.dados_interpretados or {}
     st.info(f'🗣️ **Você disse:** "{dados.get("transcricao")}"')
@@ -548,12 +585,20 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
         st.rerun()
 
 
+# FUNÇÃO PRINCIPAL DE ENTRADA
 def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
-  # Garante inicialização limpa quando acionado pelo orcasapp.py
-  if "etapa_voz" not in st.session_state or not st.session_state.etapa_voz:
+  # CORREÇÃO (1): Se o estado for "fechado", não chama a função @st.dialog de jeito nenhum
+  if st.session_state.get("etapa_voz") == "fechado":
+    return
+
+  if (
+      "etapa_voz" not in st.session_state
+      or st.session_state.etapa_voz is None
+  ):
     st.session_state.etapa_voz = "gravacao"
 
   if not planos_disponiveis:
     planos_disponiveis = [st.session_state.get("projeto_ativo") or "Padrão"]
 
+  # Chama a renderização do diájogo apenas quando estiver realmente ativo
   _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis)
