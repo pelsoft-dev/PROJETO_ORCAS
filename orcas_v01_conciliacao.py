@@ -20,7 +20,7 @@ def buscar_dados_cartao(supabase, df, nome_cartao):
 
   nome_busca = str(nome_cartao).strip().upper()
 
-  # 1. Tenta buscar no DataFrame local (se fornecido)
+  # 1. Tenta buscar no DataFrame local
   if df is not None and not df.empty and "cc_tipo" in df.columns:
     df_ccp = df[
         (
@@ -47,7 +47,7 @@ def buscar_dados_cartao(supabase, df, nome_cartao):
         corte_calc = venc_int - 6 if venc_int > 6 else venc_int + 24
         return corte_calc, venc_int
 
-  # 2. Se não achou no df local, busca direto no Supabase
+  # 2. Busca direta no Supabase
   try:
     res = (
         supabase.table("lancamentos")
@@ -81,6 +81,7 @@ def calcular_vencimento_fatura(data_compra, dia_corte=21, dia_vencimento=27):
   ano = data_compra.year
   mes = data_compra.month
 
+  # Se a compra foi feita no dia do corte ou após, a 1ª parcela vai para a fatura do mês seguinte
   if data_compra.day >= corte:
     mes += 1
     if mes > 12:
@@ -92,13 +93,14 @@ def calcular_vencimento_fatura(data_compra, dia_corte=21, dia_vencimento=27):
 
 
 def somar_meses_data(data_fatura_base, i_parcela, dia_vencimento=27):
-  """Gera a data de vencimento da N-ésima parcela mantendo o dia fixo da fatura."""
-  ano = data_fatura_base.year + (
-      (data_fatura_base.month + i_parcela - 1) // 12
-  )
-  mes = ((data_fatura_base.month + i_parcela - 1) % 12) + 1
-  dia_final = min(int(dia_vencimento), calendar.monthrange(ano, mes)[1])
-  return datetime(ano, mes, dia_final).date()
+  """Gera a data de vencimento da N-ésima parcela mantendo o dia fixo e ajustando mês e ano."""
+  # i_parcela = 0 é a 1ª parcela (mesma data base), i_parcela = 1 soma 1 mês, etc.
+  total_meses = (data_fatura_base.month - 1) + i_parcela
+  novo_ano = data_fatura_base.year + (total_meses // 12)
+  novo_mes = (total_meses % 12) + 1
+
+  dia_final = min(int(dia_vencimento), calendar.monthrange(novo_ano, novo_mes)[1])
+  return datetime(novo_ano, novo_mes, dia_final).date()
 
 
 def buscar_cartoes_lcp(df):
@@ -174,7 +176,7 @@ def atualizar_valor_plan_cartao(
     ) & (
         df_db["descricao"].fillna("").astype(str).str.strip().str.upper()
         == nome_busca
-    )
+    ) & (df_db["valor_plan"] > 0)
 
     soma_lcls = float(df_db[mask_lcls]["valor_plan"].fillna(0).sum())
   else:
@@ -253,7 +255,7 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
     base_val = round(valor / parcelas, 2)
     residuo = round(valor - (base_val * parcelas), 2)
 
-    # CORREÇÃO: Garante a gravação COMPLETA do lançamento mestre no Supabase
+    # LANÇAMENTO MESTRE (V.Plan = 0, V.Real = valor total, Status = REAL, cc_tipo = LCL)
     payload_mestre = {
         "projeto_id": projeto_id,
         "usuario_id": str(usuario_id),
@@ -263,8 +265,8 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
         "tipo": tipo,
         "valor_plan": 0.0,
         "valor_real": valor,
-        "status": "Realizado",  # Garante que grave 'Realizado'
-        "cc_tipo": "LCL",  # Tipo LCL explícito
+        "status": "REAL",
+        "cc_tipo": "LCL",
         "cc_qtd_parcelas": parcelas,
         "permite_parcial": permite_parcial,
     }
@@ -280,7 +282,7 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
     else:
       supabase.table("lancamentos").insert(payload_mestre).execute()
 
-    # Gerar parcelas filhas nas faturas do cartão
+    # GERAR PARCELAS FILHAS NAS FATURAS
     for i in range(parcelas):
       v_parc = base_val + (residuo if i == (parcelas - 1) else 0.0)
       dt_venc_p = somar_meses_data(dt_1_venc, i, dia_vencimento=venc)
@@ -296,7 +298,7 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
           "tipo": "Saída",
           "valor_plan": round(v_parc, 2),
           "valor_real": 0.0,
-          "status": "Planejado",
+          "status": "PLAN",
           "cc_tipo": "LCL",
           "cc_qtd_parcelas": 0,
       }).execute()
@@ -321,7 +323,7 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
         "valor_real": valor,
         "parcial_real": valor,
         "parcial_data": dt_venc,
-        "status": "Realizado",
+        "status": "REAL",
         "permite_parcial": True,
     }).execute()
     return f"✅ Lançamento parcial de **R$ {valor:,.2f}** gravado!"
@@ -330,13 +332,13 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
     supabase.table("lancamentos").update({
         "valor_real": valor if intencao == "REALIZAR" else 0.0,
         "valor_plan": valor if intencao == "ALTERAR" else 0.0,
-        "status": "Realizado" if intencao == "REALIZAR" else "Planejado",
+        "status": "REAL" if intencao == "REALIZAR" else "PLAN",
         "data_vencimento": dt_venc,
     }).eq("id", id_existente).execute()
     return f"✅ Lançamento **{descricao}** atualizado!"
 
   else:
-    status = "Realizado" if intencao == "REALIZAR" else "Planejado"
+    status = "REAL" if intencao == "REALIZAR" else "PLAN"
     supabase.table("lancamentos").insert({
         "projeto_id": projeto_id,
         "usuario_id": str(usuario_id),
@@ -344,8 +346,8 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
         "data": dt_venc,
         "data_vencimento": dt_venc,
         "tipo": tipo,
-        "valor_plan": valor if status == "Planejado" else 0.0,
-        "valor_real": valor if status == "Realizado" else 0.0,
+        "valor_plan": valor if status == "PLAN" else 0.0,
+        "valor_real": valor if status == "REAL" else 0.0,
         "status": status,
         "permite_parcial": permite_parcial,
     }).execute()
@@ -789,7 +791,7 @@ def exibir_conciliacao(
             else:
               supabase.table("lancamentos").update({
                   "valor_real": float(v_para_gravar),
-                  "status": "Realizado",
+                  "status": "REAL",
               }).eq("id", row["id"]).execute()
 
             st.session_state.reset_count += 1
