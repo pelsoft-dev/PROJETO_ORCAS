@@ -70,7 +70,6 @@ def buscar_dados_cartao(supabase, df, nome_cartao):
   except Exception:
     pass
 
-  # Fallback genérico apenas se não houver NENHUM cadastro no banco
   return 21, 27
 
 
@@ -210,10 +209,7 @@ def atualizar_valor_plan_cartao(
 
 
 def salvar_lancamento_oficial(supabase, usuario_id, dados):
-  """MOTOR ÚNICO DE CRIAÇÃO/EDIÇÃO DE LANÇAMENTOS.
-
-  Usado tanto pela tela de Conciliação quanto pelo PorVoz.
-  """
+  """MOTOR ÚNICO DE CRIAÇÃO/EDIÇÃO DE LANÇAMENTOS."""
   hoje = datetime.now(zoneinfo.ZoneInfo("America/Sao_Paulo")).date()
   projeto_id = str(
       dados.get("projeto_id") or st.session_state.get("projeto_ativo")
@@ -238,12 +234,11 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
     supabase.table("lancamentos").delete().eq("id", id_existente).execute()
     return f"🗑️ Lançamento **{descricao}** excluído!"
 
-  # 2. CARTÃO DE CRÉDITO (FLUXO UNIFICADO E CORRIGIDO)
+  # 2. CARTÃO DE CRÉDITO
   if cartao and str(cartao).upper() != "NENHUM":
-    # A) Busca os dias exatos de corte e vencimento do cartão
     corte, venc = buscar_dados_cartao(supabase, None, cartao)
 
-    # B) CORREÇÃO 2: Calcula o vencimento exato da 1ª fatura com regra de corte
+    # CORREÇÃO 2: Vencimento da 1ª parcela considerando a regra do dia de corte
     dt_1_venc = calcular_vencimento_fatura(
         dt_compra, dia_corte=corte, dia_vencimento=venc
     )
@@ -251,7 +246,7 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
     base_val = round(valor / parcelas, 2)
     residuo = round(valor - (base_val * parcelas), 2)
 
-    # C) CORREÇÃO 1: Gravando o Mestre (Televisão) com valor_real = total da compra e cc_tipo = LCL
+    # CORREÇÃO 1: Trata o item mestre/existente ou insere novo como LCL com valor_real = total
     payload_mestre = {
         "projeto_id": projeto_id,
         "usuario_id": str(usuario_id),
@@ -260,9 +255,9 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
         "data_vencimento": dt_compra.strftime("%Y-%m-%d"),
         "tipo": tipo,
         "valor_plan": 0.0,
-        "valor_real": valor,  # Registra os R$ 2.500,00 na compra mestre
+        "valor_real": valor,  # Registra o valor total da compra (ex: R$ 2.500,00)
         "status": "Realizado",
-        "cc_tipo": "LCL",  # Garante cc_tipo = LCL para isolar do fluxo de caixa
+        "cc_tipo": "LCL",  # Garante isolamento do fluxo mestre
         "cc_qtd_parcelas": parcelas,
         "permite_parcial": permite_parcial,
     }
@@ -271,9 +266,14 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
       payload_mestre["parcial_real"] = valor
       payload_mestre["parcial_data"] = dt_compra.strftime("%Y-%m-%d")
 
-    supabase.table("lancamentos").insert(payload_mestre).execute()
+    if id_existente:
+      supabase.table("lancamentos").update(payload_mestre).eq(
+          "id", id_existente
+      ).execute()
+    else:
+      supabase.table("lancamentos").insert(payload_mestre).execute()
 
-    # D) Inserção das parcelas nas faturas corretas
+    # Gerar cada uma das parcelas nas faturas corretas
     for i in range(parcelas):
       v_parc = base_val + (residuo if i == (parcelas - 1) else 0.0)
       dt_venc_p = somar_meses_data(dt_1_venc, i, dia_vencimento=venc)
@@ -294,7 +294,6 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
           "cc_qtd_parcelas": 0,
       }).execute()
 
-      # E) Atualiza o somatório do Cartão Pai ($CCP) para a fatura do mês correspondente
       atualizar_valor_plan_cartao(
           supabase, None, cartao, dt_venc_p, usuario_id
       )
