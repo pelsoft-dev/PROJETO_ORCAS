@@ -81,7 +81,6 @@ def calcular_vencimento_fatura(data_compra, dia_corte=21, dia_vencimento=27):
   ano = data_compra.year
   mes = data_compra.month
 
-  # Se a compra foi feita no dia do corte ou após, entra na fatura do mês seguinte
   if data_compra.day >= corte:
     mes += 1
     if mes > 12:
@@ -202,7 +201,7 @@ def atualizar_valor_plan_cartao(
           "tipo": "Saída",
           "valor_plan": round(soma_lcls, 2),
           "valor_real": 0.0,
-          "status": "Planejado",
+          "status": "Realizado",
           "cc_tipo": "$CCP",
           "cc_dia_corte": corte,
           "cc_dia_vencimento": venc,
@@ -247,7 +246,6 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
   if is_cartao_valido:
     corte, venc = buscar_dados_cartao(supabase, None, cartao)
 
-    # Vencimento da 1ª parcela considerando o dia de corte da fatura
     dt_1_venc = calcular_vencimento_fatura(
         dt_compra, dia_corte=corte, dia_vencimento=venc
     )
@@ -255,7 +253,7 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
     base_val = round(valor / parcelas, 2)
     residuo = round(valor - (base_val * parcelas), 2)
 
-    # Item mestre: valor_plan = 0, valor_real = total da compra, cc_tipo = LCL
+    # CORREÇÃO: Garante a gravação COMPLETA do lançamento mestre no Supabase
     payload_mestre = {
         "projeto_id": projeto_id,
         "usuario_id": str(usuario_id),
@@ -265,8 +263,8 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
         "tipo": tipo,
         "valor_plan": 0.0,
         "valor_real": valor,
-        "status": "Realizado",
-        "cc_tipo": "LCL",
+        "status": "Realizado",  # Garante que grave 'Realizado'
+        "cc_tipo": "LCL",  # Tipo LCL explícito
         "cc_qtd_parcelas": parcelas,
         "permite_parcial": permite_parcial,
     }
@@ -282,10 +280,10 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
     else:
       supabase.table("lancamentos").insert(payload_mestre).execute()
 
-    # Gerar parcelas sequenciais nas faturas
+    # Gerar parcelas filhas nas faturas do cartão
     for i in range(parcelas):
       v_parc = base_val + (residuo if i == (parcelas - 1) else 0.0)
-      dt_venc_p = somar_meses_data(dt_1_venc, i + 1, dia_vencimento=venc)
+      dt_venc_p = somar_meses_data(dt_1_venc, i, dia_vencimento=venc)
 
       supabase.table("lancamentos").insert({
           "projeto_id": projeto_id,
@@ -527,16 +525,12 @@ def exibir_conciliacao(
         df_c["parcial_real"], errors="coerce"
     ).fillna(0)
 
+    cc_tipo_str = df_c["cc_tipo"].fillna("").astype(str).str.strip().str.upper()
+    is_lcl = cc_tipo_str.str.contains(r"LCL|\$CCL", regex=True)
+    is_mestre_lcl = is_lcl & (df_c["valor_real"] > 0) & (df_c["valor_plan"] == 0)
+
     df_base_tela = df_c[
-        (df_c["parcial_real"] == 0)
-        & (
-            ~df_c["cc_tipo"]
-            .fillna("")
-            .astype(str)
-            .str.strip()
-            .str.upper()
-            .str.contains(r"LCL|\$CCL", regex=True)
-        )
+        (df_c["parcial_real"] == 0) & ((~is_lcl) | is_mestre_lcl)
     ].copy()
 
     if st.session_state.listar_todos_mes:
