@@ -1,9 +1,9 @@
 import calendar
 from datetime import datetime, timedelta
-import pandas as pd
-import streamlit as st
 import zoneinfo
+import pandas as pd
 from orcas_v01_ajuda_conciliacao import renderizar_ajuda_conciliacao
+import streamlit as st
 
 # ==============================================================================
 # ENGINES & REGRAS DE NEGÓCIO (Exportadas para a Conciliação e Módulo por Voz)
@@ -212,7 +212,7 @@ def atualizar_valor_plan_cartao(
 def salvar_lancamento_oficial(supabase, usuario_id, dados):
   """MOTOR ÚNICO DE CRIAÇÃO/EDIÇÃO DE LANÇAMENTOS.
 
-  Integrado para PorVoz e Conciliação.
+  Usado tanto pela tela de Conciliação quanto pelo PorVoz.
   """
   hoje = datetime.now(zoneinfo.ZoneInfo("America/Sao_Paulo")).date()
   projeto_id = str(
@@ -238,10 +238,12 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
     supabase.table("lancamentos").delete().eq("id", id_existente).execute()
     return f"🗑️ Lançamento **{descricao}** excluído!"
 
-  # 2. CARTÃO DE CRÉDITO
+  # 2. CARTÃO DE CRÉDITO (FLUXO UNIFICADO E CORRIGIDO)
   if cartao and str(cartao).upper() != "NENHUM":
+    # A) Busca os dias exatos de corte e vencimento do cartão
     corte, venc = buscar_dados_cartao(supabase, None, cartao)
 
+    # B) CORREÇÃO 2: Calcula o vencimento exato da 1ª fatura com regra de corte
     dt_1_venc = calcular_vencimento_fatura(
         dt_compra, dia_corte=corte, dia_vencimento=venc
     )
@@ -249,6 +251,7 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
     base_val = round(valor / parcelas, 2)
     residuo = round(valor - (base_val * parcelas), 2)
 
+    # C) CORREÇÃO 1: Gravando o Mestre (Televisão) com valor_real = total da compra e cc_tipo = LCL
     payload_mestre = {
         "projeto_id": projeto_id,
         "usuario_id": str(usuario_id),
@@ -257,9 +260,9 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
         "data_vencimento": dt_compra.strftime("%Y-%m-%d"),
         "tipo": tipo,
         "valor_plan": 0.0,
-        "valor_real": 0.0,
-        "status": "Realizado" if permite_parcial else "Planejado",
-        "cc_tipo": "LCL",
+        "valor_real": valor,  # Registra os R$ 2.500,00 na compra mestre
+        "status": "Realizado",
+        "cc_tipo": "LCL",  # Garante cc_tipo = LCL para isolar do fluxo de caixa
         "cc_qtd_parcelas": parcelas,
         "permite_parcial": permite_parcial,
     }
@@ -270,6 +273,7 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
 
     supabase.table("lancamentos").insert(payload_mestre).execute()
 
+    # D) Inserção das parcelas nas faturas corretas
     for i in range(parcelas):
       v_parc = base_val + (residuo if i == (parcelas - 1) else 0.0)
       dt_venc_p = somar_meses_data(dt_1_venc, i, dia_vencimento=venc)
@@ -290,11 +294,12 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
           "cc_qtd_parcelas": 0,
       }).execute()
 
+      # E) Atualiza o somatório do Cartão Pai ($CCP) para a fatura do mês correspondente
       atualizar_valor_plan_cartao(
           supabase, None, cartao, dt_venc_p, usuario_id
       )
 
-    return f"✅ Compra **{descricao}** registrada no cartão **{cartao}** ({parcelas}x)!"
+    return f"✅ Compra **{descricao}** registrada no cartão **{cartao}** ({parcelas}x de R$ {base_val:.2f})!"
 
   # 3. CONVENCIONAL OU PARCIAL (SEM CARTÃO)
   if intencao == "PARCIAL" or permite_parcial:
