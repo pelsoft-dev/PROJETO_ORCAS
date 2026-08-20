@@ -6,21 +6,17 @@ from orcas_v01_ajuda_conciliacao import renderizar_ajuda_conciliacao
 import streamlit as st
 
 # ==============================================================================
-# ENGINES & REGRAS DE NEGÓCIO (Exportadas para a Conciliação e Módulo por Voz)
+# ENGINES & REGRAS DE NEGÓCIO
 # ==============================================================================
 
-
 def buscar_dados_cartao(supabase, df, nome_cartao):
-  """Busca o dia de corte e o dia de vencimento do cartão ($CCP).
-
-  Caso não encontre no df local, realiza uma busca direta no Supabase.
-  """
+  """Busca o dia de corte e o dia de vencimento do cartão ($CCP)."""
   if not nome_cartao or str(nome_cartao).strip().upper() == "NENHUM":
     return 21, 27
 
   nome_busca = str(nome_cartao).strip().upper()
 
-  # 1. Tenta buscar no DataFrame local
+  # 1. Busca no DataFrame local
   if df is not None and not df.empty and "cc_tipo" in df.columns:
     df_ccp = df[
         (
@@ -81,7 +77,6 @@ def calcular_vencimento_fatura(data_compra, dia_corte=21, dia_vencimento=27):
   ano = data_compra.year
   mes = data_compra.month
 
-  # Se a compra foi feita no dia do corte ou após, a 1ª parcela vai para a fatura do mês seguinte
   if data_compra.day >= corte:
     mes += 1
     if mes > 12:
@@ -94,7 +89,6 @@ def calcular_vencimento_fatura(data_compra, dia_corte=21, dia_vencimento=27):
 
 def somar_meses_data(data_fatura_base, i_parcela, dia_vencimento=27):
   """Gera a data de vencimento da N-ésima parcela mantendo o dia fixo e ajustando mês e ano."""
-  # i_parcela = 0 é a 1ª parcela (mesma data base), i_parcela = 1 soma 1 mês, etc.
   total_meses = (data_fatura_base.month - 1) + i_parcela
   novo_ano = data_fatura_base.year + (total_meses // 12)
   novo_mes = (total_meses % 12) + 1
@@ -203,7 +197,7 @@ def atualizar_valor_plan_cartao(
           "tipo": "Saída",
           "valor_plan": round(soma_lcls, 2),
           "valor_real": 0.0,
-          "status": "Realizado",
+          "status": "Planejado",
           "cc_tipo": "$CCP",
           "cc_dia_corte": corte,
           "cc_dia_vencimento": venc,
@@ -213,7 +207,7 @@ def atualizar_valor_plan_cartao(
 
 
 def salvar_lancamento_oficial(supabase, usuario_id, dados):
-  """MOTOR ÚNICO DE CRIAÇÃO/EDIÇÃO DE LANÇAMENTOS (USADO NA CONCILIAÇÃO E NO PORVOZ)."""
+  """MOTOR ÚNICO DE CRIAÇÃO/EDIÇÃO DE LANÇAMENTOS (CONCILIAÇÃO E POR VOZ)."""
   hoje = datetime.now(zoneinfo.ZoneInfo("America/Sao_Paulo")).date()
   projeto_id = str(
       dados.get("projeto_id") or st.session_state.get("projeto_ativo")
@@ -255,7 +249,7 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
     base_val = round(valor / parcelas, 2)
     residuo = round(valor - (base_val * parcelas), 2)
 
-    # LANÇAMENTO MESTRE (V.Plan = 0, V.Real = valor total, Status = REAL, cc_tipo = LCL)
+    # LANÇAMENTO MESTRE: V.Real = 0, Status = Planejado (Não duplica saída no mês corrente)
     payload_mestre = {
         "projeto_id": projeto_id,
         "usuario_id": str(usuario_id),
@@ -264,8 +258,8 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
         "data_vencimento": dt_compra.strftime("%Y-%m-%d"),
         "tipo": tipo,
         "valor_plan": 0.0,
-        "valor_real": valor,
-        "status": "REAL",
+        "valor_real": 0.0,
+        "status": "Planejado",
         "cc_tipo": "LCL",
         "cc_qtd_parcelas": parcelas,
         "permite_parcial": permite_parcial,
@@ -282,7 +276,7 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
     else:
       supabase.table("lancamentos").insert(payload_mestre).execute()
 
-    # GERAR PARCELAS FILHAS NAS FATURAS
+    # GERAR PARCELAS FILHAS (LCL) NAS FATURAS
     for i in range(parcelas):
       v_parc = base_val + (residuo if i == (parcelas - 1) else 0.0)
       dt_venc_p = somar_meses_data(dt_1_venc, i, dia_vencimento=venc)
@@ -298,7 +292,7 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
           "tipo": "Saída",
           "valor_plan": round(v_parc, 2),
           "valor_real": 0.0,
-          "status": "PLAN",
+          "status": "Planejado",
           "cc_tipo": "LCL",
           "cc_qtd_parcelas": 0,
       }).execute()
@@ -323,7 +317,7 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
         "valor_real": valor,
         "parcial_real": valor,
         "parcial_data": dt_venc,
-        "status": "REAL",
+        "status": "Realizado",
         "permite_parcial": True,
     }).execute()
     return f"✅ Lançamento parcial de **R$ {valor:,.2f}** gravado!"
@@ -332,13 +326,13 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
     supabase.table("lancamentos").update({
         "valor_real": valor if intencao == "REALIZAR" else 0.0,
         "valor_plan": valor if intencao == "ALTERAR" else 0.0,
-        "status": "REAL" if intencao == "REALIZAR" else "PLAN",
+        "status": "Realizado" if intencao == "REALIZAR" else "Planejado",
         "data_vencimento": dt_venc,
     }).eq("id", id_existente).execute()
     return f"✅ Lançamento **{descricao}** atualizado!"
 
   else:
-    status = "REAL" if intencao == "REALIZAR" else "PLAN"
+    status = "Realizado" if intencao == "REALIZAR" else "Planejado"
     supabase.table("lancamentos").insert({
         "projeto_id": projeto_id,
         "usuario_id": str(usuario_id),
@@ -346,8 +340,8 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
         "data": dt_venc,
         "data_vencimento": dt_venc,
         "tipo": tipo,
-        "valor_plan": valor if status == "PLAN" else 0.0,
-        "valor_real": valor if status == "REAL" else 0.0,
+        "valor_plan": valor if status == "Planejado" else 0.0,
+        "valor_real": valor if status == "Realizado" else 0.0,
         "status": status,
         "permite_parcial": permite_parcial,
     }).execute()
@@ -357,7 +351,6 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
 # ==============================================================================
 # INTERFACE DA TELA DE CONCILIAÇÃO
 # ==============================================================================
-
 
 def exibir_conciliacao(
     df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moeda
@@ -775,6 +768,7 @@ def exibir_conciliacao(
             )
 
             if is_cc:
+              # Ao conciliar com cartão, usa a engine e mantém valor_real = 0.0 no mestre
               dados_c = {
                   "projeto_id": st.session_state.projeto_ativo,
                   "descricao": row["descricao"],
@@ -791,7 +785,7 @@ def exibir_conciliacao(
             else:
               supabase.table("lancamentos").update({
                   "valor_real": float(v_para_gravar),
-                  "status": "REAL",
+                  "status": "Realizado",
               }).eq("id", row["id"]).execute()
 
             st.session_state.reset_count += 1
