@@ -277,7 +277,7 @@ def buscar_dados_cartao_seguro(supabase, nome_cartao):
         return corte, venc
     except Exception as err:
       print(f"Aviso busca de cartão: {err}")
-  return 3, 10  # Padrão seguro se não encontrar no banco
+  return 3, 10
 
 
 def calcular_vencimento_fatura_robusto(dt_compra, dia_corte, dia_vencimento):
@@ -288,14 +288,12 @@ def calcular_vencimento_fatura_robusto(dt_compra, dia_corte, dia_vencimento):
   ano = dt_compra.year
   mes = dt_compra.month
 
-  # Compra realizada no dia de corte ou após: vai para a fatura do mês seguinte
   if dt_compra.day >= corte:
     mes += 1
     if mes > 12:
       mes = 1
       ano += 1
 
-  # Se o vencimento é numericamente menor que o corte (ex: corte 25, vencimento 5)
   if venc < corte:
     mes += 1
     if mes > 12:
@@ -337,17 +335,15 @@ def executar_acao_integrada(supabase, usuario_id, dados):
     supabase.table("lancamentos").delete().eq("id", id_existente).execute()
     return f"🗑️ Lançamento **{descricao}** excluído!"
 
-  # 2. CARTÃO DE CRÉDITO (CÁLCULO DE VENCIMENTO CORRIGIDO)
+  # 2. CARTÃO DE CRÉDITO
   if cartao and str(cartao).upper() != "NENHUM":
     corte, venc = buscar_dados_cartao_seguro(supabase, cartao)
 
-    # 1ª Parcela calculada com a regra exata do dia de corte
     dt_1_venc = calcular_vencimento_fatura_robusto(dt_compra, corte, venc)
 
     base_val = round(valor / parcelas, 2)
     residuo = round(valor - (base_val * parcelas), 2)
 
-    # Lançamento principal (Informativo)
     supabase.table("lancamentos").insert({
         "projeto_id": projeto_id,
         "usuario_id": str(usuario_id),
@@ -362,7 +358,6 @@ def executar_acao_integrada(supabase, usuario_id, dados):
         "cc_qtd_parcelas": parcelas,
     }).execute()
 
-    # Inserção das parcelas
     for i in range(parcelas):
       v_parc = base_val + (residuo if i == (parcelas - 1) else 0.0)
       dt_venc_p = somar_meses_data(dt_1_venc, i, dia_vencimento=venc)
@@ -456,7 +451,7 @@ def fechar_modal_voz():
 
 @st.dialog("🎙️ Conversar com o ORCAS")
 def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
-  # BLOQUEIO ABSOLUTO: Se o estado for 'fechado', encerra a função na primeira linha
+  # DESATIVA AS FLAGS DE ABERTURA IMEDIATAMENTE AO ENTRAR
   chaves_abertura = [
       "abrir_modal_voz",
       "exibir_modal_voz",
@@ -464,10 +459,17 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
       "show_voice_modal",
       "abrir_voz",
   ]
+
+  # Se o modal foi acionado pelas flags mas está 'fechado', reseta para 'gravacao'
   if any(st.session_state.get(k, False) for k in chaves_abertura):
     if st.session_state.get("etapa_voz") == "fechado":
       st.session_state.etapa_voz = "gravacao"
 
+    # Consome o evento do clique limpando as flags para não causar o retrigger
+    for k in chaves_abertura:
+      st.session_state[k] = False
+
+  # Se o estado estiver explicitamente fechado, interrompe a renderização
   if st.session_state.get("etapa_voz") == "fechado":
     return
 
