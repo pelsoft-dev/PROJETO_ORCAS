@@ -93,23 +93,33 @@ def processar_texto_groq(
     }}
   """
 
-  # Modelo ativo, ultra-rápido e padronizado na API do Groq
-  modelo_oficial = "llama-3.1-8b-instant"
+  # Lista de modelos ativos no Groq com fallback automático
+  modelos_candidatos = [
+      "openai/gpt-oss-20b",
+      "llama-3.3-70b-versatile",
+      "meta-llama/llama-4-scout-17b-16e-instruct",
+      "llama-3.1-8b-instant",
+  ]
+
   res = None
   ultimo_erro = None
 
-  try:
-    res = client_groq.chat.completions.create(
-        model=modelo_oficial,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        temperature=0.0,
-        response_format={"type": "json_object"},
-    )
-  except Exception as err:
-    ultimo_erro = err
+  for modelo in modelos_candidatos:
+    try:
+      res = client_groq.chat.completions.create(
+          model=modelo,
+          messages=[
+              {"role": "system", "content": system_prompt},
+              {"role": "user", "content": user_prompt},
+          ],
+          temperature=0.0,
+          response_format={"type": "json_object"},
+      )
+      if res and res.choices:
+        break
+    except Exception as err:
+      ultimo_erro = err
+      continue
 
   if not res or not res.choices:
     return {
@@ -123,13 +133,16 @@ def processar_texto_groq(
         "permite_parcial": False,
         "cartao": None,
         "parcelas": 1,
-        "erro": f"Erro na API Groq: {ultimo_erro}",
+        "erro": (
+            f"Nenhum modelo Groq respondeu. Último erro: {ultimo_erro}. Verifique"
+            " suas permissões de API no console do Groq."
+        ),
     }
 
   try:
     conteudo = res.choices[0].message.content.strip()
 
-    # Tratamento contra eventuais tags Markdown
+    # Tratamento contra tags Markdown
     conteudo_limpo = re.sub(
         r"^```json\s*|^```\s*|\s*```$", "", conteudo, flags=re.MULTILINE
     ).strip()
