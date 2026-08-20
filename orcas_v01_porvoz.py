@@ -7,10 +7,9 @@ from groq import Groq
 import pandas as pd
 import streamlit as st
 
-# MOTOR DE CONCILIAÇÃO COMPARTILHADO
+# CONSUMO DIRETO DO MOTOR DE CONCILIAÇÃO UNIFICADO
 from orcas_v01_conciliacao import (
-    atualizar_valor_plan_cartao,
-    somar_meses_data,
+    salvar_lancamento_oficial,
 )
 
 LIMITES_USO = {"PADRÃO": 30, "INTERMEDIÁRIO": 100, "ILIMITADO": 999999}
@@ -71,8 +70,8 @@ def processar_texto_groq(
     Projeto Ativo: "{plano_ativo}"
 
     Regras de extração:
-    1. "descricao": Nome limpo do item (ex: "Tênis"). Remova verbos ("comprei"), marcas não essenciais, artigos e preços.
-    2. "valor": Valor numérico total em float. Ex: "238,35" -> 238.35.
+    1. "descricao": Nome limpo do item (ex: "Mercado"). Remova verbos ("comprei"), marcas não essenciais, artigos e preços.
+    2. "valor": Valor numérico total em float. Ex: "444,00" -> 444.00.
     3. "cartao": Nome da bandeira/banco do cartão de crédito citado (ex: "Visa", "Mastercard"). Se nenhum for citado, retorne null.
     4. "parcelas": Quantidade de parcelas como inteiro. Considerar "3x", "3 vezes" e "3 meses" como 3. Padrão: 1.
     5. "intencao": "REALIZAR" para compras efetuadas, "PROJETAR" para gastos futuros.
@@ -80,10 +79,10 @@ def processar_texto_groq(
 
     Retorne exatamente esta estrutura JSON:
     {{
-      "descricao": "Tênis",
-      "valor": 238.35,
-      "cartao": null,
-      "parcelas": 1,
+      "descricao": "Mercado",
+      "valor": 444.00,
+      "cartao": "Visa",
+      "parcelas": 3,
       "intencao": "REALIZAR",
       "tipo": "Saída"
     }}
@@ -247,162 +246,8 @@ def buscar_lancamento_no_banco(supabase, usuario_id, projeto_id, descricao):
   return None
 
 
-def buscar_dados_cartao_seguro(supabase, nome_cartao):
-  if supabase and nome_cartao:
-    try:
-      res = (
-          supabase.table("cartoes")
-          .select("*")
-          .ilike("nome", f"%{str(nome_cartao).strip()}%")
-          .execute()
-      )
-      if res and res.data and len(res.data) > 0:
-        c = res.data[0]
-        corte = int(
-            c.get("cc_dia_corte")
-            or c.get("dia_corte")
-            or c.get("corte")
-            or c.get("dia_fechamento")
-            or 3
-        )
-        venc = int(
-            c.get("cc_dia_vencimento")
-            or c.get("dia_vencimento")
-            or c.get("vencimento")
-            or 10
-        )
-        return corte, venc
-    except Exception as err:
-      print(f"Aviso busca de cartão: {err}")
-  return 3, 10
-
-
-def executar_acao_integrada(supabase, usuario_id, dados):
-  if not isinstance(dados, dict):
-    return "❌ Erro nos dados do lançamento."
-
-  hoje = obter_hoje_brasil()
-  projeto_id = str(dados.get("projeto_id"))
-  descricao = dados.get("descricao")
-  valor = float(dados.get("valor") or 0.0)
-  tipo = dados.get("tipo", "Saída")
-  dt_venc = dados.get("data_vencimento") or str(hoje)
-  cartao = dados.get("cartao")
-  parcelas = int(dados.get("parcelas") or 1)
-  intencao = dados.get("intencao")
-  id_existente = dados.get("id_existente")
-
-  dt_compra = datetime.strptime(dt_venc, "%Y-%m-%d").date()
-
-  if intencao == "EXCLUIR" and id_existente:
-    supabase.table("lancamentos").delete().eq("id", id_existente).execute()
-    return f"🗑️ Lançamento **{descricao}** excluído!"
-
-  # CÁLCULO DE CARTÃO DE CRÉDITO - INTEGRADO AO CONCILIAÇÃO
-  if cartao and str(cartao).upper() != "NENHUM":
-    corte, venc = buscar_dados_cartao_seguro(supabase, cartao)
-
-    ano = dt_compra.year
-    mes = dt_compra.month
-    if dt_compra.day >= corte:
-      mes += 1
-      if mes > 12:
-        mes = 1
-        ano += 1
-
-    dt_1_venc = datetime(ano, mes, min(venc, 28)).date()
-
-    base_val = round(valor / parcelas, 2)
-    residuo = round(valor - (base_val * parcelas), 2)
-
-    supabase.table("lancamentos").insert({
-        "projeto_id": projeto_id,
-        "usuario_id": str(usuario_id),
-        "descricao": descricao,
-        "data": dt_compra.strftime("%Y-%m-%d"),
-        "data_vencimento": dt_compra.strftime("%Y-%m-%d"),
-        "tipo": tipo,
-        "valor_plan": 0.0,
-        "valor_real": 0.0,
-        "status": "Planejado",
-        "cc_tipo": "LCL",
-        "cc_qtd_parcelas": parcelas,
-    }).execute()
-
-    for i in range(parcelas):
-      v_parc = base_val + (residuo if i == (parcelas - 1) else 0.0)
-      dt_venc_p = somar_meses_data(dt_1_venc, i, dia_vencimento=venc)
-
-      supabase.table("lancamentos").insert({
-          "projeto_id": projeto_id,
-          "usuario_id": str(usuario_id),
-          "descricao": cartao,
-          "cc_descricao": f"{descricao} ({i+1:02d}/{parcelas:02d})",
-          "data": dt_venc_p.strftime("%Y-%m-%d"),
-          "data_vencimento": dt_venc_p.strftime("%Y-%m-%d"),
-          "cc_data_compra": dt_compra.strftime("%Y-%m-%d"),
-          "tipo": "Saída",
-          "valor_plan": round(v_parc, 2),
-          "valor_real": 0.0,
-          "status": "Planejado",
-          "cc_tipo": "LCL",
-          "cc_qtd_parcelas": 0,
-      }).execute()
-
-      atualizar_valor_plan_cartao(
-          supabase, pd.DataFrame(), cartao, dt_venc_p, usuario_id
-      )
-
-    return f"✅ Compra **{descricao}** registrada no cartão **{cartao}** em {parcelas}x! Primeira parcela em {dt_1_venc.strftime('%d/%m/%Y')}."
-
-  if intencao == "PARCIAL":
-    dt_1_dia = dt_compra.replace(day=1).strftime("%Y-%m-%d")
-    supabase.table("lancamentos").insert({
-        "projeto_id": projeto_id,
-        "usuario_id": str(usuario_id),
-        "descricao": descricao,
-        "data": dt_1_dia,
-        "data_vencimento": dt_1_dia,
-        "tipo": tipo,
-        "valor_plan": 0.0,
-        "valor_real": valor,
-        "parcial_real": valor,
-        "parcial_data": dt_venc,
-        "status": "Realizado",
-    }).execute()
-    return f"✅ Lançamento parcial de **{formatar_moeda_br(valor)}** gravado!"
-
-  elif id_existente and intencao in ["REALIZAR", "ALTERAR"]:
-    supabase.table("lancamentos").update({
-        "valor_real": valor if intencao == "REALIZAR" else 0.0,
-        "valor_plan": valor if intencao == "ALTERAR" else 0.0,
-        "status": "Realizado" if intencao == "REALIZAR" else "Planejado",
-        "data_vencimento": dt_venc,
-    }).eq("id", id_existente).execute()
-    return f"✅ Lançamento **{descricao}** atualizado!"
-
-  else:
-    status = "Realizado" if intencao == "REALIZAR" else "Planejado"
-    v_plan = valor if status == "Planejado" else 0.0
-    v_real = valor if status == "Realizado" else 0.0
-
-    supabase.table("lancamentos").insert({
-        "projeto_id": projeto_id,
-        "usuario_id": str(usuario_id),
-        "descricao": descricao,
-        "data": dt_venc,
-        "data_vencimento": dt_venc,
-        "tipo": tipo,
-        "valor_plan": v_plan,
-        "valor_real": v_real,
-        "status": status,
-        "permite_parcial": bool(dados.get("permite_parcial")),
-    }).execute()
-    return f"✅ Lançamento **{descricao}** ({formatar_moeda_br(valor)}) salvo!"
-
-
 def fechar_modal_voz():
-  """Reseta as flags para permitir reabertura sem mexer no orcasapp.py."""
+  """Reseta as flags do modal no session state."""
   st.session_state.abrir_modal_orcas = False
   st.session_state.etapa_voz = "gravacao"
   st.session_state.dados_interpretados = None
@@ -421,7 +266,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
 
   client_groq = Groq(api_key=groq_key.strip())
 
-  # ETAPA 1: GRAVAÇÃO
+  # TELA 1: GRAVAÇÃO
   if st.session_state.etapa_voz == "gravacao":
     pode_usar, uso, limite = verificar_limite_uso(supabase, id_usuario)
     if not pode_usar:
@@ -451,12 +296,14 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
             )
             if item_banco:
               dados["id_existente"] = item_banco.get("id")
+              dados["permite_parcial"] = bool(
+                  item_banco.get("permite_parcial")
+              )
 
               if item_banco.get("permite_parcial") or item_banco.get(
                   "parcial_real"
               ):
                 dados["intencao"] = "PARCIAL"
-                dados["permite_parcial"] = True
               elif dados.get("intencao") in ["ALTERAR", "EXCLUIR", "PARCIAL"]:
                 if not dados.get("valor") or dados.get("valor") == 0:
                   dados["valor"] = float(
@@ -469,7 +316,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
           st.session_state.etapa_voz = "confirmacao"
           st.rerun()
 
-  # ETAPA 2: CONFIRMAÇÃO
+  # TELA 2: CONFIRMAÇÃO
   elif st.session_state.etapa_voz == "confirmacao":
     dados = st.session_state.dados_interpretados or {}
     st.info(f'🗣️ **Você disse:** "{dados.get("transcricao")}"')
@@ -511,6 +358,11 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
             "Parcelas", value=int(dados.get("parcelas") or 1), min_value=1
         )
 
+      chk_parcial = st.checkbox(
+          "Permite Lançamento Parcial",
+          value=bool(dados.get("permite_parcial", False)),
+      )
+
       b_salvar, b_refazer, b_sair = st.columns(3)
       sub_salvar = b_salvar.form_submit_button(
           "✅ Confirmar", type="primary", use_container_width=True
@@ -531,9 +383,11 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
             "cartao": cartao,
             "parcelas": parcelas,
             "id_existente": dados.get("id_existente"),
-            "permite_parcial": dados.get("permite_parcial"),
+            "permite_parcial": chk_parcial,
         }
-        st.success(executar_acao_integrada(supabase, id_usuario, dados_finais))
+        # CHAMADA OFICIAL AO MOTOR DO CONCILIAÇÃO
+        msg = salvar_lancamento_oficial(supabase, id_usuario, dados_finais)
+        st.success(msg)
         time.sleep(1)
         fechar_modal_voz()
         st.rerun()
@@ -549,7 +403,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
 
 
 def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
-  # Garante inicialização limpa quando acionado pelo orcasapp.py
   if "etapa_voz" not in st.session_state or not st.session_state.etapa_voz:
     st.session_state.etapa_voz = "gravacao"
 

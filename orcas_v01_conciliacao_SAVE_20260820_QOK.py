@@ -1,9 +1,8 @@
 import calendar
 from datetime import datetime, timedelta
+from orcas_v01_ajuda_conciliacao import renderizar_ajuda_conciliacao
 import pandas as pd
 import streamlit as st
-import zoneinfo
-from orcas_v01_ajuda_conciliacao import renderizar_ajuda_conciliacao
 
 # ==============================================================================
 # ENGINES & REGRAS DE NEGÓCIO (Exportadas para a Conciliação e Módulo por Voz)
@@ -75,7 +74,11 @@ def buscar_dados_cartao(supabase, df, nome_cartao):
 
 
 def calcular_vencimento_fatura(data_compra, dia_corte=21, dia_vencimento=27):
-  """Calcula a data de vencimento da 1ª parcela com base no dia de corte da fatura."""
+  """Calcula a data de vencimento da 1ª parcela com base no dia de corte da fatura.
+
+  Regra: Compras a partir do dia de corte (inclusive) vão para a fatura do mês
+  seguinte. Compras antes do dia de corte permanecem no vencimento do mês atual.
+  """
   corte = int(dia_corte)
   venc = int(dia_vencimento)
 
@@ -125,7 +128,10 @@ def buscar_cartoes_lcp(df):
 def atualizar_valor_plan_cartao(
     supabase, df, nome_cartao, dt_vencimento, ID_USUARIO_LOGADO
 ):
-  """Recalcula o valor_plan do Cartão Pai ($CCP) consultando diretamente o Supabase."""
+  """Recalcula o valor_plan do Cartão Pai ($CCP) consultando diretamente o Supabase.
+
+  Soma todas as parcelas (LCL) com vencimento no mês/ano correspondente.
+  """
   nome_busca = str(nome_cartao).strip().upper()
   ano_venc = dt_vencimento.year
   mes_venc = dt_vencimento.month
@@ -209,138 +215,6 @@ def atualizar_valor_plan_cartao(
     st.error(f"Erro ao atualizar Cartão Pai ($CCP): {e}")
 
 
-def salvar_lancamento_oficial(supabase, usuario_id, dados):
-  """MOTOR ÚNICO DE CRIAÇÃO/EDIÇÃO DE LANÇAMENTOS.
-
-  Integrado para PorVoz e Conciliação.
-  """
-  hoje = datetime.now(zoneinfo.ZoneInfo("America/Sao_Paulo")).date()
-  projeto_id = str(
-      dados.get("projeto_id") or st.session_state.get("projeto_ativo")
-  )
-  descricao = dados.get("descricao")
-  valor = float(dados.get("valor") or 0.0)
-  tipo = dados.get("tipo", "Saída")
-  dt_venc = dados.get("data_vencimento") or str(hoje)
-  cartao = dados.get("cartao")
-  parcelas = int(dados.get("parcelas") or 1)
-  intencao = dados.get("intencao", "REALIZAR")
-  id_existente = dados.get("id_existente")
-  permite_parcial = bool(dados.get("permite_parcial"))
-
-  try:
-    dt_compra = datetime.strptime(dt_venc, "%Y-%m-%d").date()
-  except Exception:
-    dt_compra = hoje
-
-  # 1. EXCLUSÃO
-  if intencao == "EXCLUIR" and id_existente:
-    supabase.table("lancamentos").delete().eq("id", id_existente).execute()
-    return f"🗑️ Lançamento **{descricao}** excluído!"
-
-  # 2. CARTÃO DE CRÉDITO
-  if cartao and str(cartao).upper() != "NENHUM":
-    corte, venc = buscar_dados_cartao(supabase, None, cartao)
-
-    dt_1_venc = calcular_vencimento_fatura(
-        dt_compra, dia_corte=corte, dia_vencimento=venc
-    )
-
-    base_val = round(valor / parcelas, 2)
-    residuo = round(valor - (base_val * parcelas), 2)
-
-    payload_mestre = {
-        "projeto_id": projeto_id,
-        "usuario_id": str(usuario_id),
-        "descricao": descricao,
-        "data": dt_compra.strftime("%Y-%m-%d"),
-        "data_vencimento": dt_compra.strftime("%Y-%m-%d"),
-        "tipo": tipo,
-        "valor_plan": 0.0,
-        "valor_real": 0.0,
-        "status": "Realizado" if permite_parcial else "Planejado",
-        "cc_tipo": "LCL",
-        "cc_qtd_parcelas": parcelas,
-        "permite_parcial": permite_parcial,
-    }
-
-    if permite_parcial:
-      payload_mestre["parcial_real"] = valor
-      payload_mestre["parcial_data"] = dt_compra.strftime("%Y-%m-%d")
-
-    supabase.table("lancamentos").insert(payload_mestre).execute()
-
-    for i in range(parcelas):
-      v_parc = base_val + (residuo if i == (parcelas - 1) else 0.0)
-      dt_venc_p = somar_meses_data(dt_1_venc, i, dia_vencimento=venc)
-
-      supabase.table("lancamentos").insert({
-          "projeto_id": projeto_id,
-          "usuario_id": str(usuario_id),
-          "descricao": cartao,
-          "cc_descricao": f"{descricao} ({i+1:02d}/{parcelas:02d})",
-          "data": dt_venc_p.strftime("%Y-%m-%d"),
-          "data_vencimento": dt_venc_p.strftime("%Y-%m-%d"),
-          "cc_data_compra": dt_compra.strftime("%Y-%m-%d"),
-          "tipo": "Saída",
-          "valor_plan": round(v_parc, 2),
-          "valor_real": 0.0,
-          "status": "Planejado",
-          "cc_tipo": "LCL",
-          "cc_qtd_parcelas": 0,
-      }).execute()
-
-      atualizar_valor_plan_cartao(
-          supabase, None, cartao, dt_venc_p, usuario_id
-      )
-
-    return f"✅ Compra **{descricao}** registrada no cartão **{cartao}** ({parcelas}x)!"
-
-  # 3. CONVENCIONAL OU PARCIAL (SEM CARTÃO)
-  if intencao == "PARCIAL" or permite_parcial:
-    dt_1_dia = dt_compra.replace(day=1).strftime("%Y-%m-%d")
-    supabase.table("lancamentos").insert({
-        "projeto_id": projeto_id,
-        "usuario_id": str(usuario_id),
-        "descricao": descricao,
-        "data": dt_1_dia,
-        "data_vencimento": dt_1_dia,
-        "tipo": tipo,
-        "valor_plan": 0.0,
-        "valor_real": valor,
-        "parcial_real": valor,
-        "parcial_data": dt_venc,
-        "status": "Realizado",
-        "permite_parcial": True,
-    }).execute()
-    return f"✅ Lançamento parcial de **R$ {valor:,.2f}** gravado!"
-
-  elif id_existente and intencao in ["REALIZAR", "ALTERAR"]:
-    supabase.table("lancamentos").update({
-        "valor_real": valor if intencao == "REALIZAR" else 0.0,
-        "valor_plan": valor if intencao == "ALTERAR" else 0.0,
-        "status": "Realizado" if intencao == "REALIZAR" else "Planejado",
-        "data_vencimento": dt_venc,
-    }).eq("id", id_existente).execute()
-    return f"✅ Lançamento **{descricao}** atualizado!"
-
-  else:
-    status = "Realizado" if intencao == "REALIZAR" else "Planejado"
-    supabase.table("lancamentos").insert({
-        "projeto_id": projeto_id,
-        "usuario_id": str(usuario_id),
-        "descricao": descricao,
-        "data": dt_venc,
-        "data_vencimento": dt_venc,
-        "tipo": tipo,
-        "valor_plan": valor if status == "Planejado" else 0.0,
-        "valor_real": valor if status == "Realizado" else 0.0,
-        "status": status,
-        "permite_parcial": permite_parcial,
-    }).execute()
-    return f"✅ Lançamento **{descricao}** salvo com sucesso!"
-
-
 # ==============================================================================
 # INTERFACE DA TELA DE CONCILIAÇÃO
 # ==============================================================================
@@ -349,7 +223,7 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
 def exibir_conciliacao(
     df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moeda
 ):
-  """Sub-rotina da Tela Conciliação."""
+  """Sub-rotina da Tela Conciliação - Regras estritas de LOU, LPR e LCL com cartões $CCP."""
   st.markdown("""
         <style>
         div[data-testid="stColumn"] div.stButton > button {
@@ -488,22 +362,74 @@ def exibir_conciliacao(
             else sp_cartao_sel
         )
 
-        dados_sp = {
-            "projeto_id": st.session_state.projeto_ativo,
-            "descricao": sp_desc,
-            "valor": v_sp,
-            "tipo": sp_tipo,
-            "data_vencimento": hoje_c.strftime("%Y-%m-%d"),
-            "cartao": nome_cartao_final,
-            "parcelas": int(sp_parc),
-            "intencao": "REALIZAR",
-            "permite_parcial": False,
-        }
+        is_cc = (
+            bool(nome_cartao_final)
+            and nome_cartao_final != "Nenhum"
+            and int(sp_parc) > 0
+        )
+        qtd_p = int(sp_parc) if is_cc else 0
 
-        salvar_lancamento_oficial(supabase, ID_USUARIO_LOGADO, dados_sp)
-        st.session_state.reset_count += 1
-        st.session_state.abrir_sem_plan = False
-        st.rerun()
+        try:
+          v_real_lancamento = 0.0 if is_cc else float(v_sp)
+          status_lancamento = "Planejado" if is_cc else "Realizado"
+
+          supabase.table("lancamentos").insert({
+              "projeto_id": str(st.session_state.projeto_ativo),
+              "usuario_id": str(ID_USUARIO_LOGADO),
+              "descricao": sp_desc,
+              "data": hoje_c.strftime("%Y-%m-%d"),
+              "data_vencimento": hoje_c.strftime("%Y-%m-%d"),
+              "tipo": sp_tipo,
+              "valor_plan": 0.0,
+              "valor_real": v_real_lancamento,
+              "status": status_lancamento,
+              "parcial_real": 0.0,
+              "permite_parcial": False,
+              "cc_tipo": "LCL" if is_cc else None,
+              "cc_qtd_parcelas": qtd_p,
+          }).execute()
+
+          if is_cc:
+            corte, venc = buscar_dados_cartao(supabase, df, nome_cartao_final)
+            base_val = round(float(v_sp) / qtd_p, 2)
+            residuo = round(float(v_sp) - (base_val * qtd_p), 2)
+
+            dt_primeiro_venc = calcular_vencimento_fatura(
+                hoje_c, dia_corte=corte, dia_vencimento=venc
+            )
+
+            for i in range(qtd_p):
+              v_parcela = base_val + (residuo if i == (qtd_p - 1) else 0.0)
+              dt_venc_parc = somar_meses_data(
+                  dt_primeiro_venc, i, dia_vencimento=venc
+              )
+              parc_str = f"{i+1:02d}/{qtd_p:02d}"
+
+              supabase.table("lancamentos").insert({
+                  "projeto_id": str(st.session_state.projeto_ativo),
+                  "usuario_id": str(ID_USUARIO_LOGADO),
+                  "descricao": nome_cartao_final,
+                  "cc_descricao": f"{sp_desc} ({parc_str})",
+                  "data": dt_venc_parc.strftime("%Y-%m-%d"),
+                  "data_vencimento": dt_venc_parc.strftime("%Y-%m-%d"),
+                  "cc_data_compra": hoje_c.strftime("%Y-%m-%d"),
+                  "tipo": "Saída",
+                  "valor_plan": round(v_parcela, 2),
+                  "valor_real": 0.0,
+                  "status": "Planejado",
+                  "cc_tipo": "LCL",
+                  "cc_qtd_parcelas": 0,
+              }).execute()
+
+              atualizar_valor_plan_cartao(
+                  supabase, df, nome_cartao_final, dt_venc_parc, ID_USUARIO_LOGADO
+              )
+
+          st.session_state.reset_count += 1
+          st.session_state.abrir_sem_plan = False
+          st.rerun()
+        except Exception as e:
+          st.error(f"Erro ao realizar lançamento sem planejamento: {e}")
 
     st.divider()
 
@@ -687,24 +613,78 @@ def exibir_conciliacao(
                 if cc_sel == "+ Outro Cartão..."
                 else cc_sel
             )
+            is_cc = (
+                bool(nome_cartao_final)
+                and nome_cartao_final != "Nenhum"
+                and int(qtd_parc_in) > 0
+            )
+            qtd_p = int(qtd_parc_in) if is_cc else 0
 
-            dados_p = {
-                "projeto_id": st.session_state.projeto_ativo,
-                "descricao": row["descricao"],
-                "valor": v_dig,
-                "tipo": row["tipo"],
-                "data_vencimento": hoje_c.strftime("%Y-%m-%d"),
-                "cartao": nome_cartao_final,
-                "parcelas": int(qtd_parc_in),
-                "intencao": "PARCIAL",
-                "permite_parcial": True,
-            }
+            try:
+              supabase.table("lancamentos").insert({
+                  "projeto_id": str(st.session_state.projeto_ativo),
+                  "usuario_id": str(ID_USUARIO_LOGADO),
+                  "descricao": row["descricao"],
+                  "data": ini_mes_c.strftime("%Y-%m-%d"),
+                  "data_vencimento": ini_mes_c.strftime("%Y-%m-%d"),
+                  "tipo": row["tipo"],
+                  "valor_plan": 0.0,
+                  "valor_real": 0.0 if is_cc else float(v_dig),
+                  "status": "Planejado" if is_cc else "Realizado",
+                  "parcial_real": float(v_dig),
+                  "parcial_data": hoje_c.strftime("%Y-%m-%d"),
+                  "permite_parcial": False,
+                  "cc_tipo": "LCL" if is_cc else None,
+                  "cc_qtd_parcelas": qtd_p,
+              }).execute()
 
-            salvar_lancamento_oficial(supabase, ID_USUARIO_LOGADO, dados_p)
-            st.session_state.reset_count += 1
-            st.session_state[v_key] += 1
-            st.rerun()
+              if is_cc:
+                corte, venc = buscar_dados_cartao(
+                    supabase, df, nome_cartao_final
+                )
+                base_val = round(float(v_dig) / qtd_p, 2)
+                residuo = round(float(v_dig) - (base_val * qtd_p), 2)
 
+                dt_primeiro_venc = calcular_vencimento_fatura(
+                    hoje_c, dia_corte=corte, dia_vencimento=venc
+                )
+
+                for i in range(qtd_p):
+                  v_parcela = base_val + (residuo if i == (qtd_p - 1) else 0.0)
+                  dt_venc_parc = somar_meses_data(
+                      dt_primeiro_venc, i, dia_vencimento=venc
+                  )
+                  parc_str = f"{i+1:02d}/{qtd_p:02d}"
+
+                  supabase.table("lancamentos").insert({
+                      "projeto_id": str(st.session_state.projeto_ativo),
+                      "usuario_id": str(ID_USUARIO_LOGADO),
+                      "descricao": nome_cartao_final,
+                      "cc_descricao": f"{row['descricao']} ({parc_str})",
+                      "data": dt_venc_parc.strftime("%Y-%m-%d"),
+                      "data_vencimento": dt_venc_parc.strftime("%Y-%m-%d"),
+                      "cc_data_compra": hoje_c.strftime("%Y-%m-%d"),
+                      "tipo": "Saída",
+                      "valor_plan": round(v_parcela, 2),
+                      "valor_real": 0.0,
+                      "status": "Planejado",
+                      "cc_tipo": "LCL",
+                      "cc_qtd_parcelas": 0,
+                  }).execute()
+
+                  atualizar_valor_plan_cartao(
+                      supabase,
+                      df,
+                      nome_cartao_final,
+                      dt_venc_parc,
+                      ID_USUARIO_LOGADO,
+                  )
+
+              st.session_state.reset_count += 1
+              st.session_state[v_key] += 1
+              st.rerun()
+            except Exception as e:
+              st.error(f"Erro ao salvar pagamento parcial: {e}")
       else:
         c3.write(format_moeda(row["valor_plan"]))
         if row["status"] in ["Realizado", "REAL"]:
@@ -758,36 +738,70 @@ def exibir_conciliacao(
                 if cc_norm_sel == "+ Outro Cartão..."
                 else cc_norm_sel
             )
-
             is_cc = (
                 bool(nome_cartao_final)
                 and nome_cartao_final != "Nenhum"
                 and int(qtd_norm_in) > 0
             )
+            qtd_p = int(qtd_norm_in) if is_cc else 0
 
-            if is_cc:
-              dados_c = {
-                  "projeto_id": st.session_state.projeto_ativo,
-                  "descricao": row["descricao"],
-                  "valor": v_para_gravar,
-                  "tipo": row["tipo"],
-                  "data_vencimento": row["dt_obj"].strftime("%Y-%m-%d"),
-                  "cartao": nome_cartao_final,
-                  "parcelas": int(qtd_norm_in),
-                  "intencao": "REALIZAR",
-                  "id_existente": row["id"],
-                  "permite_parcial": False,
-              }
-              salvar_lancamento_oficial(supabase, ID_USUARIO_LOGADO, dados_c)
-            else:
+            try:
+              v_update_real = 0.0 if is_cc else float(v_para_gravar)
+              status_update = "Planejado" if is_cc else "Realizado"
+
               supabase.table("lancamentos").update({
-                  "valor_real": float(v_para_gravar),
-                  "status": "Realizado",
+                  "valor_real": v_update_real,
+                  "status": status_update,
+                  "cc_tipo": "LCL" if is_cc else None,
+                  "cc_qtd_parcelas": qtd_p,
               }).eq("id", row["id"]).execute()
 
-            st.session_state.reset_count += 1
-            st.rerun()
+              if is_cc:
+                corte, venc = buscar_dados_cartao(
+                    supabase, df, nome_cartao_final
+                )
+                base_val = round(float(v_para_gravar) / qtd_p, 2)
+                residuo = round(float(v_para_gravar) - (base_val * qtd_p), 2)
 
+                dt_primeiro_venc = calcular_vencimento_fatura(
+                    row["dt_obj"], dia_corte=corte, dia_vencimento=venc
+                )
+
+                for i in range(qtd_p):
+                  v_parcela = base_val + (residuo if i == (qtd_p - 1) else 0.0)
+                  dt_venc_parc = somar_meses_data(
+                      dt_primeiro_venc, i, dia_vencimento=venc
+                  )
+                  parc_str = f"{i+1:02d}/{qtd_p:02d}"
+
+                  supabase.table("lancamentos").insert({
+                      "projeto_id": str(st.session_state.projeto_ativo),
+                      "usuario_id": str(ID_USUARIO_LOGADO),
+                      "descricao": nome_cartao_final,
+                      "cc_descricao": f"{row['descricao']} ({parc_str})",
+                      "data": dt_venc_parc.strftime("%Y-%m-%d"),
+                      "data_vencimento": dt_venc_parc.strftime("%Y-%m-%d"),
+                      "cc_data_compra": row["dt_obj"].strftime("%Y-%m-%d"),
+                      "tipo": "Saída",
+                      "valor_plan": round(v_parcela, 2),
+                      "valor_real": 0.0,
+                      "status": "Planejado",
+                      "cc_tipo": "LCL",
+                      "cc_qtd_parcelas": 0,
+                  }).execute()
+
+                  atualizar_valor_plan_cartao(
+                      supabase,
+                      df,
+                      nome_cartao_final,
+                      dt_venc_parc,
+                      ID_USUARIO_LOGADO,
+                  )
+
+              st.session_state.reset_count += 1
+              st.rerun()
+            except Exception as e:
+              st.error(f"Erro ao salvar conciliação: {e}")
       st.divider()
   else:
     st.info("Nenhum lançamento pendente para conciliação.")
