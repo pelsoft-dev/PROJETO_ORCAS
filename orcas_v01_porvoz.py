@@ -227,6 +227,7 @@ def transcrever_audio_groq(client_groq, audio_bytes):
 
 
 def buscar_lancamento_no_banco(supabase, usuario_id, projeto_id, descricao):
+  """Busca case-insensitive no banco de dados para coincidir termos como 'mercado' e 'Mercado'."""
   if (
       not descricao
       or not isinstance(descricao, str)
@@ -250,7 +251,6 @@ def buscar_lancamento_no_banco(supabase, usuario_id, projeto_id, descricao):
 
 
 def buscar_dados_cartao_seguro(supabase, nome_cartao):
-  """Busca o dia de corte e vencimento no Supabase com tolerância a maiúsculas/minúsculas."""
   if supabase and nome_cartao:
     try:
       res = (
@@ -281,7 +281,6 @@ def buscar_dados_cartao_seguro(supabase, nome_cartao):
 
 
 def calcular_vencimento_fatura_robusto(dt_compra, dia_corte, dia_vencimento):
-  """Calcula a 1ª parcela. Compras a partir do dia de corte caem no vencimento do mês seguinte."""
   corte = int(dia_corte or 3)
   venc = int(dia_vencimento or 10)
 
@@ -330,15 +329,12 @@ def executar_acao_integrada(supabase, usuario_id, dados):
 
   dt_compra = datetime.strptime(dt_venc, "%Y-%m-%d").date()
 
-  # 1. EXCLUIR
   if intencao == "EXCLUIR" and id_existente:
     supabase.table("lancamentos").delete().eq("id", id_existente).execute()
     return f"🗑️ Lançamento **{descricao}** excluído!"
 
-  # 2. CARTÃO DE CRÉDITO
   if cartao and str(cartao).upper() != "NENHUM":
     corte, venc = buscar_dados_cartao_seguro(supabase, cartao)
-
     dt_1_venc = calcular_vencimento_fatura_robusto(dt_compra, corte, venc)
 
     base_val = round(valor / parcelas, 2)
@@ -384,7 +380,6 @@ def executar_acao_integrada(supabase, usuario_id, dados):
 
     return f"✅ Compra **{descricao}** registrada no cartão **{cartao}** em {parcelas}x! Primeira parcela em {dt_1_venc.strftime('%d/%m/%Y')}."
 
-  # 3. SEM CARTÃO
   if intencao == "PARCIAL":
     dt_1_dia = dt_compra.replace(day=1).strftime("%Y-%m-%d")
     supabase.table("lancamentos").insert({
@@ -432,7 +427,7 @@ def executar_acao_integrada(supabase, usuario_id, dados):
 
 
 def fechar_modal_voz():
-  """Zera os estados para garantir o encerramento absoluto do modal."""
+  """Zera os estados para encerrar o modal totalmente."""
   st.session_state.etapa_voz = "fechado"
   st.session_state.dados_interpretados = None
   st.session_state.hash_ultimo_audio = None
@@ -449,38 +444,9 @@ def fechar_modal_voz():
     st.session_state[k] = False
 
 
+# FUNÇÃO INTERNA DO DIÁLOGO
 @st.dialog("🎙️ Conversar com o ORCAS")
-def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
-  # DESATIVA AS FLAGS DE ABERTURA IMEDIATAMENTE AO ENTRAR
-  chaves_abertura = [
-      "abrir_modal_voz",
-      "exibir_modal_voz",
-      "modal_voz_aberto",
-      "show_voice_modal",
-      "abrir_voz",
-  ]
-
-  # Se o modal foi acionado pelas flags mas está 'fechado', reseta para 'gravacao'
-  if any(st.session_state.get(k, False) for k in chaves_abertura):
-    if st.session_state.get("etapa_voz") == "fechado":
-      st.session_state.etapa_voz = "gravacao"
-
-    # Consome o evento do clique limpando as flags para não causar o retrigger
-    for k in chaves_abertura:
-      st.session_state[k] = False
-
-  # Se o estado estiver explicitamente fechado, interrompe a renderização
-  if st.session_state.get("etapa_voz") == "fechado":
-    return
-
-  if (
-      "etapa_voz" not in st.session_state
-      or st.session_state.etapa_voz is None
-  ):
-    st.session_state.etapa_voz = "gravacao"
-
-  if not planos_disponiveis:
-    planos_disponiveis = [st.session_state.get("projeto_ativo") or "Padrão"]
+def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
   plano_ativo = st.session_state.get("projeto_ativo", planos_disponiveis[0])
 
   groq_key = st.secrets.get("GROQ_API_KEY")
@@ -515,21 +481,26 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
           st.session_state.hash_ultimo_audio = hash(audio_bytes)
 
           if isinstance(dados, dict):
+            # Busca lançamento no banco (case-insensitive)
             item_banco = buscar_lancamento_no_banco(
                 supabase, id_usuario, plano_ativo, dados.get("descricao")
             )
-            if item_banco and dados.get("intencao") in [
-                "ALTERAR",
-                "EXCLUIR",
-                "PARCIAL",
-            ]:
+            if item_banco:
               dados["id_existente"] = item_banco.get("id")
-              if not dados.get("valor") or dados.get("valor") == 0:
-                dados["valor"] = float(
-                    item_banco.get("valor_plan")
-                    or item_banco.get("valor_real")
-                    or 0
-                )
+
+              # CORREÇÃO (2): Se o item no banco aceita parciais, força a intenção PARCIAL
+              if item_banco.get("permite_parcial") or item_banco.get(
+                  "parcial_real"
+              ):
+                dados["intencao"] = "PARCIAL"
+                dados["permite_parcial"] = True
+              elif dados.get("intencao") in ["ALTERAR", "EXCLUIR", "PARCIAL"]:
+                if not dados.get("valor") or dados.get("valor") == 0:
+                  dados["valor"] = float(
+                      item_banco.get("valor_plan")
+                      or item_banco.get("valor_real")
+                      or 0
+                  )
 
           st.session_state.dados_interpretados = dados
           st.session_state.etapa_voz = "confirmacao"
@@ -546,11 +517,15 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
     with st.form("form_confirmacao_voz"):
       c1, c2 = st.columns(2)
       with c1:
-        intencao = st.selectbox(
-            "Ação",
-            ["REALIZAR", "PROJETAR", "PARCIAL", "ALTERAR", "EXCLUIR"],
-            index=0 if dados.get("intencao") == "REALIZAR" else 1,
+        opcoes_acao = ["REALIZAR", "PROJETAR", "PARCIAL", "ALTERAR", "EXCLUIR"]
+        intencao_atual = dados.get("intencao", "REALIZAR")
+        idx_intencao = (
+            opcoes_acao.index(intencao_atual)
+            if intencao_atual in opcoes_acao
+            else 0
         )
+
+        intencao = st.selectbox("Ação", opcoes_acao, index=idx_intencao)
         descricao = st.text_input("Descrição", value=dados.get("descricao", ""))
         cartao = st.text_input(
             "Cartão de Crédito", value=dados.get("cartao") or "Nenhum"
@@ -608,3 +583,22 @@ def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
       elif sub_sair:
         fechar_modal_voz()
         st.rerun()
+
+
+# FUNÇÃO PRINCIPAL DE ENTRADA
+def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
+  # CORREÇÃO (1): Se o estado for "fechado", não chama a função @st.dialog de jeito nenhum
+  if st.session_state.get("etapa_voz") == "fechado":
+    return
+
+  if (
+      "etapa_voz" not in st.session_state
+      or st.session_state.etapa_voz is None
+  ):
+    st.session_state.etapa_voz = "gravacao"
+
+  if not planos_disponiveis:
+    planos_disponiveis = [st.session_state.get("projeto_ativo") or "Padrão"]
+
+  # Chama a renderização do diájogo apenas quando estiver realmente ativo
+  _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis)
