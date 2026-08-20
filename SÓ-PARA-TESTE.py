@@ -1,26 +1,23 @@
 import calendar
 from datetime import datetime, timedelta
 import zoneinfo
-import pandas as pd
 from orcas_v01_ajuda_conciliacao import renderizar_ajuda_conciliacao
+import pandas as pd
 import streamlit as st
 
 # ==============================================================================
-# ENGINES & REGRAS DE NEGÓCIO (Exportadas para a Conciliação e Módulo por Voz)
+# ENGINES & REGRAS DE NEGÓCIO
 # ==============================================================================
 
 
 def buscar_dados_cartao(supabase, df, nome_cartao):
-  """Busca o dia de corte e o dia de vencimento do cartão ($CCP).
-
-  Caso não encontre no df local, realiza uma busca direta no Supabase.
-  """
+  """Busca o dia de corte e o dia de vencimento do cartão ($CCP)."""
   if not nome_cartao or str(nome_cartao).strip().upper() == "NENHUM":
-    return 21, 27
+    return 3, 10
 
   nome_busca = str(nome_cartao).strip().upper()
 
-  # 1. Tenta buscar no DataFrame local (se fornecido)
+  # 1. Busca no DataFrame local
   if df is not None and not df.empty and "cc_tipo" in df.columns:
     df_ccp = df[
         (
@@ -44,10 +41,10 @@ def buscar_dados_cartao(supabase, df, nome_cartao):
         return int(corte), int(venc)
       elif pd.notnull(venc):
         venc_int = int(venc)
-        corte_calc = venc_int - 6 if venc_int > 6 else venc_int + 24
+        corte_calc = venc_int - 7 if venc_int > 7 else 3
         return corte_calc, venc_int
 
-  # 2. Se não achou no df local, busca direto no Supabase
+  # 2. Busca direta no Supabase
   try:
     res = (
         supabase.table("lancamentos")
@@ -65,15 +62,15 @@ def buscar_dados_cartao(supabase, df, nome_cartao):
           return int(corte), int(venc)
         elif venc is not None:
           venc_int = int(venc)
-          corte_calc = venc_int - 6 if venc_int > 6 else venc_int + 24
+          corte_calc = venc_int - 7 if venc_int > 7 else 3
           return corte_calc, venc_int
   except Exception:
     pass
 
-  return 21, 27
+  return 3, 10
 
 
-def calcular_vencimento_fatura(data_compra, dia_corte=21, dia_vencimento=27):
+def calcular_vencimento_fatura(data_compra, dia_corte=3, dia_vencimento=10):
   """Calcula a data exata de vencimento da 1ª parcela com base no dia de corte da fatura."""
   corte = int(dia_corte)
   venc = int(dia_vencimento)
@@ -81,7 +78,7 @@ def calcular_vencimento_fatura(data_compra, dia_corte=21, dia_vencimento=27):
   ano = data_compra.year
   mes = data_compra.month
 
-  # Se a compra foi feita no dia do corte ou após, entra na fatura do mês seguinte
+  # Se comprou no dia do corte ou depois, vence no mês seguinte
   if data_compra.day >= corte:
     mes += 1
     if mes > 12:
@@ -92,14 +89,16 @@ def calcular_vencimento_fatura(data_compra, dia_corte=21, dia_vencimento=27):
   return datetime(ano, mes, dia_final).date()
 
 
-def somar_meses_data(data_fatura_base, i_parcela, dia_vencimento=27):
-  """Gera a data de vencimento da N-ésima parcela mantendo o dia fixo da fatura."""
-  ano = data_fatura_base.year + (
-      (data_fatura_base.month + i_parcela - 1) // 12
+def somar_meses_data(data_fatura_1a_parcela, i_parcela, dia_vencimento=10):
+  """Gera a data de vencimento da parcela i (0-indexed) a partir da data de vencimento da 1ª parcela."""
+  total_meses = (data_fatura_1a_parcela.month - 1) + i_parcela
+  novo_ano = data_fatura_1a_parcela.year + (total_meses // 12)
+  novo_mes = (total_meses % 12) + 1
+
+  dia_final = min(
+      int(dia_vencimento), calendar.monthrange(novo_ano, novo_mes)[1]
   )
-  mes = ((data_fatura_base.month + i_parcela - 1) % 12) + 1
-  dia_final = min(int(dia_vencimento), calendar.monthrange(ano, mes)[1])
-  return datetime(ano, mes, dia_final).date()
+  return datetime(novo_ano, novo_mes, dia_final).date()
 
 
 def buscar_cartoes_lcp(df):
@@ -175,7 +174,7 @@ def atualizar_valor_plan_cartao(
     ) & (
         df_db["descricao"].fillna("").astype(str).str.strip().str.upper()
         == nome_busca
-    )
+    ) & (df_db["valor_plan"] > 0)
 
     soma_lcls = float(df_db[mask_lcls]["valor_plan"].fillna(0).sum())
   else:
@@ -212,7 +211,7 @@ def atualizar_valor_plan_cartao(
 
 
 def salvar_lancamento_oficial(supabase, usuario_id, dados):
-  """MOTOR ÚNICO DE CRIAÇÃO/EDIÇÃO DE LANÇAMENTOS (USADO NA CONCILIAÇÃO E NO PORVOZ)."""
+  """MOTOR ÚNICO DE CRIAÇÃO/EDIÇÃO DE LANÇAMENTOS (CONCILIAÇÃO E POR VOZ)."""
   hoje = datetime.now(zoneinfo.ZoneInfo("America/Sao_Paulo")).date()
   projeto_id = str(
       dados.get("projeto_id") or st.session_state.get("projeto_ativo")
@@ -247,7 +246,7 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
   if is_cartao_valido:
     corte, venc = buscar_dados_cartao(supabase, None, cartao)
 
-    # Vencimento da 1ª parcela considerando o dia de corte da fatura
+    # Vencimento da 1ª Parcela considerando dia de corte
     dt_1_venc = calcular_vencimento_fatura(
         dt_compra, dia_corte=corte, dia_vencimento=venc
     )
@@ -255,7 +254,14 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
     base_val = round(valor / parcelas, 2)
     residuo = round(valor - (base_val * parcelas), 2)
 
-    # Item mestre: valor_plan = 0, valor_real = total da compra, cc_tipo = LCL
+    # REGRA PARA COMPRA NO CARTÃO (SEM PLANEJAMENTO OU CONCILIAÇÃO):
+    # Se for compra sem planejamento prévio (id_existente ausente), gera a gravação Mestre como REAL
+    # data: 20/08/2026 | valor_plan: 0.0 | valor_real: 5000.0 | status: REAL/Realizado | cc_tipo: LCL
+    status_mestre = (
+        "Realizado" if (not id_existente or intencao == "REALIZAR") else "Planejado"
+    )
+    v_real_mestre = valor if (not id_existente or intencao == "REALIZAR") else 0.0
+
     payload_mestre = {
         "projeto_id": projeto_id,
         "usuario_id": str(usuario_id),
@@ -264,8 +270,8 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
         "data_vencimento": dt_compra.strftime("%Y-%m-%d"),
         "tipo": tipo,
         "valor_plan": 0.0,
-        "valor_real": valor,
-        "status": "Realizado",
+        "valor_real": v_real_mestre,
+        "status": status_mestre,
         "cc_tipo": "LCL",
         "cc_qtd_parcelas": parcelas,
         "permite_parcial": permite_parcial,
@@ -282,10 +288,11 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
     else:
       supabase.table("lancamentos").insert(payload_mestre).execute()
 
-    # Gerar parcelas sequenciais nas faturas
+    # GERAR PARCELAS FILHAS (LCL) NAS FATURAS FUTURAS/ATUAIS
     for i in range(parcelas):
       v_parc = base_val + (residuo if i == (parcelas - 1) else 0.0)
-      dt_venc_p = somar_meses_data(dt_1_venc, i + 1, dia_vencimento=venc)
+      # i=0 usa a dt_1_venc exata (ex: 10/09/2026), i=1 gera 10/10/2026, etc.
+      dt_venc_p = somar_meses_data(dt_1_venc, i, dia_vencimento=venc)
 
       supabase.table("lancamentos").insert({
           "projeto_id": projeto_id,
@@ -331,7 +338,11 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
   elif id_existente and intencao in ["REALIZAR", "ALTERAR"]:
     supabase.table("lancamentos").update({
         "valor_real": valor if intencao == "REALIZAR" else 0.0,
-        "valor_plan": valor if intencao == "ALTERAR" else 0.0,
+        "valor_plan": (
+            valor
+            if intencao == "ALTERAR"
+            else row_valor_plan_se_necessario(valor, intencao)
+        ),
         "status": "Realizado" if intencao == "REALIZAR" else "Planejado",
         "data_vencimento": dt_venc,
     }).eq("id", id_existente).execute()
@@ -354,6 +365,10 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
     return f"✅ Lançamento **{descricao}** salvo com sucesso!"
 
 
+def row_valor_plan_se_necessario(valor, intencao):
+  return valor if intencao == "ALTERAR" else 0.0
+
+
 # ==============================================================================
 # INTERFACE DA TELA DE CONCILIAÇÃO
 # ==============================================================================
@@ -363,7 +378,8 @@ def exibir_conciliacao(
     df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moeda
 ):
   """Sub-rotina da Tela Conciliação."""
-  st.markdown("""
+  st.markdown(
+      """
         <style>
         div[data-testid="stColumn"] div.stButton > button {
             padding: 2px 4px !important;
@@ -373,7 +389,9 @@ def exibir_conciliacao(
             white-space: nowrap !important;
         }
         </style>
-    """, unsafe_allow_html=True)
+    """,
+      unsafe_allow_html=True,
+  )
 
   if "reset_count" not in st.session_state:
     st.session_state.reset_count = 0
@@ -390,7 +408,8 @@ def exibir_conciliacao(
     )
 
   with col_ajuda:
-    st.markdown("""
+    st.markdown(
+        """
             <style>
             div.stButton > button:first-child {
                 background-color: #007ba7 !important;
@@ -402,7 +421,9 @@ def exibir_conciliacao(
                 color: white !important;
             }
             </style>
-        """, unsafe_allow_html=True)
+        """,
+        unsafe_allow_html=True,
+    )
 
     if st.button("AJUDA", type="primary", use_container_width=True):
       st.session_state["exibir_ajuda_conciliacao"] = not st.session_state.get(
@@ -413,14 +434,17 @@ def exibir_conciliacao(
   if st.session_state.get("exibir_ajuda_conciliacao", False):
     renderizar_ajuda_conciliacao()
 
-  st.markdown("""
+  st.markdown(
+      """
         <style>
         .block-container { padding-top: 2rem !important; }
         [data-testid="stWidgetLabel"] p { font-size: 0.85rem !important; white-space: nowrap !important; }
         .stMarkdown div p { margin-bottom: 0px !important; }
         hr { margin-top: 0.5rem !important; margin-bottom: 0.5rem !important; }
         </style>
-    """, unsafe_allow_html=True)
+    """,
+      unsafe_allow_html=True,
+  )
 
   hoje_c = (datetime.utcnow() - timedelta(hours=3)).date()
   ini_mes_c = hoje_c.replace(day=1)
@@ -527,16 +551,12 @@ def exibir_conciliacao(
         df_c["parcial_real"], errors="coerce"
     ).fillna(0)
 
+    cc_tipo_str = df_c["cc_tipo"].fillna("").astype(str).str.strip().str.upper()
+    is_lcl = cc_tipo_str.str.contains(r"LCL|\$CCL", regex=True)
+    is_mestre_lcl = is_lcl & (df_c["valor_real"] > 0) & (df_c["valor_plan"] == 0)
+
     df_base_tela = df_c[
-        (df_c["parcial_real"] == 0)
-        & (
-            ~df_c["cc_tipo"]
-            .fillna("")
-            .astype(str)
-            .str.strip()
-            .str.upper()
-            .str.contains(r"LCL|\$CCL", regex=True)
-        )
+        (df_c["parcial_real"] == 0) & ((~is_lcl) | is_mestre_lcl)
     ].copy()
 
     if st.session_state.listar_todos_mes:
