@@ -296,15 +296,19 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
             )
             if item_banco:
               dados["id_existente"] = item_banco.get("id")
-              dados["permite_parcial"] = bool(
-                  item_banco.get("permite_parcial")
-              )
 
               if item_banco.get("permite_parcial") or item_banco.get(
                   "parcial_real"
               ):
                 dados["intencao"] = "PARCIAL"
-              elif dados.get("intencao") in ["ALTERAR", "EXCLUIR", "PARCIAL"]:
+                # O registro que está sendo gerado é uma parcela (filho), logo NÃO permite parcial
+                dados["permite_parcial"] = False
+              else:
+                dados["permite_parcial"] = bool(
+                    item_banco.get("permite_parcial")
+                )
+
+              if dados.get("intencao") in ["ALTERAR", "EXCLUIR", "PARCIAL"]:
                 if not dados.get("valor") or dados.get("valor") == 0:
                   dados["valor"] = float(
                       item_banco.get("valor_plan")
@@ -358,9 +362,14 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
             "Parcelas", value=int(dados.get("parcelas") or 1), min_value=1
         )
 
+      # Se a intenção selecionada for PARCIAL, desativa o checkbox e garante False
+      is_parcial_intencao = intencao == "PARCIAL"
       chk_parcial = st.checkbox(
           "Permite Lançamento Parcial",
-          value=bool(dados.get("permite_parcial", False)),
+          value=False
+          if is_parcial_intencao
+          else bool(dados.get("permite_parcial", False)),
+          disabled=is_parcial_intencao,
       )
 
       b_salvar, b_refazer, b_sair = st.columns(3)
@@ -373,6 +382,11 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
       sub_sair = b_sair.form_submit_button("❌ Sair", use_container_width=True)
 
       if sub_salvar:
+        # Se for PARCIAL, o registro filho NUNCA deve ter permite_parcial = True
+        permite_parcial_final = (
+            False if intencao == "PARCIAL" else chk_parcial
+        )
+
         dados_finais = {
             "intencao": intencao,
             "projeto_id": plano_ativo,
@@ -383,7 +397,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
             "cartao": cartao,
             "parcelas": parcelas,
             "id_existente": dados.get("id_existente"),
-            "permite_parcial": chk_parcial,
+            "permite_parcial": permite_parcial_final,
         }
         # CHAMADA OFICIAL AO MOTOR DO CONCILIAÇÃO
         msg = salvar_lancamento_oficial(supabase, id_usuario, dados_finais)
