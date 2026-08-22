@@ -317,7 +317,7 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
     return f"✅ Compra **{descricao}** registrada no cartão **{cartao}** ({parcelas}x de R$ {base_val:.2f})!"
 
   # 3. CONVENCIONAL OU PARCIAL (SEM CARTÃO)
-  if intencao == "PARCIAL" or permite_parcial:
+  if intencao == "PARCIAL":
     dt_1_dia = dt_compra.replace(day=1).strftime("%Y-%m-%d")
     supabase.table("lancamentos").insert({
         "projeto_id": projeto_id,
@@ -331,7 +331,7 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
         "parcial_real": valor,
         "parcial_data": dt_venc,
         "status": "Realizado",
-        "permite_parcial": True,
+        "permite_parcial": False, # Registro filho de parcial NUNCA permite parcial
     }).execute()
     return f"✅ Lançamento parcial de **R$ {valor:,.2f}** gravado!"
 
@@ -423,7 +423,7 @@ def exibir_conciliacao(
             </style>
         """,
         unsafe_allow_html=True,
-    )
+  )
 
     if st.button("AJUDA", type="primary", use_container_width=True):
       st.session_state["exibir_ajuda_conciliacao"] = not st.session_state.get(
@@ -730,7 +730,7 @@ def exibir_conciliacao(
                 "cartao": nome_cartao_final,
                 "parcelas": int(qtd_parc_in),
                 "intencao": "PARCIAL",
-                "permite_parcial": True,
+                "permite_parcial": False, # Força False na requisição da interface também
             }
 
             salvar_lancamento_oficial(supabase, ID_USUARIO_LOGADO, dados_p)
