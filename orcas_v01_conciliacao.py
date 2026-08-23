@@ -253,29 +253,23 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
     base_val = round(valor / parcelas, 2)
     residuo = round(valor - (base_val * parcelas), 2)
 
-    status_mestre = (
-        "Realizado" if (not id_existente or intencao == "REALIZAR") else "Planejado"
-    )
-    v_real_mestre = valor if (not id_existente or intencao == "REALIZAR") else 0.0
+    # Formata a descrição mestre conforme solicitado: "Descrição - Cartão nX"
+    desc_mestre = f"{descricao} - {cartao} {parcelas}x"
 
     payload_mestre = {
         "projeto_id": projeto_id,
         "usuario_id": str(usuario_id),
-        "descricao": descricao,
+        "descricao": desc_mestre,
         "data": dt_compra.strftime("%Y-%m-%d"),
         "data_vencimento": dt_compra.strftime("%Y-%m-%d"),
         "tipo": tipo,
         "valor_plan": 0.0,
-        "valor_real": v_real_mestre,
-        "status": status_mestre,
+        "valor_real": valor,
+        "status": "Realizado",
         "cc_tipo": "LCL",
         "cc_qtd_parcelas": parcelas,
-        "permite_parcial": permite_parcial,
+        "permite_parcial": False,
     }
-
-    if permite_parcial:
-      payload_mestre["parcial_real"] = valor
-      payload_mestre["parcial_data"] = dt_compra.strftime("%Y-%m-%d")
 
     if id_existente:
       supabase.table("lancamentos").update(payload_mestre).eq(
@@ -308,7 +302,7 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
           supabase, None, cartao, dt_venc_p, usuario_id
       )
 
-    return f"✅ Compra **{descricao}** registrada no cartão **{cartao}** ({parcelas}x de R$ {base_val:.2f})!"
+    return f"✅ Compra **{desc_mestre}** registrada ({parcelas}x de R$ {base_val:.2f})!"
 
   # 3. CONVENCIONAL OU PARCIAL (SEM CARTÃO)
   if intencao == "PARCIAL":
@@ -321,11 +315,11 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
         "data_vencimento": dt_1_dia,
         "tipo": tipo,
         "valor_plan": 0.0,
-        "valor_real": 0.0,  # Corrigido: Parciais gravam 0.0 no valor_real
+        "valor_real": 0.0,
         "parcial_real": valor,
         "parcial_data": dt_venc,
         "status": "Realizado",
-        "permite_parcial": False,  # Corrigido: Registro filho de parcial não permite parcial
+        "permite_parcial": False,
     }).execute()
     return f"✅ Lançamento parcial de **R$ {valor:,.2f}** gravado!"
 

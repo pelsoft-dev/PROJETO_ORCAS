@@ -246,7 +246,6 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
   if is_cartao_valido:
     corte, venc = buscar_dados_cartao(supabase, None, cartao)
 
-    # Vencimento da 1ª Parcela considerando dia de corte
     dt_1_venc = calcular_vencimento_fatura(
         dt_compra, dia_corte=corte, dia_vencimento=venc
     )
@@ -254,32 +253,23 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
     base_val = round(valor / parcelas, 2)
     residuo = round(valor - (base_val * parcelas), 2)
 
-    # REGRA PARA COMPRA NO CARTÃO (SEM PLANEJAMENTO OU CONCILIAÇÃO):
-    # Se for compra sem planejamento prévio (id_existente ausente), gera a gravação Mestre como REAL
-    # data: 20/08/2026 | valor_plan: 0.0 | valor_real: 5000.0 | status: REAL/Realizado | cc_tipo: LCL
-    status_mestre = (
-        "Realizado" if (not id_existente or intencao == "REALIZAR") else "Planejado"
-    )
-    v_real_mestre = valor if (not id_existente or intencao == "REALIZAR") else 0.0
+    # Formata a descrição mestre conforme solicitado: "Descrição - Cartão nX"
+    desc_mestre = f"{descricao} - {cartao} {parcelas}x"
 
     payload_mestre = {
         "projeto_id": projeto_id,
         "usuario_id": str(usuario_id),
-        "descricao": descricao,
+        "descricao": desc_mestre,
         "data": dt_compra.strftime("%Y-%m-%d"),
         "data_vencimento": dt_compra.strftime("%Y-%m-%d"),
         "tipo": tipo,
         "valor_plan": 0.0,
-        "valor_real": v_real_mestre,
-        "status": status_mestre,
+        "valor_real": valor,
+        "status": "Realizado",
         "cc_tipo": "LCL",
         "cc_qtd_parcelas": parcelas,
-        "permite_parcial": permite_parcial,
+        "permite_parcial": False,
     }
-
-    if permite_parcial:
-      payload_mestre["parcial_real"] = valor
-      payload_mestre["parcial_data"] = dt_compra.strftime("%Y-%m-%d")
 
     if id_existente:
       supabase.table("lancamentos").update(payload_mestre).eq(
@@ -288,10 +278,8 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
     else:
       supabase.table("lancamentos").insert(payload_mestre).execute()
 
-    # GERAR PARCELAS FILHAS (LCL) NAS FATURAS FUTURAS/ATUAIS
     for i in range(parcelas):
       v_parc = base_val + (residuo if i == (parcelas - 1) else 0.0)
-      # i=0 usa a dt_1_venc exata (ex: 10/09/2026), i=1 gera 10/10/2026, etc.
       dt_venc_p = somar_meses_data(dt_1_venc, i, dia_vencimento=venc)
 
       supabase.table("lancamentos").insert({
@@ -314,7 +302,7 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
           supabase, None, cartao, dt_venc_p, usuario_id
       )
 
-    return f"✅ Compra **{descricao}** registrada no cartão **{cartao}** ({parcelas}x de R$ {base_val:.2f})!"
+    return f"✅ Compra **{desc_mestre}** registrada ({parcelas}x de R$ {base_val:.2f})!"
 
   # 3. CONVENCIONAL OU PARCIAL (SEM CARTÃO)
   if intencao == "PARCIAL":
@@ -327,11 +315,11 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
         "data_vencimento": dt_1_dia,
         "tipo": tipo,
         "valor_plan": 0.0,
-        "valor_real": valor,
+        "valor_real": 0.0,
         "parcial_real": valor,
         "parcial_data": dt_venc,
         "status": "Realizado",
-        "permite_parcial": False, # Registro filho de parcial NUNCA permite parcial
+        "permite_parcial": False,
     }).execute()
     return f"✅ Lançamento parcial de **R$ {valor:,.2f}** gravado!"
 
@@ -423,7 +411,7 @@ def exibir_conciliacao(
             </style>
         """,
         unsafe_allow_html=True,
-  )
+    )
 
     if st.button("AJUDA", type="primary", use_container_width=True):
       st.session_state["exibir_ajuda_conciliacao"] = not st.session_state.get(
@@ -730,7 +718,7 @@ def exibir_conciliacao(
                 "cartao": nome_cartao_final,
                 "parcelas": int(qtd_parc_in),
                 "intencao": "PARCIAL",
-                "permite_parcial": False, # Força False na requisição da interface também
+                "permite_parcial": False,
             }
 
             salvar_lancamento_oficial(supabase, ID_USUARIO_LOGADO, dados_p)
