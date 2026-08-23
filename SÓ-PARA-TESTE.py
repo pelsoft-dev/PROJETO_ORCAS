@@ -200,7 +200,7 @@ def atualizar_valor_plan_cartao(
           "tipo": "Saída",
           "valor_plan": round(soma_lcls, 2),
           "valor_real": 0.0,
-          "status": "Realizado",
+          "status": "Planejado",
           "cc_tipo": "$CCP",
           "cc_dia_corte": corte,
           "cc_dia_vencimento": venc,
@@ -212,13 +212,15 @@ def atualizar_valor_plan_cartao(
 def salvar_lancamento_oficial(supabase, usuario_id, dados):
   """MOTOR ÚNICO DE CRIAÇÃO/EDIÇÃO DE LANÇAMENTOS (CONCILIAÇÃO E POR VOZ)."""
   hoje = datetime.now(zoneinfo.ZoneInfo("America/Sao_Paulo")).date()
+  hoje_str = hoje.strftime("%Y-%m-%d")
+
   projeto_id = str(
       dados.get("projeto_id") or st.session_state.get("projeto_ativo")
   )
   descricao = str(dados.get("descricao") or "").strip()
   valor = float(dados.get("valor") or 0.0)
   tipo = dados.get("tipo", "Saída")
-  dt_venc = dados.get("data_vencimento") or str(hoje)
+  dt_venc = dados.get("data_vencimento") or hoje_str
   cartao = dados.get("cartao")
   parcelas = int(dados.get("parcelas") or 1)
   intencao = dados.get("intencao", "REALIZAR")
@@ -252,16 +254,16 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
     base_val = round(valor / parcelas, 2)
     residuo = round(valor - (base_val * parcelas), 2)
 
-    # Formatação exata da descrição e definição da data de hoje para o lançamento realizado
+    # Regra Lançar Sem Planejamento via Cartão:
+    # Descrição unificada no formato exato "Descrição - Cartão nX"
     desc_mestre = f"{descricao} - {cartao} {parcelas}X"
-    dt_hoje_str = hoje.strftime("%Y-%m-%d")
 
     payload_mestre = {
         "projeto_id": projeto_id,
         "usuario_id": str(usuario_id),
         "descricao": desc_mestre,
-        "data": dt_hoje_str,
-        "data_vencimento": dt_hoje_str,
+        "data": hoje_str,
+        "data_vencimento": hoje_str,
         "tipo": tipo,
         "valor_plan": 0.0,
         "valor_real": valor,
@@ -271,8 +273,6 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
         "permite_parcial": False,
     }
 
-    # Se a compra veio de um lançamento planejado existente, atualiza o registro mestre.
-    # Se for "Lançar sem Planejamento" (id_existente é None), insere o registro mestre do zero.
     if id_existente:
       supabase.table("lancamentos").update(payload_mestre).eq(
           "id", id_existente
@@ -280,7 +280,6 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
     else:
       supabase.table("lancamentos").insert(payload_mestre).execute()
 
-    # Gera as parcelas no cartão
     for i in range(parcelas):
       v_parc = base_val + (residuo if i == (parcelas - 1) else 0.0)
       dt_venc_p = somar_meses_data(dt_1_venc, i, dia_vencimento=venc)
@@ -440,7 +439,6 @@ def exibir_conciliacao(
 
   hoje_c = (datetime.utcnow() - timedelta(hours=3)).date()
   ini_mes_c = hoje_c.replace(day=1)
-  limite_c = hoje_c - timedelta(days=4)
 
   col_aviso, col_tog = st.columns([4, 3])
   col_aviso.markdown(
@@ -562,28 +560,20 @@ def exibir_conciliacao(
           & (df_base_tela["dt_obj"] <= fim_mes_c)
       ].copy()
     else:
+      # Filtro para listar itens não realizados
       df_f = df_base_tela[
           (df_base_tela["dt_obj"] >= ini_mes_c)
-          & (df_base_tela["dt_obj"] <= hoje_c)
-          & (
-              (df_base_tela["status"].isin(["Planejado", "PLAN"]))
-              | (
-                  (df_base_tela["status"].isin(["Realizado", "REAL"]))
-                  & (df_base_tela["dt_obj"] >= limite_c)
-              )
-              | (
-                  (df_base_tela["valor_plan"] == 0)
-                  & (df_base_tela["valor_real"] > 0)
-              )
-          )
+          & (~df_base_tela["status"].isin(["Realizado", "REAL"]))
       ].copy()
 
-    parciais_topo = df_f[
-        (df_f["permite_parcial"] == True) & (df_f["dt_obj"] >= ini_mes_c)
-    ]
+    # 1º PARTE: Lançamentos que aceitam parciais no topo
+    parciais_topo = df_f[df_f["permite_parcial"] == True]
+
+    # 2º PARTE: Lançamentos não realizados restantes ordenados de forma decrescente por data
     demais_itens = df_f[~df_f.index.isin(parciais_topo.index)].sort_values(
         "dt_obj", ascending=False
     )
+
     df_final_concilia = pd.concat([parciais_topo, demais_itens])
 
     h1, h2, h3, h4, h5, h6, h7, h8 = st.columns(
