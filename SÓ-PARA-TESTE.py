@@ -252,12 +252,16 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
     base_val = round(valor / parcelas, 2)
     residuo = round(valor - (base_val * parcelas), 2)
 
+    # Formatação exata da descrição e definição da data de hoje para o lançamento realizado
+    desc_mestre = f"{descricao} - {cartao} {parcelas}X"
+    dt_hoje_str = hoje.strftime("%Y-%m-%d")
+
     payload_mestre = {
         "projeto_id": projeto_id,
         "usuario_id": str(usuario_id),
-        "descricao": descricao,
-        "data": dt_compra.strftime("%Y-%m-%d"),
-        "data_vencimento": dt_compra.strftime("%Y-%m-%d"),
+        "descricao": desc_mestre,
+        "data": dt_hoje_str,
+        "data_vencimento": dt_hoje_str,
         "tipo": tipo,
         "valor_plan": 0.0,
         "valor_real": valor,
@@ -267,8 +271,8 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
         "permite_parcial": False,
     }
 
-    # Se a compra veio de um lançamento planejado existente, atualiza ele.
-    # Se for "Lançar sem Planejamento" (não planejado), insere o registro mestre/dummy do zero.
+    # Se a compra veio de um lançamento planejado existente, atualiza o registro mestre.
+    # Se for "Lançar sem Planejamento" (id_existente é None), insere o registro mestre do zero.
     if id_existente:
       supabase.table("lancamentos").update(payload_mestre).eq(
           "id", id_existente
@@ -302,7 +306,7 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
           supabase, None, cartao, dt_venc_p, usuario_id
       )
 
-    return f"✅ Compra **{descricao}** registrada no cartão **{cartao}** ({parcelas}x de R$ {base_val:.2f})!"
+    return f"✅ Compra **{desc_mestre}** registrada no cartão **{cartao}** ({parcelas}x de R$ {base_val:.2f})!"
 
   # 3. CONVENCIONAL OU PARCIAL (SEM CARTÃO)
   if intencao == "PARCIAL":
