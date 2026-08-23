@@ -1,9 +1,9 @@
 import calendar
 from datetime import datetime, timedelta
 import zoneinfo
-from orcas_v01_ajuda_conciliacao import renderizar_ajuda_conciliacao
 import pandas as pd
 import streamlit as st
+from orcas_v01_ajuda_conciliacao import renderizar_ajuda_conciliacao
 
 # ==============================================================================
 # ENGINES & REGRAS DE NEGÓCIO
@@ -78,7 +78,6 @@ def calcular_vencimento_fatura(data_compra, dia_corte=3, dia_vencimento=10):
   ano = data_compra.year
   mes = data_compra.month
 
-  # Se comprou no dia do corte ou depois, vence no mês seguinte
   if data_compra.day >= corte:
     mes += 1
     if mes > 12:
@@ -201,7 +200,7 @@ def atualizar_valor_plan_cartao(
           "tipo": "Saída",
           "valor_plan": round(soma_lcls, 2),
           "valor_real": 0.0,
-          "status": "Planejado",
+          "status": "Realizado",
           "cc_tipo": "$CCP",
           "cc_dia_corte": corte,
           "cc_dia_vencimento": venc,
@@ -246,7 +245,6 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
   if is_cartao_valido:
     corte, venc = buscar_dados_cartao(supabase, None, cartao)
 
-    # Mantém a regra exata de cálculo do vencimento da 1ª parcela baseada na data da compra
     dt_1_venc = calcular_vencimento_fatura(
         dt_compra, dia_corte=corte, dia_vencimento=venc
     )
@@ -254,7 +252,6 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
     base_val = round(valor / parcelas, 2)
     residuo = round(valor - (base_val * parcelas), 2)
 
-    # Registro Mestre/Dummy para histórico total na Tela de Lançamentos
     payload_mestre = {
         "projeto_id": projeto_id,
         "usuario_id": str(usuario_id),
@@ -270,16 +267,16 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
         "permite_parcial": False,
     }
 
+    # Se a compra veio de um lançamento planejado existente, atualiza ele.
+    # Se for "Lançar sem Planejamento" (não planejado), insere o registro mestre/dummy do zero.
     if id_existente:
-      # Baixa o lançamento planejado existente tornando-o o registro mestre/dummy da compra
       supabase.table("lancamentos").update(payload_mestre).eq(
           "id", id_existente
       ).execute()
     else:
-      # Cria o lançamento mestre/dummy do zero quando for compra sem planejamento prévio
       supabase.table("lancamentos").insert(payload_mestre).execute()
 
-    # Inserção das parcelas projetadas no Cartão de Crédito
+    # Gera as parcelas no cartão
     for i in range(parcelas):
       v_parc = base_val + (residuo if i == (parcelas - 1) else 0.0)
       dt_venc_p = somar_meses_data(dt_1_venc, i, dia_vencimento=venc)
@@ -525,6 +522,7 @@ def exibir_conciliacao(
             "cartao": nome_cartao_final,
             "parcelas": int(sp_parc),
             "intencao": "REALIZAR",
+            "id_existente": None,
             "permite_parcial": False,
         }
 
@@ -544,7 +542,9 @@ def exibir_conciliacao(
 
     cc_tipo_str = df_c["cc_tipo"].fillna("").astype(str).str.strip().str.upper()
     is_lcl = cc_tipo_str.str.contains(r"LCL|\$CCL", regex=True)
-    is_mestre_lcl = is_lcl & (df_c["valor_real"] > 0) & (df_c["valor_plan"] == 0)
+    is_mestre_lcl = (
+        is_lcl & (df_c["valor_real"] > 0) & (df_c["valor_plan"] == 0)
+    )
 
     df_base_tela = df_c[
         (df_c["parcial_real"] == 0) & ((~is_lcl) | is_mestre_lcl)
