@@ -246,6 +246,7 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
   if is_cartao_valido:
     corte, venc = buscar_dados_cartao(supabase, None, cartao)
 
+    # Mantém a regra exata de cálculo do vencimento da 1ª parcela baseada na data da compra
     dt_1_venc = calcular_vencimento_fatura(
         dt_compra, dia_corte=corte, dia_vencimento=venc
     )
@@ -253,11 +254,7 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
     base_val = round(valor / parcelas, 2)
     residuo = round(valor - (base_val * parcelas), 2)
 
-    status_mestre = (
-        "Realizado" if (not id_existente or intencao == "REALIZAR") else "Planejado"
-    )
-    v_real_mestre = valor if (not id_existente or intencao == "REALIZAR") else 0.0
-
+    # Registro Mestre/Dummy para histórico total na Tela de Lançamentos
     payload_mestre = {
         "projeto_id": projeto_id,
         "usuario_id": str(usuario_id),
@@ -266,24 +263,23 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
         "data_vencimento": dt_compra.strftime("%Y-%m-%d"),
         "tipo": tipo,
         "valor_plan": 0.0,
-        "valor_real": v_real_mestre,
-        "status": status_mestre,
+        "valor_real": valor,
+        "status": "Realizado",
         "cc_tipo": "LCL",
         "cc_qtd_parcelas": parcelas,
-        "permite_parcial": permite_parcial,
+        "permite_parcial": False,
     }
 
-    if permite_parcial:
-      payload_mestre["parcial_real"] = valor
-      payload_mestre["parcial_data"] = dt_compra.strftime("%Y-%m-%d")
-
     if id_existente:
+      # Baixa o lançamento planejado existente tornando-o o registro mestre/dummy da compra
       supabase.table("lancamentos").update(payload_mestre).eq(
           "id", id_existente
       ).execute()
     else:
+      # Cria o lançamento mestre/dummy do zero quando for compra sem planejamento prévio
       supabase.table("lancamentos").insert(payload_mestre).execute()
 
+    # Inserção das parcelas projetadas no Cartão de Crédito
     for i in range(parcelas):
       v_parc = base_val + (residuo if i == (parcelas - 1) else 0.0)
       dt_venc_p = somar_meses_data(dt_1_venc, i, dia_vencimento=venc)
@@ -302,6 +298,7 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
           "status": "Planejado",
           "cc_tipo": "LCL",
           "cc_qtd_parcelas": 0,
+          "permite_parcial": False,
       }).execute()
 
       atualizar_valor_plan_cartao(
@@ -321,11 +318,11 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
         "data_vencimento": dt_1_dia,
         "tipo": tipo,
         "valor_plan": 0.0,
-        "valor_real": 0.0,  # Corrigido: Parciais gravam 0.0 no valor_real
+        "valor_real": 0.0,
         "parcial_real": valor,
         "parcial_data": dt_venc,
         "status": "Realizado",
-        "permite_parcial": False,  # Corrigido: Registro filho de parcial não permite parcial
+        "permite_parcial": False,
     }).execute()
     return f"✅ Lançamento parcial de **R$ {valor:,.2f}** gravado!"
 

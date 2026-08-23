@@ -246,6 +246,7 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
   if is_cartao_valido:
     corte, venc = buscar_dados_cartao(supabase, None, cartao)
 
+    # Mantém a regra exata de cálculo do vencimento da 1ª parcela baseada na data da compra
     dt_1_venc = calcular_vencimento_fatura(
         dt_compra, dia_corte=corte, dia_vencimento=venc
     )
@@ -253,13 +254,11 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
     base_val = round(valor / parcelas, 2)
     residuo = round(valor - (base_val * parcelas), 2)
 
-    # Formata a descrição mestre conforme solicitado: "Descrição - Cartão nX"
-    desc_mestre = f"{descricao} - {cartao} {parcelas}x"
-
+    # Registro Mestre/Dummy para histórico total na Tela de Lançamentos
     payload_mestre = {
         "projeto_id": projeto_id,
         "usuario_id": str(usuario_id),
-        "descricao": desc_mestre,
+        "descricao": descricao,
         "data": dt_compra.strftime("%Y-%m-%d"),
         "data_vencimento": dt_compra.strftime("%Y-%m-%d"),
         "tipo": tipo,
@@ -272,12 +271,15 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
     }
 
     if id_existente:
+      # Baixa o lançamento planejado existente tornando-o o registro mestre/dummy da compra
       supabase.table("lancamentos").update(payload_mestre).eq(
           "id", id_existente
       ).execute()
     else:
+      # Cria o lançamento mestre/dummy do zero quando for compra sem planejamento prévio
       supabase.table("lancamentos").insert(payload_mestre).execute()
 
+    # Inserção das parcelas projetadas no Cartão de Crédito
     for i in range(parcelas):
       v_parc = base_val + (residuo if i == (parcelas - 1) else 0.0)
       dt_venc_p = somar_meses_data(dt_1_venc, i, dia_vencimento=venc)
@@ -296,13 +298,14 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
           "status": "Planejado",
           "cc_tipo": "LCL",
           "cc_qtd_parcelas": 0,
+          "permite_parcial": False,
       }).execute()
 
       atualizar_valor_plan_cartao(
           supabase, None, cartao, dt_venc_p, usuario_id
       )
 
-    return f"✅ Compra **{desc_mestre}** registrada ({parcelas}x de R$ {base_val:.2f})!"
+    return f"✅ Compra **{descricao}** registrada no cartão **{cartao}** ({parcelas}x de R$ {base_val:.2f})!"
 
   # 3. CONVENCIONAL OU PARCIAL (SEM CARTÃO)
   if intencao == "PARCIAL":
