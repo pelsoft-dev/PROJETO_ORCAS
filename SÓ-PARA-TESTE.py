@@ -78,6 +78,7 @@ def calcular_vencimento_fatura(data_compra, dia_corte=3, dia_vencimento=10):
   ano = data_compra.year
   mes = data_compra.month
 
+  # Se comprou no dia do corte ou depois, vence no mês seguinte
   if data_compra.day >= corte:
     mes += 1
     if mes > 12:
@@ -212,15 +213,13 @@ def atualizar_valor_plan_cartao(
 def salvar_lancamento_oficial(supabase, usuario_id, dados):
   """MOTOR ÚNICO DE CRIAÇÃO/EDIÇÃO DE LANÇAMENTOS (CONCILIAÇÃO E POR VOZ)."""
   hoje = datetime.now(zoneinfo.ZoneInfo("America/Sao_Paulo")).date()
-  hoje_str = hoje.strftime("%Y-%m-%d")
-
   projeto_id = str(
       dados.get("projeto_id") or st.session_state.get("projeto_ativo")
   )
   descricao = str(dados.get("descricao") or "").strip()
   valor = float(dados.get("valor") or 0.0)
   tipo = dados.get("tipo", "Saída")
-  dt_venc = dados.get("data_vencimento") or hoje_str
+  dt_venc = dados.get("data_vencimento") or str(hoje)
   cartao = dados.get("cartao")
   parcelas = int(dados.get("parcelas") or 1)
   intencao = dados.get("intencao", "REALIZAR")
@@ -254,24 +253,36 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
     base_val = round(valor / parcelas, 2)
     residuo = round(valor - (base_val * parcelas), 2)
 
-    # Regra Lançar Sem Planejamento via Cartão:
-    # Descrição unificada no formato exato "Descrição - Cartão nX"
-    desc_mestre = f"{descricao} - {cartao} {parcelas}X"
+    status_mestre = (
+        "Realizado" if (not id_existente or intencao == "REALIZAR") else "Planejado"
+    )
+    v_real_mestre = valor if (not id_existente or intencao == "REALIZAR") else 0.0
+
+    # Formatação unificada do registro mestre
+    desc_mestre = (
+        f"{descricao} - {cartao} {parcelas}X"
+        if not id_existente
+        else descricao
+    )
 
     payload_mestre = {
         "projeto_id": projeto_id,
         "usuario_id": str(usuario_id),
         "descricao": desc_mestre,
-        "data": hoje_str,
-        "data_vencimento": hoje_str,
+        "data": dt_compra.strftime("%Y-%m-%d"),
+        "data_vencimento": dt_compra.strftime("%Y-%m-%d"),
         "tipo": tipo,
         "valor_plan": 0.0,
-        "valor_real": valor,
-        "status": "Realizado",
+        "valor_real": v_real_mestre,
+        "status": status_mestre,
         "cc_tipo": "LCL",
         "cc_qtd_parcelas": parcelas,
-        "permite_parcial": False,
+        "permite_parcial": permite_parcial,
     }
+
+    if permite_parcial:
+      payload_mestre["parcial_real"] = valor
+      payload_mestre["parcial_data"] = dt_compra.strftime("%Y-%m-%d")
 
     if id_existente:
       supabase.table("lancamentos").update(payload_mestre).eq(
@@ -298,7 +309,6 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
           "status": "Planejado",
           "cc_tipo": "LCL",
           "cc_qtd_parcelas": 0,
-          "permite_parcial": False,
       }).execute()
 
       atualizar_valor_plan_cartao(
@@ -439,6 +449,7 @@ def exibir_conciliacao(
 
   hoje_c = (datetime.utcnow() - timedelta(hours=3)).date()
   ini_mes_c = hoje_c.replace(day=1)
+  limite_c = hoje_c - timedelta(days=4)
 
   col_aviso, col_tog = st.columns([4, 3])
   col_aviso.markdown(
@@ -524,7 +535,6 @@ def exibir_conciliacao(
             "cartao": nome_cartao_final,
             "parcelas": int(sp_parc),
             "intencao": "REALIZAR",
-            "id_existente": None,
             "permite_parcial": False,
         }
 
@@ -544,9 +554,7 @@ def exibir_conciliacao(
 
     cc_tipo_str = df_c["cc_tipo"].fillna("").astype(str).str.strip().str.upper()
     is_lcl = cc_tipo_str.str.contains(r"LCL|\$CCL", regex=True)
-    is_mestre_lcl = (
-        is_lcl & (df_c["valor_real"] > 0) & (df_c["valor_plan"] == 0)
-    )
+    is_mestre_lcl = is_lcl & (df_c["valor_real"] > 0) & (df_c["valor_plan"] == 0)
 
     df_base_tela = df_c[
         (df_c["parcial_real"] == 0) & ((~is_lcl) | is_mestre_lcl)
@@ -560,20 +568,28 @@ def exibir_conciliacao(
           & (df_base_tela["dt_obj"] <= fim_mes_c)
       ].copy()
     else:
-      # Filtro para listar itens não realizados
       df_f = df_base_tela[
           (df_base_tela["dt_obj"] >= ini_mes_c)
-          & (~df_base_tela["status"].isin(["Realizado", "REAL"]))
+          & (df_base_tela["dt_obj"] <= hoje_c)
+          & (
+              (df_base_tela["status"].isin(["Planejado", "PLAN"]))
+              | (
+                  (df_base_tela["status"].isin(["Realizado", "REAL"]))
+                  & (df_base_tela["dt_obj"] >= limite_c)
+              )
+              | (
+                  (df_base_tela["valor_plan"] == 0)
+                  & (df_base_tela["valor_real"] > 0)
+              )
+          )
       ].copy()
 
-    # 1º PARTE: Lançamentos que aceitam parciais no topo
-    parciais_topo = df_f[df_f["permite_parcial"] == True]
-
-    # 2º PARTE: Lançamentos não realizados restantes ordenados de forma decrescente por data
+    parciais_topo = df_f[
+        (df_f["permite_parcial"] == True) & (df_f["dt_obj"] >= ini_mes_c)
+    ]
     demais_itens = df_f[~df_f.index.isin(parciais_topo.index)].sort_values(
         "dt_obj", ascending=False
     )
-
     df_final_concilia = pd.concat([parciais_topo, demais_itens])
 
     h1, h2, h3, h4, h5, h6, h7, h8 = st.columns(
