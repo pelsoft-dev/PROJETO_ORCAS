@@ -76,9 +76,9 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
             def calcular_total_tipo(df_tipo, e_fechado):
                 total = 0
                 
-                # IGNORA LCLs sem planejamento para não somar 2x (já que entrarão pela fatura mestre $CCP/CCP)
+                # IGNORA LCLs para não somar 2x (já que entram agregados na fatura mestre $CCP/CCP)
                 s_cc = df_tipo.get('cc_tipo', pd.Series('', index=df_tipo.index)).fillna('').astype(str).str.strip().str.upper()
-                df_tipo_filtrado = df_tipo[(s_cc != 'LCL') | (df_tipo['valor_plan'] > 0)]
+                df_tipo_filtrado = df_tipo[s_cc != 'LCL']
                 
                 if e_fechado:
                     itens_principais = df_tipo_filtrado[(df_tipo_filtrado['valor_plan'] > 0) | ((df_tipo_filtrado['valor_plan'] == 0) & (df_tipo_filtrado['valor_real'] > 0))]
@@ -208,15 +208,11 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                     s_cc_m = df_mes.get('cc_tipo', pd.Series('', index=df_mes.index)).fillna('').astype(str).str.strip().str.upper()
                     eh_ccp_mask = s_cc_m.isin(['$CCP', 'CCP'])
 
-                    # Regra estrita para LCL avulso: Sem planejamento (valor_plan == 0) e sem parcial
-                    p_real = df_mes.get('parcial_real', pd.Series(0, index=df_mes.index)).fillna(0)
-                    is_lcl_avulso = (s_cc_m == 'LCL') & (df_mes['valor_plan'] == 0) & (p_real == 0)
-
-                    # EXIBIÇÃO: Lançamentos normais + Faturas mestre ($CCP) + Lançamentos planejados mesmo que p/ cartão (LCL com valor_plan > 0) + LCLs Avulsos
+                    # EXIBIÇÃO: Filtra estritamente tudo que for LCL da listagem principal, 
+                    # pois lançamentos do cartão pertencem unicamente à Fatura Mestre ($CCP/CCP)
                     df_exibir = df_mes[
-                        (((df_mes['valor_plan'] > 0) | (df_mes['valor_real'] > 0) | eh_ccp_mask) &
-                         ((s_cc_m != 'LCL') | (df_mes['valor_plan'] > 0))) |
-                        is_lcl_avulso
+                        ((df_mes['valor_plan'] > 0) | (df_mes['valor_real'] > 0) | eh_ccp_mask) &
+                        (s_cc_m != 'LCL')
                     ].sort_values('data')
                     
                     # Cabeçalho da tabela
