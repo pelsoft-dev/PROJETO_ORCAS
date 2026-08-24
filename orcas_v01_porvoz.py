@@ -124,7 +124,7 @@ def processar_texto_groq(
         "descricao": "Erro de Modelo",
         "valor": 0.0,
         "tipo": "Saída",
-        "data_vencimento": str(hoje),
+        "data_compra": str(hoje),
         "permite_parcial": False,
         "cartao": None,
         "parcelas": 1,
@@ -166,7 +166,7 @@ def processar_texto_groq(
         "descricao": desc.capitalize(),
         "valor": valor_float,
         "tipo": dados_parsed.get("tipo", "Saída"),
-        "data_vencimento": str(hoje),
+        "data_compra": str(hoje),
         "permite_parcial": False,
         "cartao": cartao_extraido,
         "parcelas": int(dados_parsed.get("parcelas") or 1),
@@ -181,7 +181,7 @@ def processar_texto_groq(
         "descricao": "Erro ao Interpretar",
         "valor": 0.0,
         "tipo": "Saída",
-        "data_vencimento": str(hoje),
+        "data_compra": str(hoje),
         "permite_parcial": False,
         "cartao": None,
         "parcelas": 1,
@@ -321,7 +321,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
               if is_pai_parcial:
                 dados["intencao"] = "PARCIAL"
                 dados["permite_parcial"] = False
-                # IMPORTANTE: NÃO vincular o id_existente para não editar/sobrescrever o PAI
                 dados["id_existente"] = None
               else:
                 dados["id_existente"] = item_banco.get("id")
@@ -353,7 +352,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
     df_proj = buscar_df_lancamentos_projeto(supabase, plano_ativo)
     opcoes_cartoes = buscar_cartoes_lcp(df_proj)
 
-    # CORRESPONDÊNCIA / MONTAGEM DA LISTA
     cartao_detectado = dados.get("cartao")
     if cartao_detectado:
       cartao_clean = str(cartao_detectado).strip()
@@ -365,7 +363,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
       if match_opt:
         idx_cartao = opcoes_cartoes.index(match_opt)
       else:
-        # Se for um nome personalizado de cartão não cadastrado ainda, insere no dropdown antes de "+ Outro Cartão..."
         opcoes_cartoes.insert(-1, cartao_clean)
         idx_cartao = opcoes_cartoes.index(cartao_clean)
     else:
@@ -400,10 +397,10 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
             value=float(dados.get("valor") or 0.0),
             format="%.2f",
         )
-        dt_venc = st.date_input(
+        dt_compra = st.date_input(
             "Data da Compra",
             value=datetime.strptime(
-                dados.get("data_vencimento", str(obter_hoje_brasil())),
+                dados.get("data_compra", str(obter_hoje_brasil())),
                 "%Y-%m-%d",
             ).date(),
             format="DD/MM/YYYY",
@@ -412,7 +409,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
             "Parcelas", value=int(dados.get("parcelas") or 1), min_value=1
         )
 
-      # Se for PARCIAL, força False no checkbox e desabilita a edição da flag
       is_parcial_intencao = intencao == "PARCIAL"
       val_parcial_chk = (
           False
@@ -449,13 +445,17 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
             else cartao_sel
         )
 
+        str_dt_compra = dt_compra.strftime("%Y-%m-%d")
+
         dados_finais = {
             "intencao": intencao,
             "projeto_id": plano_ativo,
             "descricao": descricao,
             "valor": valor,
             "tipo": dados.get("tipo", "Saída"),
-            "data_vencimento": dt_venc.strftime("%Y-%m-%d"),
+            "data_compra": str_dt_compra,
+            "data_movimento": str_dt_compra,
+            "data_vencimento": str_dt_compra,
             "cartao": nome_cartao_final,
             "parcelas": parcelas,
             "id_existente": id_final,
