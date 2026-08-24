@@ -90,10 +90,9 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                             if x.get('status') == 'Realizado':
                                 if str(x.get('cc_tipo', '')).strip().upper() in ['$CCP', 'CCP']:
                                     desc_cc = str(x['descricao']).strip().upper()
-                                    soma_lcls = df_mes[
-                                        (df_mes.get('cc_tipo', pd.Series('')).fillna('').astype(str).str.strip().str.upper() == 'LCL') & 
-                                        (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_cc)
-                                    ]['valor_real'].sum()
+                                    m_lcl = (df_mes.get('cc_tipo', pd.Series('')).fillna('').astype(str).str.strip().str.upper() == 'LCL')
+                                    m_desc = (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_cc) | (df_mes.get('cc_descricao', pd.Series('')).fillna('').astype(str).str.strip().str.upper() == desc_cc)
+                                    soma_lcls = df_mes[m_lcl & m_desc]['valor_real'].sum()
                                     total += soma_lcls
                                 else:
                                     total += x['valor_real']
@@ -108,10 +107,9 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         else:
                             if str(x.get('cc_tipo', '')).strip().upper() in ['$CCP', 'CCP']:
                                 desc_cc = str(x['descricao']).strip().upper()
-                                soma_lcls = df_mes[
-                                    (df_mes.get('cc_tipo', pd.Series('')).fillna('').astype(str).str.strip().str.upper() == 'LCL') & 
-                                    (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_cc)
-                                ]['valor_real'].sum()
+                                m_lcl = (df_mes.get('cc_tipo', pd.Series('')).fillna('').astype(str).str.strip().str.upper() == 'LCL')
+                                m_desc = (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_cc) | (df_mes.get('cc_descricao', pd.Series('')).fillna('').astype(str).str.strip().str.upper() == desc_cc)
+                                soma_lcls = df_mes[m_lcl & m_desc]['valor_real'].sum()
                                 total += soma_lcls if soma_lcls > 0 else x['valor_plan']
                             else:
                                 total += x['valor_real'] if x['valor_real'] > 0 else x['valor_plan']
@@ -231,13 +229,13 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         v_re = v_ac if v_ac > 0 else row['valor_real']
                         eh_cartao_ccp = str(row.get('cc_tipo', '')).strip().upper() in ['$CCP', 'CCP']
 
-                        # Busca LCLs vinculadas (Compras do cartão)
+                        # Busca LCLs vinculadas (compras do cartão associadas à fatura/cartão pai)
                         df_lcls_cartao = pd.DataFrame()
                         if eh_cartao_ccp:
-                            df_lcls_cartao = df_mes[
-                                (df_mes.get('cc_tipo', pd.Series('')).fillna('').astype(str).str.strip().str.upper() == 'LCL') & 
-                                (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_row_upper)
-                            ]
+                            mask_lcl = (df_mes.get('cc_tipo', pd.Series('')).fillna('').astype(str).str.strip().str.upper() == 'LCL')
+                            mask_desc_dir = (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_row_upper)
+                            mask_desc_cc = (df_mes.get('cc_descricao', pd.Series('')).fillna('').astype(str).str.strip().str.upper() == desc_row_upper)
+                            df_lcls_cartao = df_mes[mask_lcl & (mask_desc_dir | mask_desc_cc)]
                             v_re = df_lcls_cartao['valor_real'].sum()
 
                         dt_e = pd.to_datetime(row['data']).strftime('%d/%m/%Y')
@@ -272,7 +270,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                             # 1. Compras no Cartão de Crédito
                             if eh_cartao_ccp and not df_lcls_cartao.empty:
                                 for _, lcl in df_lcls_cartao.iterrows():
-                                    desc_lcl = lcl.get('cc_descricao') if 'cc_descricao' in lcl and pd.notna(lcl['cc_descricao']) else lcl['descricao']
+                                    desc_lcl = lcl['descricao']
                                     dt_compra = lcl.get('cc_data_compra') if 'cc_data_compra' in lcl and pd.notna(lcl['cc_data_compra']) else lcl['data']
                                     dt_compra_str = pd.to_datetime(dt_compra).strftime('%d/%m/%Y')
                                     
