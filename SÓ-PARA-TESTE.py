@@ -9,7 +9,7 @@ from orcas_v01_ajuda_lancamentos import renderizar_ajuda_lancamentos
 def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db, format_moeda, ir_para_o_topo):
     """
     Sub-rotina da Tela Lançamentos.
-    Exibe LCLs agrupados exclusivamente dentro de suas faturas mestre ($CCP/CCP).
+    Exibe LCLs mestre/avulsos na listagem sem duplicar saldos.
     """
 
     if 'msg_sucesso' not in st.session_state: 
@@ -76,9 +76,9 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
             def calcular_total_tipo(df_tipo, e_fechado):
                 total = 0
                 
-                # IGNORA LCLs soltos no loop principal de cálculo para não duplicar o cartão
+                # IGNORA LCLs sem planejamento para não somar 2x (já que entrarão pela fatura mestre $CCP/CCP)
                 s_cc = df_tipo.get('cc_tipo', pd.Series('', index=df_tipo.index)).fillna('').astype(str).str.strip().str.upper()
-                df_tipo_filtrado = df_tipo[s_cc != 'LCL']
+                df_tipo_filtrado = df_tipo[(s_cc != 'LCL') | (df_tipo['valor_plan'] > 0)]
                 
                 if e_fechado:
                     itens_principais = df_tipo_filtrado[(df_tipo_filtrado['valor_plan'] > 0) | ((df_tipo_filtrado['valor_plan'] == 0) & (df_tipo_filtrado['valor_real'] > 0))]
@@ -206,9 +206,18 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                     """, unsafe_allow_html=True)
 
                     s_cc_m = df_mes.get('cc_tipo', pd.Series('', index=df_mes.index)).fillna('').astype(str).str.strip().str.upper()
+                    eh_ccp_mask = s_cc_m.isin(['$CCP', 'CCP'])
 
-                    # NA LISTAGEM PRINCIPAL: Oculta todos os LCLs para não ter duplicidade solta fora da fatura
-                    df_exibir = df_mes[s_cc_m != 'LCL'].sort_values('data')
+                    # Regra estrita para LCL avulso: Sem planejamento (valor_plan == 0) e sem parcial
+                    p_real = df_mes.get('parcial_real', pd.Series(0, index=df_mes.index)).fillna(0)
+                    is_lcl_avulso = (s_cc_m == 'LCL') & (df_mes['valor_plan'] == 0) & (p_real == 0)
+
+                    # EXIBIÇÃO: Lançamentos normais + Faturas mestre ($CCP) + Lançamentos planejados mesmo que p/ cartão (LCL com valor_plan > 0) + LCLs Avulsos
+                    df_exibir = df_mes[
+                        (((df_mes['valor_plan'] > 0) | (df_mes['valor_real'] > 0) | eh_ccp_mask) &
+                         ((s_cc_m != 'LCL') | (df_mes['valor_plan'] > 0))) |
+                        is_lcl_avulso
+                    ].sort_values('data')
                     
                     # Cabeçalho da tabela
                     h_hdr = '<div class="tab-scroll"><div class="tab-body">'
@@ -225,7 +234,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         v_re = v_ac if v_ac > 0 else row['valor_real']
                         eh_cartao_ccp = str(row.get('cc_tipo', '')).strip().upper() in ['$CCP', 'CCP']
 
-                        # Busca LCLs vinculadas ao cartão mestre
+                        # Busca LCLs vinculadas ao cartão mestre (por descricao ou cc_descricao)
                         df_lcls_cartao = pd.DataFrame()
                         if eh_cartao_ccp:
                             mask_lcl = (df_mes.get('cc_tipo', pd.Series('')).fillna('').astype(str).str.strip().str.upper() == 'LCL')
@@ -233,7 +242,6 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                             mask_desc_cc = (df_mes.get('cc_descricao', pd.Series('')).fillna('').astype(str).str.strip().str.upper() == desc_row_upper)
                             df_lcls_cartao = df_mes[mask_lcl & (mask_desc_dir | mask_desc_cc)]
                             
-                            # Atualiza valores agregados da fatura mestre baseados nos LCLs
                             if not df_lcls_cartao.empty:
                                 v_plan = df_lcls_cartao['valor_plan'].sum()
                                 v_re = df_lcls_cartao['valor_real'].sum()
@@ -267,7 +275,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                             h_hdr += '</div></summary>'
 
                             # Subitens exibidos quando aberto
-                            # 1. Compras no Cartão de Crédito (Exibe cc_descricao preferencialmente)
+                            # 1. Compras no Cartão de Crédito
                             if eh_cartao_ccp and not df_lcls_cartao.empty:
                                 for _, lcl in df_lcls_cartao.iterrows():
                                     desc_cc_val = str(lcl.get('cc_descricao', '')).strip()
