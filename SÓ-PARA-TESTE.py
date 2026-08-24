@@ -9,7 +9,7 @@ from orcas_v01_ajuda_lancamentos import renderizar_ajuda_lancamentos
 def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db, format_moeda, ir_para_o_topo):
     """
     Sub-rotina da Tela Lançamentos.
-    Exibe LCLs mestre de cartão (planejados e não planejados) na listagem sem duplicar saldos.
+    Exibe LCLs agrupados exclusivamente dentro de suas faturas mestre ($CCP/CCP).
     """
 
     if 'msg_sucesso' not in st.session_state: 
@@ -52,6 +52,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
     if 'permite_parcial' not in df.columns: df['permite_parcial'] = False
     if 'parcial_real' not in df.columns: df['parcial_real'] = 0.0
     if 'status' not in df.columns: df['status'] = 'Planejado'
+    if 'cc_descricao' not in df.columns: df['cc_descricao'] = ''
 
     if d_ini_db and d_fim_db:
         meses_periodo = []
@@ -75,9 +76,9 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
             def calcular_total_tipo(df_tipo, e_fechado):
                 total = 0
                 
-                # IGNORA apenas LCLs sem planejamento (compras filhas do cartão) no loop principal de cálculo
+                # IGNORA LCLs soltos no loop principal de cálculo para não duplicar o cartão
                 s_cc = df_tipo.get('cc_tipo', pd.Series('', index=df_tipo.index)).fillna('').astype(str).str.strip().str.upper()
-                df_tipo_filtrado = df_tipo[(s_cc != 'LCL') | (df_tipo['valor_plan'] > 0)]
+                df_tipo_filtrado = df_tipo[s_cc != 'LCL']
                 
                 if e_fechado:
                     itens_principais = df_tipo_filtrado[(df_tipo_filtrado['valor_plan'] > 0) | ((df_tipo_filtrado['valor_plan'] == 0) & (df_tipo_filtrado['valor_real'] > 0))]
@@ -110,8 +111,10 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                                 desc_cc = str(x['descricao']).strip().upper()
                                 m_lcl = (df_mes.get('cc_tipo', pd.Series('')).fillna('').astype(str).str.strip().str.upper() == 'LCL')
                                 m_desc = (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_cc) | (df_mes.get('cc_descricao', pd.Series('')).fillna('').astype(str).str.strip().str.upper() == desc_cc)
-                                soma_lcls = df_mes[m_lcl & m_desc]['valor_real'].sum()
-                                total += soma_lcls if soma_lcls > 0 else x['valor_plan']
+                                soma_lcls_real = df_mes[m_lcl & m_desc]['valor_real'].sum()
+                                soma_lcls_plan = df_mes[m_lcl & m_desc]['valor_plan'].sum()
+                                val_cartao = soma_lcls_real if soma_lcls_real > 0 else (soma_lcls_plan if soma_lcls_plan > 0 else x['valor_plan'])
+                                total += val_cartao
                             else:
                                 total += x['valor_real'] if x['valor_real'] > 0 else x['valor_plan']
                 return total
@@ -203,18 +206,9 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                     """, unsafe_allow_html=True)
 
                     s_cc_m = df_mes.get('cc_tipo', pd.Series('', index=df_mes.index)).fillna('').astype(str).str.strip().str.upper()
-                    eh_ccp_mask = s_cc_m.isin(['$CCP', 'CCP'])
 
-                    # LCLs avulsos (não planejados e não parciais)
-                    p_real = df_mes.get('parcial_real', pd.Series(0, index=df_mes.index)).fillna(0)
-                    is_lcl_valido = (s_cc_m == 'LCL') & (df_mes['valor_plan'] == 0) & (p_real == 0)
-
-                    # EXIBIÇÃO: Permite exibir LCLs desde que tenham valor planejado (valor_plan > 0)
-                    df_exibir = df_mes[
-                        (((df_mes['valor_plan'] > 0) | (df_mes['valor_real'] > 0) | eh_ccp_mask) &
-                         ((s_cc_m != 'LCL') | (df_mes['valor_plan'] > 0))) |
-                        is_lcl_valido
-                    ].sort_values('data')
+                    # NA LISTAGEM PRINCIPAL: Oculta todos os LCLs para não ter duplicidade solta fora da fatura
+                    df_exibir = df_mes[s_cc_m != 'LCL'].sort_values('data')
                     
                     # Cabeçalho da tabela
                     h_hdr = '<div class="tab-scroll"><div class="tab-body">'
@@ -227,23 +221,28 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                             df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_row_upper
                         ].get('parcial_real', pd.Series(0)).sum()
                         
+                        v_plan = row['valor_plan']
                         v_re = v_ac if v_ac > 0 else row['valor_real']
                         eh_cartao_ccp = str(row.get('cc_tipo', '')).strip().upper() in ['$CCP', 'CCP']
 
-                        # Busca LCLs vinculadas ao cartão (por descricao ou cc_descricao)
+                        # Busca LCLs vinculadas ao cartão mestre
                         df_lcls_cartao = pd.DataFrame()
                         if eh_cartao_ccp:
                             mask_lcl = (df_mes.get('cc_tipo', pd.Series('')).fillna('').astype(str).str.strip().str.upper() == 'LCL')
                             mask_desc_dir = (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_row_upper)
                             mask_desc_cc = (df_mes.get('cc_descricao', pd.Series('')).fillna('').astype(str).str.strip().str.upper() == desc_row_upper)
                             df_lcls_cartao = df_mes[mask_lcl & (mask_desc_dir | mask_desc_cc)]
-                            v_re = df_lcls_cartao['valor_real'].sum()
+                            
+                            # Atualiza valores agregados da fatura mestre baseados nos LCLs
+                            if not df_lcls_cartao.empty:
+                                v_plan = df_lcls_cartao['valor_plan'].sum()
+                                v_re = df_lcls_cartao['valor_real'].sum()
 
                         dt_e = pd.to_datetime(row['data']).strftime('%d/%m/%Y')
                         st_e = 'PLAN' if row.get('status') == 'Planejado' else 'REAL'
                         
                         classe_cor = ""
-                        if v_re > row['valor_plan']:
+                        if v_re > v_plan:
                             if row['tipo'] == 'Saída':
                                 classe_cor = " linha-alerta-saida"
                             elif row['tipo'] == 'Entrada':
@@ -263,15 +262,17 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                             h_hdr += f'<details class="det-linha"><summary>'
                             h_hdr += f'<div class="tab-row{classe_cor}">'
                             h_hdr += f'<div class="c-dt">{dt_e}</div><div class="c-ds">{row["descricao"]}</div><div class="c-es">{row["tipo"][0]}</div>'
-                            h_hdr += f'<div class="c-vl">{format_moeda(row["valor_plan"])}</div><div class="c-vl">{format_moeda(v_re)}</div><div class="c-st">{st_e}</div>'
+                            h_hdr += f'<div class="c-vl">{format_moeda(v_plan)}</div><div class="c-vl">{format_moeda(v_re)}</div><div class="c-st">{st_e}</div>'
                             h_hdr += f'<div class="c-act"><span class="btn-exp-native"><span class="lbl-closed">&gt;&gt;</span><span class="lbl-open">^^</span></span></div>'
                             h_hdr += '</div></summary>'
 
                             # Subitens exibidos quando aberto
-                            # 1. Compras no Cartão de Crédito
+                            # 1. Compras no Cartão de Crédito (Exibe cc_descricao preferencialmente)
                             if eh_cartao_ccp and not df_lcls_cartao.empty:
                                 for _, lcl in df_lcls_cartao.iterrows():
-                                    desc_lcl = lcl['descricao']
+                                    desc_cc_val = str(lcl.get('cc_descricao', '')).strip()
+                                    desc_lcl = desc_cc_val if desc_cc_val and desc_cc_val.upper() != desc_row_upper else lcl['descricao']
+                                    
                                     dt_compra = lcl.get('cc_data_compra') if 'cc_data_compra' in lcl and pd.notna(lcl['cc_data_compra']) else lcl['data']
                                     dt_compra_str = pd.to_datetime(dt_compra).strftime('%d/%m/%Y')
                                     
@@ -294,7 +295,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                             # Linha normal sem subitens
                             h_hdr += f'<div class="tab-row{classe_cor}">'
                             h_hdr += f'<div class="c-dt">{dt_e}</div><div class="c-ds">{row["descricao"]}</div><div class="c-es">{row["tipo"][0]}</div>'
-                            h_hdr += f'<div class="c-vl">{format_moeda(row["valor_plan"])}</div><div class="c-vl">{format_moeda(v_re)}</div><div class="c-st">{st_e}</div>'
+                            h_hdr += f'<div class="c-vl">{format_moeda(v_plan)}</div><div class="c-vl">{format_moeda(v_re)}</div><div class="c-st">{st_e}</div>'
                             h_hdr += f'<div class="c-act"></div>'
                             h_hdr += '</div>'
 
