@@ -9,7 +9,7 @@ from orcas_v01_ajuda_lancamentos import renderizar_ajuda_lancamentos
 def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db, format_moeda, ir_para_o_topo):
     """
     Sub-rotina da Tela Lançamentos.
-    Exibe LCLs mestre de cartão (não planejados e não parciais) na listagem sem duplicar saldos.
+    Exibe LCLs mestre de cartão (planejados e não planejados) na listagem sem duplicar saldos.
     """
 
     if 'msg_sucesso' not in st.session_state: 
@@ -69,9 +69,10 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
             def calcular_total_tipo(df_tipo, e_fechado):
                 total = 0
                 
-                # IGNORA LCLs no loop principal para não duplicar o valor do Cartão
+                # IGNORA apenas LCLs sem planejamento (compras filhas do cartão) no loop principal
                 df_tipo_filtrado = df_tipo[
-                    df_tipo['cc_tipo'].fillna('').astype(str).str.strip().str.upper() != 'LCL'
+                    (df_tipo['cc_tipo'].fillna('').astype(str).str.strip().str.upper() != 'LCL') |
+                    (df_tipo['valor_plan'] > 0)
                 ]
                 
                 if e_fechado:
@@ -201,17 +202,17 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
 
                     eh_ccp_mask = df_mes['cc_tipo'].fillna('').astype(str).str.strip().str.upper().isin(['$CCP', 'CCP'])
 
-                    # Regra estrita para LCL: Cartão de Crédito, Não Planejado (valor_plan == 0) e Não Parcial (parcial_real == 0)
+                    # Regra estrita para LCL avulso: Cartão de Crédito, Não Planejado (valor_plan == 0) e Não Parcial (parcial_real == 0)
                     is_lcl_valido = (
                         (df_mes['cc_tipo'].fillna('').astype(str).str.strip().str.upper() == 'LCL') &
                         (df_mes['valor_plan'] == 0) &
                         (df_mes['parcial_real'].fillna(0) == 0)
                     )
 
-                    # Exibe os lançamentos normais + os LCLs válidos
+                    # Exibe os lançamentos normais (ou LCLs mestres planejados) + LCLs avulsos válidos
                     df_exibir = df_mes[
                         (((df_mes['valor_plan'] > 0) | (df_mes['valor_real'] > 0) | eh_ccp_mask) &
-                         (df_mes['cc_tipo'].fillna('').astype(str).str.strip().str.upper() != 'LCL')) |
+                         ((df_mes['cc_tipo'].fillna('').astype(str).str.strip().str.upper() != 'LCL') | (df_mes['valor_plan'] > 0))) |
                         is_lcl_valido
                     ].sort_values('data')
                     
