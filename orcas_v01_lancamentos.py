@@ -76,7 +76,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
             def calcular_total_tipo(df_tipo, e_fechado):
                 total = 0
                 
-                # IGNORA LCLs para não somar 2x (já que entram agregados na fatura mestre $CCP/CCP)
+                # IGNORA LCLs planejados para não somar 2x com a fatura mestre
                 s_cc = df_tipo.get('cc_tipo', pd.Series('', index=df_tipo.index)).fillna('').astype(str).str.strip().str.upper()
                 df_tipo_filtrado = df_tipo[s_cc != 'LCL']
                 
@@ -207,13 +207,17 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
 
                     s_cc_m = df_mes.get('cc_tipo', pd.Series('', index=df_mes.index)).fillna('').astype(str).str.strip().str.upper()
                     eh_ccp_mask = s_cc_m.isin(['$CCP', 'CCP'])
+                    v_parcial_series = df_mes.get('parcial_real', pd.Series(0, index=df_mes.index)).fillna(0)
 
-                    # EXIBIÇÃO: Filtra estritamente tudo que for LCL da listagem principal, 
-                    # pois lançamentos do cartão pertencem unicamente à Fatura Mestre ($CCP/CCP)
-                    df_exibir = df_mes[
-                        ((df_mes['valor_plan'] > 0) | (df_mes['valor_real'] > 0) | eh_ccp_mask) &
-                        (s_cc_m != 'LCL')
-                    ].sort_values('data')
+                    # --- EXIBIÇÃO REVISADA ---
+                    # 1. Deve possuir algum valor (planejado, realizado ou parcial) OU ser cartão mestre
+                    mask_tem_valor = (df_mes['valor_plan'] > 0) | (df_mes['valor_real'] > 0) | (v_parcial_series > 0) | eh_ccp_mask
+                    
+                    # 2. Se for LCL, só entra na lista principal se já tiver REALIZADO (compra feita no mês)
+                    # LCLs apenas PLANEJADOS (valor_real == 0) ficam exclusivamente dentro dos expansores dos cartões mestres
+                    mask_exibir_item = (s_cc_m != 'LCL') | ((s_cc_m == 'LCL') & ((df_mes['valor_real'] > 0) | (v_parcial_series > 0)))
+
+                    df_exibir = df_mes[mask_tem_valor & mask_exibir_item].sort_values('data')
                     
                     # Cabeçalho da tabela
                     h_hdr = '<div class="tab-scroll"><div class="tab-body">'
