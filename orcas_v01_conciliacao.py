@@ -17,7 +17,6 @@ def buscar_dados_cartao(supabase, df, nome_cartao):
 
   nome_busca = str(nome_cartao).strip().upper()
 
-  # 1. Busca no DataFrame local
   if df is not None and not df.empty and "cc_tipo" in df.columns:
     df_ccp = df[
         (
@@ -44,7 +43,6 @@ def buscar_dados_cartao(supabase, df, nome_cartao):
         corte_calc = venc_int - 7 if venc_int > 7 else 3
         return corte_calc, venc_int
 
-  # 2. Busca direta no Supabase
   try:
     res = (
         supabase.table("lancamentos")
@@ -78,7 +76,6 @@ def calcular_vencimento_fatura(data_compra, dia_corte=3, dia_vencimento=10):
   ano = data_compra.year
   mes = data_compra.month
 
-  # Se comprou no dia do corte ou depois, vence no mês seguinte
   if data_compra.day >= corte:
     mes += 1
     if mes > 12:
@@ -90,7 +87,7 @@ def calcular_vencimento_fatura(data_compra, dia_corte=3, dia_vencimento=10):
 
 
 def somar_meses_data(data_fatura_1a_parcela, i_parcela, dia_vencimento=10):
-  """Gera a data de vencimento da parcela i (0-indexed) a partir da data de vencimento da 1ª parcela."""
+  """Gera a data de vencimento da parcela i a partir da data de vencimento da 1ª parcela."""
   total_meses = (data_fatura_1a_parcela.month - 1) + i_parcela
   novo_ano = data_fatura_1a_parcela.year + (total_meses // 12)
   novo_mes = (total_meses % 12) + 1
@@ -236,6 +233,44 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
     supabase.table("lancamentos").delete().eq("id", id_existente).execute()
     return f"🗑️ Lançamento **{descricao}** excluído!"
 
+  # VERIFICA SE É ITEM DE PARCIALIDADE VIA BUSCA NO BANCO
+  e_categoria_parcial = permite_parcial
+  if not e_categoria_parcial and descricao:
+    try:
+      res_p = (
+          supabase.table("lancamentos")
+          .select("permite_parcial, valor_plan")
+          .eq("projeto_id", projeto_id)
+          .ilike("descricao", descricao)
+          .execute()
+      )
+      if res_p.data:
+        e_categoria_parcial = any(
+            item.get("permite_parcial") for item in res_p.data
+        )
+    except Exception:
+      pass
+
+  # REGRA PARCIAL SUPREMA: SE FOR PARCIAL (EX: MERCADO), DEVE GRAVAR APENAS COMO SUB-LANÇAMENTO PARCIAL
+  if e_categoria_parcial and intencao == "PARCIAL":
+    dt_1_dia = dt_compra.replace(day=1).strftime("%Y-%m-%d")
+    supabase.table("lancamentos").insert({
+        "projeto_id": projeto_id,
+        "usuario_id": str(usuario_id),
+        "descricao": descricao,
+        "data": dt_1_dia,
+        "data_vencimento": dt_1_dia,
+        "tipo": tipo,
+        "valor_plan": 0.0,
+        "valor_real": 0.0,
+        "parcial_real": valor,
+        "parcial_data": dt_venc,
+        "status": "Realizado",
+        "cc_tipo": "LCL" if cartao and cartao != "Nenhum" else None,
+        "permite_parcial": False,
+    }).execute()
+    return f"✅ Lançamento parcial de **R$ {valor:,.2f}** gravado para **{descricao}**!"
+
   # 2. CARTÃO DE CRÉDITO
   is_cartao_valido = (
       cartao
@@ -258,37 +293,38 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
     )
     v_real_mestre = valor if (not id_existente or intencao == "REALIZAR") else 0.0
 
-    # Formatação unificada do registro mestre
-    desc_mestre = (
+    # Nome unificado exigido: "Descrição - Cartão nX"
+    f_desc_mestre = (
         f"{descricao} - {cartao} {parcelas}X"
-        if not id_existente
+        if not f"{cartao} {parcelas}X" in descricao
         else descricao
     )
 
-    payload_mestre = {
-        "projeto_id": projeto_id,
-        "usuario_id": str(usuario_id),
-        "descricao": desc_mestre,
-        "data": dt_compra.strftime("%Y-%m-%d"),
-        "data_vencimento": dt_compra.strftime("%Y-%m-%d"),
-        "tipo": tipo,
-        "valor_plan": 0.0,
-        "valor_real": v_real_mestre,
-        "status": status_mestre,
-        "cc_tipo": "LCL",
-        "cc_qtd_parcelas": parcelas,
-        "permite_parcial": permite_parcial,
-    }
-
-    if permite_parcial:
-      payload_mestre["parcial_real"] = valor
-      payload_mestre["parcial_data"] = dt_compra.strftime("%Y-%m-%d")
-
     if id_existente:
-      supabase.table("lancamentos").update(payload_mestre).eq(
-          "id", id_existente
-      ).execute()
+      # PRESERVA O VALOR_PLAN ORIGINAL SE JÁ EXISTIA
+      supabase.table("lancamentos").update({
+          "descricao": f_desc_mestre,
+          "valor_real": v_real_mestre,
+          "status": status_mestre,
+          "cc_tipo": "LCL",
+          "cc_qtd_parcelas": parcelas,
+      }).eq("id", id_existente).execute()
     else:
+      # SEM PLANEJAMENTO PRÉVIO: valor_plan fica 0.0
+      payload_mestre = {
+          "projeto_id": projeto_id,
+          "usuario_id": str(usuario_id),
+          "descricao": f_desc_mestre,
+          "data": dt_compra.strftime("%Y-%m-%d"),
+          "data_vencimento": dt_compra.strftime("%Y-%m-%d"),
+          "tipo": tipo,
+          "valor_plan": 0.0,
+          "valor_real": v_real_mestre,
+          "status": status_mestre,
+          "cc_tipo": "LCL",
+          "cc_qtd_parcelas": parcelas,
+          "permite_parcial": False,
+      }
       supabase.table("lancamentos").insert(payload_mestre).execute()
 
     for i in range(parcelas):
@@ -315,28 +351,10 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
           supabase, None, cartao, dt_venc_p, usuario_id
       )
 
-    return f"✅ Compra **{desc_mestre}** registrada no cartão **{cartao}** ({parcelas}x de R$ {base_val:.2f})!"
+    return f"✅ Compra **{f_desc_mestre}** registrada no cartão **{cartao}** ({parcelas}x de R$ {base_val:.2f})!"
 
-  # 3. CONVENCIONAL OU PARCIAL (SEM CARTÃO)
-  if intencao == "PARCIAL":
-    dt_1_dia = dt_compra.replace(day=1).strftime("%Y-%m-%d")
-    supabase.table("lancamentos").insert({
-        "projeto_id": projeto_id,
-        "usuario_id": str(usuario_id),
-        "descricao": descricao,
-        "data": dt_1_dia,
-        "data_vencimento": dt_1_dia,
-        "tipo": tipo,
-        "valor_plan": 0.0,
-        "valor_real": 0.0,
-        "parcial_real": valor,
-        "parcial_data": dt_venc,
-        "status": "Realizado",
-        "permite_parcial": False,
-    }).execute()
-    return f"✅ Lançamento parcial de **R$ {valor:,.2f}** gravado!"
-
-  elif id_existente and intencao in ["REALIZAR", "ALTERAR"]:
+  # 3. CONVENCIONAL (SEM CARTÃO DE CRÉDITO)
+  if id_existente and intencao in ["REALIZAR", "ALTERAR"]:
     supabase.table("lancamentos").update({
         "valor_real": valor if intencao == "REALIZAR" else 0.0,
         "valor_plan": (
@@ -449,7 +467,6 @@ def exibir_conciliacao(
 
   hoje_c = (datetime.utcnow() - timedelta(hours=3)).date()
   ini_mes_c = hoje_c.replace(day=1)
-  limite_c = hoje_c - timedelta(days=4)
 
   col_aviso, col_tog = st.columns([4, 3])
   col_aviso.markdown(
@@ -560,6 +577,7 @@ def exibir_conciliacao(
         (df_c["parcial_real"] == 0) & ((~is_lcl) | is_mestre_lcl)
     ].copy()
 
+    # REGRAS DO FILTRO DE CONCILIAÇÃO
     if st.session_state.listar_todos_mes:
       proximo_mes = (ini_mes_c + timedelta(days=32)).replace(day=1)
       fim_mes_c = proximo_mes - timedelta(days=1)
@@ -568,19 +586,13 @@ def exibir_conciliacao(
           & (df_base_tela["dt_obj"] <= fim_mes_c)
       ].copy()
     else:
+      # Oculta itens que já estão "Realizado" / "REAL", a menos que sejam categorias parciais ativas
       df_f = df_base_tela[
           (df_base_tela["dt_obj"] >= ini_mes_c)
           & (df_base_tela["dt_obj"] <= hoje_c)
           & (
               (df_base_tela["status"].isin(["Planejado", "PLAN"]))
-              | (
-                  (df_base_tela["status"].isin(["Realizado", "REAL"]))
-                  & (df_base_tela["dt_obj"] >= limite_c)
-              )
-              | (
-                  (df_base_tela["valor_plan"] == 0)
-                  & (df_base_tela["valor_real"] > 0)
-              )
+              | (df_base_tela["permite_parcial"] == True)
           )
       ].copy()
 
@@ -591,6 +603,10 @@ def exibir_conciliacao(
         "dt_obj", ascending=False
     )
     df_final_concilia = pd.concat([parciais_topo, demais_itens])
+
+    if df_final_concilia.empty:
+      st.info("Nenhum lançamento pendente para conciliação.")
+      return
 
     h1, h2, h3, h4, h5, h6, h7, h8 = st.columns(
         [2.2, 0.4, 0.9, 0.9, 0.9, 1.2, 0.5, 0.7], vertical_alignment="center"
@@ -611,9 +627,14 @@ def exibir_conciliacao(
           .fillna(0)
           .sum()
       )
+
+      # A cor vermelha só é acionada se o V.Real exceder o V.Plan planejado
+      v_real_comparacao = (
+          v_acumulado_desc if row["permite_parcial"] else row["valor_real"]
+      )
       cor_txt = (
           "red"
-          if (row["valor_plan"] > 0 and v_acumulado_desc > row["valor_plan"])
+          if (row["valor_plan"] > 0 and v_real_comparacao > row["valor_plan"])
           else "black"
       )
 
@@ -638,35 +659,6 @@ def exibir_conciliacao(
       )
 
       valor_exibicao_real = row["valor_real"]
-      if str(row.get("cc_tipo")).strip().upper() in [
-          "$CCP",
-          "CCP",
-          "'Z $CCP",
-          "Z|$CCP",
-      ]:
-        soma_lcls = df[
-            (
-                df["cc_tipo"]
-                .fillna("")
-                .astype(str)
-                .str.strip()
-                .str.upper()
-                .str.contains(r"LCL|\$CCL", regex=True)
-            )
-            & (
-                df["descricao"].fillna("").astype(str).str.strip().str.upper()
-                == str(row["descricao"]).strip().upper()
-            )
-            & (
-                pd.to_datetime(df["data_vencimento"]).dt.month
-                == row["dt_obj"].month
-            )
-            & (
-                pd.to_datetime(df["data_vencimento"]).dt.year
-                == row["dt_obj"].year
-            )
-        ]["valor_real"].sum()
-        valor_exibicao_real = soma_lcls
 
       if row["permite_parcial"]:
         c3.markdown(
