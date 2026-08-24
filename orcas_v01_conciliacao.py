@@ -76,7 +76,8 @@ def calcular_vencimento_fatura(data_compra, dia_corte=3, dia_vencimento=10):
   ano = data_compra.year
   mes = data_compra.month
 
-  if data_compra.day >= corte:
+  # CORREÇÃO: A fatura só vira para o mês seguinte se a compra for feita APÓS o dia de corte.
+  if data_compra.day > corte:
     mes += 1
     if mes > 12:
       mes = 1

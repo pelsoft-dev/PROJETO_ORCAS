@@ -1,488 +1,824 @@
-import json
-import re
-import time
+import calendar
+from datetime import datetime, timedelta
 import zoneinfo
-from datetime import datetime
-from groq import Groq
 import pandas as pd
 import streamlit as st
+from orcas_v01_ajuda_conciliacao import renderizar_ajuda_conciliacao
 
-# CONSUMO DIRETO DO MOTOR DE CONCILIAÇÃO UNIFICADO
-from orcas_v01_conciliacao import (
-    buscar_cartoes_lcp,
-    salvar_lancamento_oficial,
-)
-
-LIMITES_USO = {"PADRÃO": 30, "INTERMEDIÁRIO": 100, "ILIMITADO": 999999}
+# ==============================================================================
+# ENGINES & REGRAS DE NEGÓCIO
+# ==============================================================================
 
 
-def obter_hoje_brasil():
-  return datetime.now(zoneinfo.ZoneInfo("America/Sao_Paulo")).date()
+def buscar_dados_cartao(supabase, df, nome_cartao):
+  """Busca o dia de corte e o dia de vencimento do cartão ($CCP)."""
+  if not nome_cartao or str(nome_cartao).strip().upper() == "NENHUM":
+    return 3, 10
 
+  nome_busca = str(nome_cartao).strip().upper()
 
-def formatar_moeda_br(valor):
+  if df is not None and not df.empty and "cc_tipo" in df.columns:
+    df_ccp = df[
+        (
+            df["cc_tipo"]
+            .fillna("")
+            .astype(str)
+            .str.strip()
+            .str.upper()
+            .isin(["$CCP", "CCP", "'Z $CCP", "Z|$CCP"])
+        )
+        & (
+            df["descricao"].fillna("").astype(str).str.strip().str.upper()
+            == nome_busca
+        )
+    ]
+    if not df_ccp.empty:
+      row = df_ccp.iloc[0]
+      venc = row.get("cc_dia_vencimento")
+      corte = row.get("cc_dia_corte")
+      if pd.notnull(venc) and pd.notnull(corte):
+        return int(corte), int(venc)
+      elif pd.notnull(venc):
+        venc_int = int(venc)
+        corte_calc = venc_int - 7 if venc_int > 7 else 3
+        return corte_calc, venc_int
+
   try:
-    return (
-        f"R$ {float(valor or 0.0):,.2f}".replace(",", "X")
-        .replace(".", ",")
-        .replace("X", ".")
+    res = (
+        supabase.table("lancamentos")
+        .select("cc_dia_corte, cc_dia_vencimento")
+        .eq("projeto_id", str(st.session_state.projeto_ativo))
+        .ilike("descricao", nome_busca)
+        .execute()
     )
+
+    if res.data:
+      for item in res.data:
+        venc = item.get("cc_dia_vencimento")
+        corte = item.get("cc_dia_corte")
+        if venc is not None and corte is not None:
+          return int(corte), int(venc)
+        elif venc is not None:
+          venc_int = int(venc)
+          corte_calc = venc_int - 7 if venc_int > 7 else 3
+          return corte_calc, venc_int
   except Exception:
-    return "R$ 0,00"
+    pass
+
+  return 3, 10
 
 
-def normalizar_valor_moeda(valor_str):
-  if valor_str is None:
-    return 0.0
-  if isinstance(valor_str, (int, float)):
-    return float(valor_str)
+def calcular_vencimento_fatura(data_compra, dia_corte=3, dia_vencimento=10):
+  """Calcula a data exata de vencimento da 1ª parcela com base no dia de corte da fatura."""
+  corte = int(dia_corte)
+  venc = int(dia_vencimento)
 
-  s = str(valor_str).strip().replace("R$", "").strip()
-  if "." in s and "," in s:
-    s = s.replace(".", "").replace(",", ".")
-  elif "," in s:
-    s = s.replace(",", ".")
-  elif "." in s:
-    partes = s.split(".")
-    if len(partes[-1]) == 3:
-      s = "".join(partes)
+  ano = data_compra.year
+  mes = data_compra.month
+
+  # CORREÇÃO: A fatura só vira para o mês seguinte se a compra for feita APÓS o dia de corte.
+  if data_compra.day > corte:
+    mes += 1
+    if mes > 12:
+      mes = 1
+      ano += 1
+
+  dia_final = min(venc, calendar.monthrange(ano, mes)[1])
+  return datetime(ano, mes, dia_final).date()
+
+
+def somar_meses_data(data_fatura_1a_parcela, i_parcela, dia_vencimento=10):
+  """Gera a data de vencimento da parcela i a partir da data de vencimento da 1ª parcela."""
+  total_meses = (data_fatura_1a_parcela.month - 1) + i_parcela
+  novo_ano = data_fatura_1a_parcela.year + (total_meses // 12)
+  novo_mes = (total_meses % 12) + 1
+
+  dia_final = min(
+      int(dia_vencimento), calendar.monthrange(novo_ano, novo_mes)[1]
+  )
+  return datetime(novo_ano, novo_mes, dia_final).date()
+
+
+def buscar_cartoes_lcp(df):
+  """Busca no DataFrame os cartões cadastrados preservando o nome original cadastrado."""
+  cartoes_ccp = []
+  if df is not None and not df.empty and "cc_tipo" in df.columns:
+    df_ccp = df[
+        df["cc_tipo"]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+        .str.upper()
+        .isin(["$CCP", "CCP", "'Z $CCP", "Z|$CCP"])
+    ]
+    if not df_ccp.empty and "descricao" in df_ccp.columns:
+      cartoes_ccp = df_ccp["descricao"].dropna().unique().tolist()
+      cartoes_ccp = sorted(
+          list(set([c.strip() for c in cartoes_ccp if c.strip()]))
+      )
+
+  opcoes = ["Nenhum"] + cartoes_ccp + ["+ Outro Cartão..."]
+  return opcoes
+
+
+def atualizar_valor_plan_cartao(
+    supabase, df, nome_cartao, dt_vencimento, ID_USUARIO_LOGADO
+):
+  """Recalcula o valor_plan do Cartão Pai ($CCP) consultando diretamente o Supabase."""
+  nome_busca = str(nome_cartao).strip().upper()
+  ano_venc = dt_vencimento.year
+  mes_venc = dt_vencimento.month
+
+  primeiro_dia_mes = f"{ano_venc:04d}-{mes_venc:02d}-01"
+  ultimo_dia_mes = f"{ano_venc:04d}-{mes_venc:02d}-{calendar.monthrange(ano_venc, mes_venc)[1]:02d}"
 
   try:
-    return float(s)
-  except ValueError:
-    return 0.0
+    res = (
+        supabase.table("lancamentos")
+        .select("id, descricao, cc_tipo, valor_plan, data_vencimento")
+        .eq("projeto_id", str(st.session_state.projeto_ativo))
+        .gte("data_vencimento", primeiro_dia_mes)
+        .lte("data_vencimento", ultimo_dia_mes)
+        .execute()
+    )
+
+    df_db = pd.DataFrame(res.data) if res.data else pd.DataFrame()
+  except Exception:
+    df_db = pd.DataFrame()
+
+  if not df_db.empty:
+    df_ccp = df_db[
+        (
+            df_db["cc_tipo"]
+            .fillna("")
+            .astype(str)
+            .str.strip()
+            .str.upper()
+            .isin(["$CCP", "CCP", "'Z $CCP", "Z|$CCP"])
+        )
+        & (
+            df_db["descricao"].fillna("").astype(str).str.strip().str.upper()
+            == nome_busca
+        )
+    ]
+
+    mask_lcls = (
+        df_db["cc_tipo"]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+        .str.upper()
+        .str.contains(r"LCL|\$CCL", regex=True)
+    ) & (
+        df_db["descricao"].fillna("").astype(str).str.strip().str.upper()
+        == nome_busca
+    ) & (df_db["valor_plan"] > 0)
+
+    soma_lcls = float(df_db[mask_lcls]["valor_plan"].fillna(0).sum())
+  else:
+    df_ccp = pd.DataFrame()
+    soma_lcls = 0.0
+
+  try:
+    if not df_ccp.empty:
+      id_ccp = df_ccp.iloc[0]["id"]
+      supabase.table("lancamentos").update(
+          {"valor_plan": round(soma_lcls, 2)}
+      ).eq("id", id_ccp).execute()
+    else:
+      corte, venc = buscar_dados_cartao(supabase, df, nome_cartao)
+      dia_final = min(venc, calendar.monthrange(ano_venc, mes_venc)[1])
+      dt_exata_ccp = datetime(ano_venc, mes_venc, dia_final).date()
+
+      supabase.table("lancamentos").insert({
+          "projeto_id": str(st.session_state.projeto_ativo),
+          "usuario_id": str(ID_USUARIO_LOGADO),
+          "descricao": nome_cartao,
+          "data": dt_exata_ccp.strftime("%Y-%m-%d"),
+          "data_vencimento": dt_exata_ccp.strftime("%Y-%m-%d"),
+          "tipo": "Saída",
+          "valor_plan": round(soma_lcls, 2),
+          "valor_real": 0.0,
+          "status": "Planejado",
+          "cc_tipo": "$CCP",
+          "cc_dia_corte": corte,
+          "cc_dia_vencimento": venc,
+      }).execute()
+  except Exception as e:
+    st.error(f"Erro ao atualizar Cartão Pai ($CCP): {e}")
 
 
-def processar_texto_groq(
-    client_groq, texto_transcrito, planos_disponiveis, plano_ativo
-):
-  hoje = obter_hoje_brasil()
+def salvar_lancamento_oficial(supabase, usuario_id, dados):
+  """MOTOR ÚNICO DE CRIAÇÃO/EDIÇÃO DE LANÇAMENTOS (CONCILIAÇÃO E POR VOZ)."""
+  hoje = datetime.now(zoneinfo.ZoneInfo("America/Sao_Paulo")).date()
+  projeto_id = str(
+      dados.get("projeto_id") or st.session_state.get("projeto_ativo")
+  )
+  descricao = str(dados.get("descricao") or "").strip()
+  valor = float(dados.get("valor") or 0.0)
+  tipo = dados.get("tipo", "Saída")
+  dt_venc = dados.get("data_vencimento") or str(hoje)
+  cartao = dados.get("cartao")
+  parcelas = int(dados.get("parcelas") or 1)
+  intencao = dados.get("intencao", "REALIZAR")
+  id_existente = dados.get("id_existente")
+  permite_parcial = bool(dados.get("permite_parcial"))
 
-  system_prompt = (
-      "Você é o assistente financeiro do software ORCAS.\n"
-      "Sua tarefa é analisar a frase gravada pelo usuário e responder"
-      " EXCLUSIVAMENTE com um objeto JSON válido contendo a estrutura"
-      ' solicitada.\nNão inclua explicações ou formatação markdown como ```json.'
+  try:
+    dt_compra = datetime.strptime(dt_venc, "%Y-%m-%d").date()
+  except Exception:
+    dt_compra = hoje
+
+  # 1. EXCLUSÃO
+  if intencao == "EXCLUIR" and id_existente:
+    supabase.table("lancamentos").delete().eq("id", id_existente).execute()
+    return f"🗑️ Lançamento **{descricao}** excluído!"
+
+  # VERIFICA SE É ITEM DE PARCIALIDADE VIA BUSCA NO BANCO
+  e_categoria_parcial = permite_parcial
+  if not e_categoria_parcial and descricao:
+    try:
+      res_p = (
+          supabase.table("lancamentos")
+          .select("permite_parcial, valor_plan")
+          .eq("projeto_id", projeto_id)
+          .ilike("descricao", descricao)
+          .execute()
+      )
+      if res_p.data:
+        e_categoria_parcial = any(
+            item.get("permite_parcial") for item in res_p.data
+        )
+    except Exception:
+      pass
+
+  # VERIFICA SE O CARTÃO É VÁLIDO
+  is_cartao_valido = (
+      cartao
+      and str(cartao).strip().upper() not in ["NENHUM", "NONE", "NULL", ""]
+      and parcelas >= 1
   )
 
-  user_prompt = f"""
-    Texto Transcrito: "{texto_transcrito}"
-    Data Atual: {hoje.strftime('%Y-%m-%d')}
-    Projeto Ativo: "{plano_ativo}"
+  # REGRA PARCIAL SUPREMA: SE FOR PARCIAL (EX: MERCADO), DEVE GRAVAR COMO SUB-LANÇAMENTO PARCIAL
+  if e_categoria_parcial and intencao == "PARCIAL":
+    dt_1_dia = dt_compra.replace(day=1).strftime("%Y-%m-%d")
+    supabase.table("lancamentos").insert({
+        "projeto_id": projeto_id,
+        "usuario_id": str(usuario_id),
+        "descricao": descricao,
+        "data": dt_1_dia,
+        "data_vencimento": dt_1_dia,
+        "tipo": tipo,
+        "valor_plan": 0.0,
+        "valor_real": 0.0,
+        "parcial_real": valor,
+        "parcial_data": dt_venc,
+        "status": "Realizado",
+        "cc_tipo": "LCL" if is_cartao_valido else None,
+        "permite_parcial": False,
+    }).execute()
 
-    Regras de extração:
-    1. "descricao": Nome limpo do item (ex: "Mercado"). Remova verbos ("comprei"), marcas não essenciais, artigos e preços.
-    2. "valor": Valor numérico total em float. Ex: "444,00" -> 444.00.
-    3. "cartao": Extraia EXATAMENTE o nome do cartão de crédito citado pelo usuário (ex: "MASTER", "Cartão do Fulano", "Nubank", "VISA"). O usuário pode dar qualquer nome ao cartão dele. Se nenhum for citado, retorne null.
-    4. "parcelas": Quantidade de parcelas como inteiro. Considerar "3x", "3 vezes" e "3 meses" como 3. Padrão: 1.
-    5. "intencao": "REALIZAR" para compras efetuadas, "PROJETAR" para gastos futuros.
-    6. "tipo": "Saída" para compras/gastos e "Entrada" para receitas.
-
-    Retorne exatamente esta estrutura JSON:
-    {{
-      "descricao": "Mercado",
-      "valor": 444.00,
-      "cartao": "MASTER",
-      "parcelas": 3,
-      "intencao": "REALIZAR",
-      "tipo": "Saída"
-    }}
-  """
-
-  modelos_candidatos = [
-      "openai/gpt-oss-20b",
-      "llama-3.3-70b-versatile",
-      "meta-llama/llama-4-scout-17b-16e-instruct",
-      "llama-3.1-8b-instant",
-  ]
-
-  res = None
-  ultimo_erro = None
-
-  for modelo in modelos_candidatos:
-    try:
-      res = client_groq.chat.completions.create(
-          model=modelo,
-          messages=[
-              {"role": "system", "content": system_prompt},
-              {"role": "user", "content": user_prompt},
-          ],
-          temperature=0.0,
-          response_format={"type": "json_object"},
+    # SE NÃO TIVER CARTÃO, ENCERRA AQUI. SE TIVER CARTÃO, CONTINUA PARA GERAR AS PARCELAS DO CARTÃO ABAIXO!
+    if not is_cartao_valido:
+      return (
+          f"✅ Lançamento parcial de **R$ {valor:,.2f}** gravado para"
+          f" **{descricao}**!"
       )
-      if res and res.choices:
-        break
-    except Exception as err:
-      ultimo_erro = err
-      continue
 
-  if not res or not res.choices:
-    return {
-        "transcricao": texto_transcrito,
-        "intencao": "REALIZAR",
-        "projeto_id": plano_ativo,
-        "descricao": "Erro de Modelo",
-        "valor": 0.0,
-        "tipo": "Saída",
-        "data_vencimento": str(hoje),
-        "permite_parcial": False,
-        "cartao": None,
-        "parcelas": 1,
-        "erro": f"Nenhum modelo Groq respondeu. Último erro: {ultimo_erro}.",
-    }
-
-  try:
-    conteudo = res.choices[0].message.content.strip()
-    conteudo_limpo = re.sub(
-        r"^```json\s*|^```\s*|\s*```$", "", conteudo, flags=re.MULTILINE
-    ).strip()
-    match = re.search(r"\{.*\}", conteudo_limpo, re.DOTALL)
-    if match:
-      conteudo_limpo = match.group(0)
-
-    dados_parsed = json.loads(conteudo_limpo)
-
-    valor_float = normalizar_valor_moeda(dados_parsed.get("valor"))
-    desc = str(dados_parsed.get("descricao") or "Novo Lançamento").strip()
-    desc = re.sub(r"[.,;!?]+$", "", desc).strip()
-
-    cartao_extraido = dados_parsed.get("cartao")
-    if isinstance(
-        cartao_extraido, str
-    ) and cartao_extraido.lower() in [
-        "none",
-        "null",
-        "nenhum",
-        "",
-    ]:
-      cartao_extraido = None
-    elif isinstance(cartao_extraido, str):
-      cartao_extraido = cartao_extraido.strip()
-
-    return {
-        "transcricao": texto_transcrito,
-        "intencao": dados_parsed.get("intencao", "REALIZAR"),
-        "projeto_id": plano_ativo,
-        "descricao": desc.capitalize(),
-        "valor": valor_float,
-        "tipo": dados_parsed.get("tipo", "Saída"),
-        "data_vencimento": str(hoje),
-        "permite_parcial": False,
-        "cartao": cartao_extraido,
-        "parcelas": int(dados_parsed.get("parcelas") or 1),
-        "erro": None,
-    }
-
-  except Exception as e:
-    return {
-        "transcricao": texto_transcrito,
-        "intencao": "REALIZAR",
-        "projeto_id": plano_ativo,
-        "descricao": "Erro ao Interpretar",
-        "valor": 0.0,
-        "tipo": "Saída",
-        "data_vencimento": str(hoje),
-        "permite_parcial": False,
-        "cartao": None,
-        "parcelas": 1,
-        "erro": f"Erro na conversão do JSON: {e}",
-    }
-
-
-def verificar_limite_uso(supabase, usuario_id):
-  try:
-    res = (
-        supabase.table("usuarios")
-        .select("plano_ia, uso_voz_mes")
-        .eq("id", str(usuario_id))
-        .execute()
+  # 2. CARTÃO DE CRÉDITO (Gera as parcelas LCL e atualiza a fatura mestre do cartão)
+  if is_cartao_valido:
+    corte, venc = buscar_dados_cartao(supabase, None, cartao)
+    dt_1_venc = calcular_vencimento_fatura(
+        dt_compra, dia_corte=corte, dia_vencimento=venc
     )
-    if res and res.data:
-      dados = res.data[0]
-      plano = str(dados.get("plano_ia") or "PADRAO").upper()
-      uso = int(dados.get("uso_voz_mes") or 0)
-      limite = LIMITES_USO.get(plano, 30)
-      return uso < limite, uso, limite
-  except Exception:
-    pass
-  return True, 0, 30
 
+    base_val = round(valor / parcelas, 2)
+    residuo = round(valor - (base_val * parcelas), 2)
 
-def incrementar_uso_voz(supabase, usuario_id, uso_atual):
-  try:
-    supabase.table("usuarios").update({"uso_voz_mes": uso_atual + 1}).eq(
-        "id", str(usuario_id)
-    ).execute()
-  except Exception as e:
-    print(f"Aviso Supabase (uso_voz_mes): {e}")
-
-
-def transcrever_audio_groq(client_groq, audio_bytes):
-  return client_groq.audio.transcriptions.create(
-      file=("audio.wav", audio_bytes),
-      model="whisper-large-v3-turbo",
-      language="pt",
-      response_format="text",
-  ).strip()
-
-
-def buscar_lancamento_no_banco(supabase, usuario_id, projeto_id, descricao):
-  if (
-      not descricao
-      or not isinstance(descricao, str)
-      or len(descricao.strip()) < 3
-  ):
-    return None
-  try:
-    res = (
-        supabase.table("lancamentos")
-        .select("*")
-        .eq("usuario_id", str(usuario_id))
-        .eq("projeto_id", str(projeto_id))
-        .ilike("descricao", f"%{descricao.strip()}%")
-        .execute()
+    status_mestre = (
+        "Realizado" if (not id_existente or intencao == "REALIZAR") else "Planejado"
     )
-    if res and res.data:
-      return res.data[0]
-  except Exception as e:
-    print(f"Erro na busca: {e}")
-  return None
+    v_real_mestre = valor if (not id_existente or intencao == "REALIZAR") else 0.0
 
-
-def fechar_modal_voz():
-  """Reseta as flags do modal no session state."""
-  st.session_state.abrir_modal_orcas = False
-  st.session_state.etapa_voz = "gravacao"
-  st.session_state.dados_interpretados = None
-  st.session_state.hash_ultimo_audio = None
-  st.session_state.audio_key = st.session_state.get("audio_key", 0) + 1
-
-
-def buscar_df_lancamentos_projeto(supabase, projeto_id):
-  """Busca os lançamentos do projeto no banco para extrair cartões ($CCP)."""
-  try:
-    res = (
-        supabase.table("lancamentos")
-        .select("*")
-        .eq("projeto_id", str(projeto_id))
-        .execute()
+    f_desc_mestre = (
+        f"{descricao} - {cartao} {parcelas}X"
+        if not f"{cartao} {parcelas}X" in descricao
+        else descricao
     )
-    if res and res.data:
-      return pd.DataFrame(res.data)
-  except Exception:
-    pass
-  return pd.DataFrame()
+
+    if id_existente:
+      supabase.table("lancamentos").update({
+          "descricao": f_desc_mestre,
+          "valor_real": v_real_mestre,
+          "status": status_mestre,
+          "cc_tipo": "LCL",
+          "cc_qtd_parcelas": parcelas,
+      }).eq("id", id_existente).execute()
+    elif not e_categoria_parcial:
+      # Só insere o mestre se NÃO for parcial (pois a parcial já gravou seu sub-registro no bloco 1)
+      payload_mestre = {
+          "projeto_id": projeto_id,
+          "usuario_id": str(usuario_id),
+          "descricao": f_desc_mestre,
+          "data": dt_compra.strftime("%Y-%m-%d"),
+          "data_vencimento": dt_compra.strftime("%Y-%m-%d"),
+          "tipo": tipo,
+          "valor_plan": 0.0,
+          "valor_real": v_real_mestre,
+          "status": status_mestre,
+          "cc_tipo": "LCL",
+          "cc_qtd_parcelas": parcelas,
+          "permite_parcial": False,
+      }
+      supabase.table("lancamentos").insert(payload_mestre).execute()
+
+    # GERADOR DAS N PARCELAS DE CARTÃO (LCLs)
+    for i in range(parcelas):
+      v_parc = base_val + (residuo if i == (parcelas - 1) else 0.0)
+      dt_venc_p = somar_meses_data(dt_1_venc, i, dia_vencimento=venc)
+
+      supabase.table("lancamentos").insert({
+          "projeto_id": projeto_id,
+          "usuario_id": str(usuario_id),
+          "descricao": cartao,
+          "cc_descricao": f"{descricao} ({i+1:02d}/{parcelas:02d})",
+          "data": dt_venc_p.strftime("%Y-%m-%d"),
+          "data_vencimento": dt_venc_p.strftime("%Y-%m-%d"),
+          "cc_data_compra": dt_compra.strftime("%Y-%m-%d"),
+          "tipo": "Saída",
+          "valor_plan": round(v_parc, 2),
+          "valor_real": 0.0,
+          "status": "Planejado",
+          "cc_tipo": "LCL",
+          "cc_qtd_parcelas": 0,
+      }).execute()
+
+      atualizar_valor_plan_cartao(
+          supabase, None, cartao, dt_venc_p, usuario_id
+      )
+
+    return f"✅ Compra **{f_desc_mestre}** registrada no cartão **{cartao}** ({parcelas}x de R$ {base_val:.2f})!"
+
+  # 3. CONVENCIONAL (SEM CARTÃO DE CRÉDITO E SEM SER PARCIAL)
+  if id_existente and intencao in ["REALIZAR", "ALTERAR"]:
+    supabase.table("lancamentos").update({
+        "valor_real": valor if intencao == "REALIZAR" else 0.0,
+        "valor_plan": (
+            valor
+            if intencao == "ALTERAR"
+            else row_valor_plan_se_necessario(valor, intencao)
+        ),
+        "status": "Realizado" if intencao == "REALIZAR" else "Planejado",
+        "data_vencimento": dt_venc,
+    }).eq("id", id_existente).execute()
+    return f"✅ Lançamento **{descricao}** atualizado!"
+  else:
+    status = "Realizado" if intencao == "REALIZAR" else "Planejado"
+    supabase.table("lancamentos").insert({
+        "projeto_id": projeto_id,
+        "usuario_id": str(usuario_id),
+        "descricao": descricao,
+        "data": dt_venc,
+        "data_vencimento": dt_venc,
+        "tipo": tipo,
+        "valor_plan": valor if status == "Planejado" else 0.0,
+        "valor_real": valor if status == "Realizado" else 0.0,
+        "status": status,
+        "permite_parcial": permite_parcial,
+    }).execute()
+    return f"✅ Lançamento **{descricao}** salvo com sucesso!"
 
 
-@st.dialog("🎙️ Conversar com o ORCAS")
-def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
-  plano_ativo = st.session_state.get("projeto_ativo", planos_disponiveis[0])
+def row_valor_plan_se_necessario(valor, intencao):
+  return valor if intencao == "ALTERAR" else 0.0
 
-  groq_key = st.secrets.get("GROQ_API_KEY")
-  if not groq_key:
-    st.error("❌ Chave GROQ_API_KEY não configurada nos Secrets!")
-    return
 
-  client_groq = Groq(api_key=groq_key.strip())
+# ==============================================================================
+# INTERFACE DA TELA DE CONCILIAÇÃO
+# ==============================================================================
 
-  # TELA 1: GRAVAÇÃO
-  if st.session_state.etapa_voz == "gravacao":
-    pode_usar, uso, limite = verificar_limite_uso(supabase, id_usuario)
-    if not pode_usar:
-      st.error(f"⚠️ Limite mensal atingido! ({uso}/{limite})")
+
+def exibir_conciliacao(
+    df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moeda
+):
+  """Sub-rotina da Tela Conciliação."""
+  st.markdown(
+      """
+        <style>
+        div[data-testid="stColumn"] div.stButton > button {
+            padding: 2px 4px !important;
+            min-width: 32px !important;
+            height: 28px !important;
+            font-size: 11px !important;
+            white-space: nowrap !important;
+        }
+        </style>
+    """,
+      unsafe_allow_html=True,
+  )
+
+  if "reset_count" not in st.session_state:
+    st.session_state.reset_count = 0
+
+  reset_key = st.session_state.reset_count
+
+  col_titulo, col_ajuda = st.columns([4, 1])
+
+  with col_titulo:
+    st.markdown(
+        f'<div class="titulo-tela" style="margin-top:0px;">Conciliação:'
+        f" {st.session_state.projeto_ativo}</div>",
+        unsafe_allow_html=True,
+    )
+
+  with col_ajuda:
+    st.markdown(
+        """
+            <style>
+            div.stButton > button:first-child {
+                background-color: #007ba7 !important;
+                color: white !important;
+                border: none !important;
+            }
+            div.stButton > button:first-child:hover {
+                background-color: #005f81 !important;
+                color: white !important;
+            }
+            </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if st.button("AJUDA", type="primary", use_container_width=True):
+      st.session_state["exibir_ajuda_conciliacao"] = not st.session_state.get(
+          "exibir_ajuda_conciliacao", False
+      )
+      st.rerun()
+
+  if st.session_state.get("exibir_ajuda_conciliacao", False):
+    renderizar_ajuda_conciliacao()
+
+  st.markdown(
+      """
+        <style>
+        .block-container { padding-top: 2rem !important; }
+        [data-testid="stWidgetLabel"] p { font-size: 0.85rem !important; white-space: nowrap !important; }
+        .stMarkdown div p { margin-bottom: 0px !important; }
+        hr { margin-top: 0.5rem !important; margin-bottom: 0.5rem !important; }
+        </style>
+    """,
+      unsafe_allow_html=True,
+  )
+
+  hoje_c = (datetime.utcnow() - timedelta(hours=3)).date()
+  ini_mes_c = hoje_c.replace(day=1)
+
+  col_aviso, col_tog = st.columns([4, 3])
+  col_aviso.markdown(
+      '<div style="font-size: 0.8rem; color: #555; margin-top: 10px;">📱🔄 SE'
+      " USANDO O CELULAR, TRABALHE COM ELE NA HORIZONTAL</div>",
+      unsafe_allow_html=True,
+  )
+
+  abrir_sem_plan = col_tog.toggle(
+      "Lançar sem Planejamento",
+      value=st.session_state.get("abrir_sem_plan", False),
+  )
+  st.session_state.abrir_sem_plan = abrir_sem_plan
+
+  listar_todos_mes = col_tog.toggle(
+      "Listar todos Lançamentos do mês",
+      value=st.session_state.get("listar_todos_mes", False),
+  )
+  st.session_state.listar_todos_mes = listar_todos_mes
+
+  st.divider()
+
+  lista_cartoes_ccp = buscar_cartoes_lcp(df)
+
+  # --- ÁREA: LANÇAR SEM PLANEJAMENTO ---
+  if st.session_state.abrir_sem_plan:
+    cols_sp = st.columns(
+        [1.8, 0.8, 1.0, 1.3, 0.6, 0.5], vertical_alignment="center"
+    )
+    sp_desc = cols_sp[0].text_input(
+        "Descrição", key=f"sp_desc_{reset_key}", placeholder="Ex: Combustível"
+    )
+    sp_tipo = cols_sp[1].selectbox(
+        "E/S", ["Saída", "Entrada"], key=f"sp_tipo_{reset_key}"
+    )
+    sp_valor = cols_sp[2].text_input(
+        "Valor Real", key=f"sp_valor_{reset_key}", value="0,00"
+    )
+
+    sp_cartao_sel = cols_sp[3].selectbox(
+        "Cartão", lista_cartoes_ccp, key=f"sp_cartao_sel_{reset_key}"
+    )
+    sp_parc = cols_sp[4].number_input(
+        "Parc.",
+        min_value=0,
+        max_value=12,
+        value=0,
+        step=1,
+        key=f"sp_parc_{reset_key}",
+    )
+
+    sp_cartao_manual = ""
+    if sp_cartao_sel == "+ Outro Cartão...":
+      sp_cartao_manual = st.text_input(
+          "Nome do Cartão",
+          key=f"sp_cartao_manual_input_{reset_key}",
+          placeholder="Ex: ITAÚ MASTER",
+      )
+
+    with cols_sp[5]:
+      st.markdown(
+          '<div style="margin-top: 28px;"></div>', unsafe_allow_html=True
+      )
+      btn_confirmar = st.button(
+          "Ok", key=f"btn_sp_conf_{reset_key}", use_container_width=True
+      )
+
+    if btn_confirmar:
+      v_sp = parse_moeda(sp_valor)
+      if sp_desc and v_sp > 0:
+        nome_cartao_final = (
+            sp_cartao_manual.strip()
+            if sp_cartao_sel == "+ Outro Cartão..."
+            else sp_cartao_sel
+        )
+
+        dados_sp = {
+            "projeto_id": st.session_state.projeto_ativo,
+            "descricao": sp_desc,
+            "valor": v_sp,
+            "tipo": sp_tipo,
+            "data_vencimento": hoje_c.strftime("%Y-%m-%d"),
+            "cartao": nome_cartao_final,
+            "parcelas": int(sp_parc),
+            "intencao": "REALIZAR",
+            "permite_parcial": False,
+        }
+
+        salvar_lancamento_oficial(supabase, ID_USUARIO_LOGADO, dados_sp)
+        st.session_state.reset_count += 1
+        st.session_state.abrir_sem_plan = False
+        st.rerun()
+
+    st.divider()
+
+  df_c = df.copy() if df is not None else pd.DataFrame()
+  if not df_c.empty:
+    df_c["dt_obj"] = pd.to_datetime(df_c["data"]).dt.date
+    df_c["parcial_real"] = pd.to_numeric(
+        df_c["parcial_real"], errors="coerce"
+    ).fillna(0)
+
+    cc_tipo_str = df_c["cc_tipo"].fillna("").astype(str).str.strip().str.upper()
+    is_lcl = cc_tipo_str.str.contains(r"LCL|\$CCL", regex=True)
+    is_mestre_lcl = is_lcl & (df_c["valor_real"] > 0) & (df_c["valor_plan"] == 0)
+
+    df_base_tela = df_c[
+        (df_c["parcial_real"] == 0) & ((~is_lcl) | is_mestre_lcl)
+    ].copy()
+
+    # REGRAS DO FILTRO DE CONCILIAÇÃO
+    if st.session_state.listar_todos_mes:
+      proximo_mes = (ini_mes_c + timedelta(days=32)).replace(day=1)
+      fim_mes_c = proximo_mes - timedelta(days=1)
+      df_f = df_base_tela[
+          (df_base_tela["dt_obj"] >= ini_mes_c)
+          & (df_base_tela["dt_obj"] <= fim_mes_c)
+      ].copy()
+    else:
+      # Oculta itens que já estão "Realizado" / "REAL", a menos que sejam categorias parciais ativas
+      df_f = df_base_tela[
+          (df_base_tela["dt_obj"] >= ini_mes_c)
+          & (df_base_tela["dt_obj"] <= hoje_c)
+          & (
+              (df_base_tela["status"].isin(["Planejado", "PLAN"]))
+              | (df_base_tela["permite_parcial"] == True)
+          )
+      ].copy()
+
+    parciais_topo = df_f[
+        (df_f["permite_parcial"] == True) & (df_f["dt_obj"] >= ini_mes_c)
+    ]
+    demais_itens = df_f[~df_f.index.isin(parciais_topo.index)].sort_values(
+        "dt_obj", ascending=False
+    )
+    df_final_concilia = pd.concat([parciais_topo, demais_itens])
+
+    if df_final_concilia.empty:
+      st.info("Nenhum lançamento pendente para conciliação.")
       return
 
-    st.caption(f"📊 Uso do recurso no mês: **{uso}/{limite}**")
-    audio = st.audio_input(
-        "Grave seu comando:", key=f"audio_{st.session_state.get('audio_key', 0)}"
+    h1, h2, h3, h4, h5, h6, h7, h8 = st.columns(
+        [2.2, 0.4, 0.9, 0.9, 0.9, 1.2, 0.5, 0.7], vertical_alignment="center"
     )
+    h1.write("**Data - Descrição**")
+    h2.write("**E/S**")
+    h3.write("**V. Plan.**")
+    h4.write("**V. Real**")
+    h5.write("**V. Parcial**")
+    h6.write("**Cartão**")
+    h7.write("**Parc.**")
+    h8.write("**Ação**")
+    st.divider()
 
-    if audio:
-      audio_bytes = audio.getvalue()
-      if hash(audio_bytes) != st.session_state.get("hash_ultimo_audio"):
-        with st.spinner("🤖 ORCAS processando..."):
-          incrementar_uso_voz(supabase, id_usuario, uso)
-          texto = transcrever_audio_groq(client_groq, audio_bytes)
-          dados = processar_texto_groq(
-              client_groq, texto, planos_disponiveis, plano_ativo
+    for _, row in df_final_concilia.iterrows():
+      v_acumulado_desc = (
+          df[df["descricao"] == row["descricao"]]["parcial_real"]
+          .fillna(0)
+          .sum()
+      )
+
+      # A cor vermelha só é acionada se o V.Real exceder o V.Plan planejado
+      v_real_comparacao = (
+          v_acumulado_desc if row["permite_parcial"] else row["valor_real"]
+      )
+      cor_txt = (
+          "red"
+          if (row["valor_plan"] > 0 and v_real_comparacao > row["valor_plan"])
+          else "black"
+      )
+
+      st.markdown(
+          '<div style="margin-bottom: -32px;"></div>', unsafe_allow_html=True
+      )
+
+      c1, c2, c3, c4, c5, c6, c7, c8 = st.columns(
+          [2.2, 0.4, 0.9, 0.9, 0.9, 1.2, 0.5, 0.7], vertical_alignment="center"
+      )
+
+      c1.markdown(
+          f"<span style='color:{cor_txt}; font-weight:"
+          f" 500;'>{row['dt_obj'].strftime('%d/%m/%Y')} -"
+          f" {row['descricao']}</span>",
+          unsafe_allow_html=True,
+      )
+      cor_tipo = "red" if row["tipo"] == "Saída" else "blue"
+      c2.markdown(
+          f"<span style='color:{cor_tipo}'>{row['tipo'][0]}</span>",
+          unsafe_allow_html=True,
+      )
+
+      valor_exibicao_real = row["valor_real"]
+
+      if row["permite_parcial"]:
+        c3.markdown(
+            f"<span style='color:{cor_txt}'>{format_moeda(row['valor_plan'])}</span>",
+            unsafe_allow_html=True,
+        )
+        c4.markdown(
+            f"<span style='color:{cor_txt}'>{format_moeda(v_acumulado_desc)}</span>",
+            unsafe_allow_html=True,
+        )
+
+        v_key = f"v_p_{row['id']}"
+        if v_key not in st.session_state:
+          st.session_state[v_key] = 0
+
+        v_parc_in = c5.text_input(
+            "",
+            key=f"p_{row['id']}_{reset_key}_{st.session_state[v_key]}",
+            value="0,00",
+            label_visibility="collapsed",
+        )
+
+        cc_sel = c6.selectbox(
+            "",
+            lista_cartoes_ccp,
+            key=f"cc_p_sel_{row['id']}_{reset_key}",
+            label_visibility="collapsed",
+        )
+        qtd_parc_in = c7.number_input(
+            "",
+            min_value=0,
+            max_value=12,
+            value=0,
+            step=1,
+            key=f"q_p_{row['id']}_{reset_key}",
+            label_visibility="collapsed",
+        )
+
+        cc_outro_nome = ""
+        if cc_sel == "+ Outro Cartão...":
+          cc_outro_nome = st.text_input(
+              "Digite o Cartão",
+              key=f"cc_outro_p_{row['id']}_{reset_key}",
+              placeholder="Ex: ITAÚ MASTER",
           )
 
-          st.session_state.hash_ultimo_audio = hash(audio_bytes)
-
-          if isinstance(dados, dict):
-            item_banco = buscar_lancamento_no_banco(
-                supabase, id_usuario, plano_ativo, dados.get("descricao")
+        if c8.button("Ok", key=f"btn_p_{row['id']}", use_container_width=True):
+          v_dig = parse_moeda(v_parc_in)
+          if v_dig > 0:
+            nome_cartao_final = (
+                cc_outro_nome.strip()
+                if cc_sel == "+ Outro Cartão..."
+                else cc_sel
             )
-            if item_banco:
-              is_pai_parcial = bool(
-                  item_banco.get("permite_parcial")
-              ) or bool(item_banco.get("parcial_real"))
 
-              if is_pai_parcial:
-                dados["intencao"] = "PARCIAL"
-                dados["permite_parcial"] = False
-                # IMPORTANTE: NÃO vincular o id_existente para não editar/sobrescrever o PAI
-                dados["id_existente"] = None
-              else:
-                dados["id_existente"] = item_banco.get("id")
-                dados["permite_parcial"] = bool(
-                    item_banco.get("permite_parcial")
-                )
+            dados_p = {
+                "projeto_id": st.session_state.projeto_ativo,
+                "descricao": row["descricao"],
+                "valor": v_dig,
+                "tipo": row["tipo"],
+                "data_vencimento": hoje_c.strftime("%Y-%m-%d"),
+                "cartao": nome_cartao_final,
+                "parcelas": int(qtd_parc_in),
+                "intencao": "PARCIAL",
+                "permite_parcial": False,
+            }
 
-              if dados.get("intencao") in ["ALTERAR", "EXCLUIR"]:
-                if not dados.get("valor") or dados.get("valor") == 0:
-                  dados["valor"] = float(
-                      item_banco.get("valor_plan")
-                      or item_banco.get("valor_real")
-                      or 0
-                  )
+            salvar_lancamento_oficial(supabase, ID_USUARIO_LOGADO, dados_p)
+            st.session_state.reset_count += 1
+            st.session_state[v_key] += 1
+            st.rerun()
 
-          st.session_state.dados_interpretados = dados
-          st.session_state.etapa_voz = "confirmacao"
-          st.rerun()
-
-  # TELA 2: CONFIRMAÇÃO
-  elif st.session_state.etapa_voz == "confirmacao":
-    dados = st.session_state.dados_interpretados or {}
-    st.info(f'🗣️ **Você disse:** "{dados.get("transcricao")}"')
-
-    if dados.get("erro"):
-      st.error(f"⚠️ **Detalhe do erro da IA:** `{dados.get('erro')}`")
-
-    # BUSCA OPÇÕES DE CARTÕES DISPONÍVEIS NO PLANO ATIVO
-    df_proj = buscar_df_lancamentos_projeto(supabase, plano_ativo)
-    opcoes_cartoes = buscar_cartoes_lcp(df_proj)
-
-    # CORRESPONDÊNCIA / MONTAGEM DA LISTA
-    cartao_detectado = dados.get("cartao")
-    if cartao_detectado:
-      cartao_clean = str(cartao_detectado).strip()
-      match_opt = next(
-          (opt for opt in opcoes_cartoes if opt.upper() == cartao_clean.upper()),
-          None,
-      )
-
-      if match_opt:
-        idx_cartao = opcoes_cartoes.index(match_opt)
       else:
-        # Se for um nome personalizado de cartão não cadastrado ainda, insere no dropdown antes de "+ Outro Cartão..."
-        opcoes_cartoes.insert(-1, cartao_clean)
-        idx_cartao = opcoes_cartoes.index(cartao_clean)
-    else:
-      idx_cartao = 0
+        c3.write(format_moeda(row["valor_plan"]))
+        if row["status"] in ["Realizado", "REAL"]:
+          c4.write(format_moeda(valor_exibicao_real))
+          c5.write("-")
+          c6.write("-")
+          c7.write("-")
+          c8.write("✅")
+        else:
+          v_norm_in = c4.text_input(
+              "",
+              key=f"n_{row['id']}_{reset_key}",
+              value="0,00",
+              label_visibility="collapsed",
+          )
+          c5.write("-")
 
-    with st.form("form_confirmacao_voz"):
-      c1, c2 = st.columns(2)
-      with c1:
-        opcoes_acao = ["REALIZAR", "PROJETAR", "PARCIAL", "ALTERAR", "EXCLUIR"]
-        intencao_atual = dados.get("intencao", "REALIZAR")
-        idx_intencao = (
-            opcoes_acao.index(intencao_atual)
-            if intencao_atual in opcoes_acao
-            else 0
-        )
-
-        intencao = st.selectbox("Ação", opcoes_acao, index=idx_intencao)
-        descricao = st.text_input("Descrição", value=dados.get("descricao", ""))
-        cartao_sel = st.selectbox(
-            "Cartão de Crédito", opcoes_cartoes, index=idx_cartao
-        )
-
-        cartao_manual = ""
-        if cartao_sel == "+ Outro Cartão...":
-          cartao_manual = st.text_input(
-              "Nome do Cartão", placeholder="Ex: MEU CARTÃO PERSONALIZADO"
+          cc_norm_sel = c6.selectbox(
+              "",
+              lista_cartoes_ccp,
+              key=f"cc_n_sel_{row['id']}_{reset_key}",
+              label_visibility="collapsed",
+          )
+          qtd_norm_in = c7.number_input(
+              "",
+              min_value=0,
+              max_value=12,
+              value=0,
+              step=1,
+              key=f"q_n_{row['id']}_{reset_key}",
+              label_visibility="collapsed",
           )
 
-      with c2:
-        valor = st.number_input(
-            "Valor Total (R$)",
-            value=float(dados.get("valor") or 0.0),
-            format="%.2f",
-        )
-        dt_venc = st.date_input(
-            "Data da Compra",
-            value=datetime.strptime(
-                dados.get("data_vencimento", str(obter_hoje_brasil())),
-                "%Y-%m-%d",
-            ).date(),
-            format="DD/MM/YYYY",
-        )
-        parcelas = st.number_input(
-            "Parcelas", value=int(dados.get("parcelas") or 1), min_value=1
-        )
+          cc_norm_outro_nome = ""
+          if cc_norm_sel == "+ Outro Cartão...":
+            cc_norm_outro_nome = st.text_input(
+                "Digite o Cartão",
+                key=f"cc_outro_n_{row['id']}_{reset_key}",
+                placeholder="Ex: ITAÚ MASTER",
+            )
 
-      # Se for PARCIAL, força False no checkbox e desabilita a edição da flag
-      is_parcial_intencao = intencao == "PARCIAL"
-      val_parcial_chk = (
-          False
-          if is_parcial_intencao
-          else bool(dados.get("permite_parcial", False))
-      )
+          if c8.button(
+              "Ok", key=f"btn_n_{row['id']}", use_container_width=True
+          ):
+            v_para_gravar = parse_moeda(v_norm_in)
+            if v_para_gravar == 0:
+              v_para_gravar = row["valor_plan"]
 
-      chk_parcial = st.checkbox(
-          "Permite Lançamento Parcial",
-          value=val_parcial_chk,
-          disabled=is_parcial_intencao,
-      )
+            nome_cartao_final = (
+                cc_norm_outro_nome.strip()
+                if cc_norm_sel == "+ Outro Cartão..."
+                else cc_norm_sel
+            )
 
-      b_salvar, b_refazer, b_sair = st.columns(3)
-      sub_salvar = b_salvar.form_submit_button(
-          "✅ Confirmar", type="primary", use_container_width=True
-      )
-      sub_refazer = b_refazer.form_submit_button(
-          "🔄 Refazer", use_container_width=True
-      )
-      sub_sair = b_sair.form_submit_button("❌ Sair", use_container_width=True)
+            is_cc = (
+                bool(nome_cartao_final)
+                and nome_cartao_final != "Nenhum"
+                and int(qtd_norm_in) > 0
+            )
 
-      if sub_salvar:
-        id_final = (
-            None if intencao == "PARCIAL" else dados.get("id_existente")
-        )
-        permite_parcial_final = (
-            False if intencao == "PARCIAL" else chk_parcial
-        )
+            if is_cc:
+              dados_c = {
+                  "projeto_id": st.session_state.projeto_ativo,
+                  "descricao": row["descricao"],
+                  "valor": v_para_gravar,
+                  "tipo": row["tipo"],
+                  "data_vencimento": row["dt_obj"].strftime("%Y-%m-%d"),
+                  "cartao": nome_cartao_final,
+                  "parcelas": int(qtd_norm_in),
+                  "intencao": "REALIZAR",
+                  "id_existente": row["id"],
+                  "permite_parcial": False,
+              }
+              salvar_lancamento_oficial(supabase, ID_USUARIO_LOGADO, dados_c)
+            else:
+              supabase.table("lancamentos").update({
+                  "valor_real": float(v_para_gravar),
+                  "status": "Realizado",
+              }).eq("id", row["id"]).execute()
 
-        nome_cartao_final = (
-            cartao_manual.strip()
-            if cartao_sel == "+ Outro Cartão..."
-            else cartao_sel
-        )
+            st.session_state.reset_count += 1
+            st.rerun()
 
-        dados_finais = {
-            "intencao": intencao,
-            "projeto_id": plano_ativo,
-            "descricao": descricao,
-            "valor": valor,
-            "tipo": dados.get("tipo", "Saída"),
-            "data_vencimento": dt_venc.strftime("%Y-%m-%d"),
-            "cartao": nome_cartao_final,
-            "parcelas": parcelas,
-            "id_existente": id_final,
-            "permite_parcial": permite_parcial_final,
-        }
-        # CHAMADA OFICIAL AO MOTOR DE CONCILIAÇÃO
-        msg = salvar_lancamento_oficial(supabase, id_usuario, dados_finais)
-        st.success(msg)
-        time.sleep(1)
-        fechar_modal_voz()
-        st.rerun()
-
-      elif sub_refazer:
-        st.session_state.etapa_voz = "gravacao"
-        st.session_state.audio_key = st.session_state.get("audio_key", 0) + 1
-        st.rerun()
-
-      elif sub_sair:
-        fechar_modal_voz()
-        st.rerun()
-
-
-def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
-  if "etapa_voz" not in st.session_state or not st.session_state.etapa_voz:
-    st.session_state.etapa_voz = "gravacao"
-
-  if not planos_disponiveis:
-    planos_disponiveis = [st.session_state.get("projeto_ativo") or "Padrão"]
-
-  _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis)
+      st.divider()
+  else:
+    st.info("Nenhum lançamento pendente para conciliação.")
