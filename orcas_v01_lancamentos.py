@@ -9,7 +9,7 @@ from orcas_v01_ajuda_lancamentos import renderizar_ajuda_lancamentos
 def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db, format_moeda, ir_para_o_topo):
     """
     Sub-rotina da Tela Lançamentos.
-    Exibe LCLs mestre de cartão (planejados e não planejados) na listagem sem duplicar saldos.
+    Exibe LCLs mestre de cartão (não planejados e não parciais) na listagem sem duplicar saldos.
     """
 
     if 'msg_sucesso' not in st.session_state: 
@@ -47,12 +47,6 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
     if st.session_state.get("exibir_ajuda_lancamentos", False):
         renderizar_ajuda_lancamentos()
 
-    # --- GARANTIA CONTRA KEYERROR EM NOVOS PLANOS ---
-    if 'cc_tipo' not in df.columns: df['cc_tipo'] = ''
-    if 'permite_parcial' not in df.columns: df['permite_parcial'] = False
-    if 'parcial_real' not in df.columns: df['parcial_real'] = 0.0
-    if 'status' not in df.columns: df['status'] = 'Planejado'
-
     if d_ini_db and d_fim_db:
         meses_periodo = []
         data_atual_loop = d_ini_db.replace(day=1)
@@ -75,42 +69,45 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
             def calcular_total_tipo(df_tipo, e_fechado):
                 total = 0
                 
-                # IGNORA apenas LCLs sem planejamento (compras filhas do cartão) no loop principal de cálculo
-                s_cc = df_tipo.get('cc_tipo', pd.Series('', index=df_tipo.index)).fillna('').astype(str).str.strip().str.upper()
-                df_tipo_filtrado = df_tipo[(s_cc != 'LCL') | (df_tipo['valor_plan'] > 0)]
+                # IGNORA LCLs no loop principal para não duplicar o valor do Cartão
+                df_tipo_filtrado = df_tipo[
+                    df_tipo['cc_tipo'].fillna('').astype(str).str.strip().str.upper() != 'LCL'
+                ]
                 
                 if e_fechado:
                     itens_principais = df_tipo_filtrado[(df_tipo_filtrado['valor_plan'] > 0) | ((df_tipo_filtrado['valor_plan'] == 0) & (df_tipo_filtrado['valor_real'] > 0))]
                     for _, x in itens_principais.iterrows():
-                        if x.get('permite_parcial', False):
+                        if x['permite_parcial']:
                             desc_pai = str(x['descricao']).strip().upper()
                             mask_filhos = (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_pai) & (df_mes['valor_plan'] == 0)
-                            v_parciais = df_mes[mask_filhos].get('parcial_real', pd.Series(0)).sum()
+                            v_parciais = df_mes[mask_filhos]['parcial_real'].sum()
                             total += v_parciais
                         else:
-                            if x.get('status') == 'Realizado':
-                                if str(x.get('cc_tipo', '')).strip().upper() in ['$CCP', 'CCP']:
+                            if x['status'] == 'Realizado':
+                                if str(x.get('cc_tipo')).strip().upper() in ['$CCP', 'CCP']:
                                     desc_cc = str(x['descricao']).strip().upper()
-                                    m_lcl = (df_mes.get('cc_tipo', pd.Series('')).fillna('').astype(str).str.strip().str.upper() == 'LCL')
-                                    m_desc = (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_cc) | (df_mes.get('cc_descricao', pd.Series('')).fillna('').astype(str).str.strip().str.upper() == desc_cc)
-                                    soma_lcls = df_mes[m_lcl & m_desc]['valor_real'].sum()
+                                    soma_lcls = df_mes[
+                                        (df_mes['cc_tipo'].fillna('').astype(str).str.strip().str.upper() == 'LCL') & 
+                                        (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_cc)
+                                    ]['valor_real'].sum()
                                     total += soma_lcls
                                 else:
                                     total += x['valor_real']
                 else:
                     itens_principais = df_tipo_filtrado[(df_tipo_filtrado['valor_plan'] > 0) | ((df_tipo_filtrado['valor_plan'] == 0) & (df_tipo_filtrado['valor_real'] > 0))]
                     for _, x in itens_principais.iterrows():
-                        if x.get('permite_parcial', False):
+                        if x['permite_parcial']:
                             desc_pai = str(x['descricao']).strip().upper()
                             mask_filhos = (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_pai) & (df_mes['valor_plan'] == 0)
-                            v_parciais = df_mes[mask_filhos].get('parcial_real', pd.Series(0)).sum()
+                            v_parciais = df_mes[mask_filhos]['parcial_real'].sum()
                             total += max(x['valor_plan'], v_parciais)
                         else:
-                            if str(x.get('cc_tipo', '')).strip().upper() in ['$CCP', 'CCP']:
+                            if str(x.get('cc_tipo')).strip().upper() in ['$CCP', 'CCP']:
                                 desc_cc = str(x['descricao']).strip().upper()
-                                m_lcl = (df_mes.get('cc_tipo', pd.Series('')).fillna('').astype(str).str.strip().str.upper() == 'LCL')
-                                m_desc = (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_cc) | (df_mes.get('cc_descricao', pd.Series('')).fillna('').astype(str).str.strip().str.upper() == desc_cc)
-                                soma_lcls = df_mes[m_lcl & m_desc]['valor_real'].sum()
+                                soma_lcls = df_mes[
+                                    (df_mes['cc_tipo'].fillna('').astype(str).str.strip().str.upper() == 'LCL') & 
+                                    (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_cc)
+                                ]['valor_real'].sum()
                                 total += soma_lcls if soma_lcls > 0 else x['valor_plan']
                             else:
                                 total += x['valor_real'] if x['valor_real'] > 0 else x['valor_plan']
@@ -202,17 +199,19 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         </style>
                     """, unsafe_allow_html=True)
 
-                    s_cc_m = df_mes.get('cc_tipo', pd.Series('', index=df_mes.index)).fillna('').astype(str).str.strip().str.upper()
-                    eh_ccp_mask = s_cc_m.isin(['$CCP', 'CCP'])
+                    eh_ccp_mask = df_mes['cc_tipo'].fillna('').astype(str).str.strip().str.upper().isin(['$CCP', 'CCP'])
 
-                    # LCLs avulsos (não planejados e não parciais)
-                    p_real = df_mes.get('parcial_real', pd.Series(0, index=df_mes.index)).fillna(0)
-                    is_lcl_valido = (s_cc_m == 'LCL') & (df_mes['valor_plan'] == 0) & (p_real == 0)
+                    # Regra estrita para LCL: Cartão de Crédito, Não Planejado (valor_plan == 0) e Não Parcial (parcial_real == 0)
+                    is_lcl_valido = (
+                        (df_mes['cc_tipo'].fillna('').astype(str).str.strip().str.upper() == 'LCL') &
+                        (df_mes['valor_plan'] == 0) &
+                        (df_mes['parcial_real'].fillna(0) == 0)
+                    )
 
-                    # EXIBIÇÃO: Permite exibir LCLs desde que tenham valor planejado (valor_plan > 0)
+                    # Exibe os lançamentos normais + os LCLs válidos
                     df_exibir = df_mes[
                         (((df_mes['valor_plan'] > 0) | (df_mes['valor_real'] > 0) | eh_ccp_mask) &
-                         ((s_cc_m != 'LCL') | (df_mes['valor_plan'] > 0))) |
+                         (df_mes['cc_tipo'].fillna('').astype(str).str.strip().str.upper() != 'LCL')) |
                         is_lcl_valido
                     ].sort_values('data')
                     
@@ -225,22 +224,22 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         
                         v_ac = df_mes[
                             df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_row_upper
-                        ].get('parcial_real', pd.Series(0)).sum()
+                        ]['parcial_real'].sum()
                         
                         v_re = v_ac if v_ac > 0 else row['valor_real']
-                        eh_cartao_ccp = str(row.get('cc_tipo', '')).strip().upper() in ['$CCP', 'CCP']
+                        eh_cartao_ccp = str(row.get('cc_tipo')).strip().upper() in ['$CCP', 'CCP']
 
-                        # Busca LCLs vinculadas ao cartão (por descricao ou cc_descricao)
+                        # Busca LCLs vinculadas (Compras do cartão)
                         df_lcls_cartao = pd.DataFrame()
                         if eh_cartao_ccp:
-                            mask_lcl = (df_mes.get('cc_tipo', pd.Series('')).fillna('').astype(str).str.strip().str.upper() == 'LCL')
-                            mask_desc_dir = (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_row_upper)
-                            mask_desc_cc = (df_mes.get('cc_descricao', pd.Series('')).fillna('').astype(str).str.strip().str.upper() == desc_row_upper)
-                            df_lcls_cartao = df_mes[mask_lcl & (mask_desc_dir | mask_desc_cc)]
+                            df_lcls_cartao = df_mes[
+                                (df_mes['cc_tipo'].fillna('').astype(str).str.strip().str.upper() == 'LCL') & 
+                                (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_row_upper)
+                            ]
                             v_re = df_lcls_cartao['valor_real'].sum()
 
                         dt_e = pd.to_datetime(row['data']).strftime('%d/%m/%Y')
-                        st_e = 'PLAN' if row.get('status') == 'Planejado' else 'REAL'
+                        st_e = 'PLAN' if row['status'] == 'Planejado' else 'REAL'
                         
                         classe_cor = ""
                         if v_re > row['valor_plan']:
@@ -253,7 +252,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         filhos_parciais = df_mes[
                             (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_row_upper) & 
                             (df_mes['valor_plan'] == 0) & 
-                            (df_mes.get('parcial_real', pd.Series(0)) > 0)
+                            (df_mes['parcial_real'] > 0)
                         ]
 
                         tem_subitens = (eh_cartao_ccp and not df_lcls_cartao.empty) or (not filhos_parciais.empty)
@@ -271,7 +270,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                             # 1. Compras no Cartão de Crédito
                             if eh_cartao_ccp and not df_lcls_cartao.empty:
                                 for _, lcl in df_lcls_cartao.iterrows():
-                                    desc_lcl = lcl['descricao']
+                                    desc_lcl = lcl.get('cc_descricao') if 'cc_descricao' in lcl and pd.notna(lcl['cc_descricao']) else lcl['descricao']
                                     dt_compra = lcl.get('cc_data_compra') if 'cc_data_compra' in lcl and pd.notna(lcl['cc_data_compra']) else lcl['data']
                                     dt_compra_str = pd.to_datetime(dt_compra).strftime('%d/%m/%Y')
                                     
