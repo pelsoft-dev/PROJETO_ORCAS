@@ -47,10 +47,11 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
     if st.session_state.get("exibir_ajuda_lancamentos", False):
         renderizar_ajuda_lancamentos()
 
-    # Garantia contra KeyError em dataframes de novos planos
+    # --- GARANTIA CONTRA KEYERROR EM NOVOS PLANOS ---
     if 'cc_tipo' not in df.columns: df['cc_tipo'] = ''
     if 'permite_parcial' not in df.columns: df['permite_parcial'] = False
     if 'parcial_real' not in df.columns: df['parcial_real'] = 0.0
+    if 'status' not in df.columns: df['status'] = 'Planejado'
 
     if d_ini_db and d_fim_db:
         meses_periodo = []
@@ -74,7 +75,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
             def calcular_total_tipo(df_tipo, e_fechado):
                 total = 0
                 
-                # IGNORA apenas LCLs sem planejamento (compras filhas do cartão) no loop principal
+                # IGNORA apenas LCLs sem planejamento (compras filhas do cartão) no loop principal de cálculo
                 s_cc = df_tipo.get('cc_tipo', pd.Series('', index=df_tipo.index)).fillna('').astype(str).str.strip().str.upper()
                 df_tipo_filtrado = df_tipo[(s_cc != 'LCL') | (df_tipo['valor_plan'] > 0)]
                 
@@ -204,11 +205,11 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                     s_cc_m = df_mes.get('cc_tipo', pd.Series('', index=df_mes.index)).fillna('').astype(str).str.strip().str.upper()
                     eh_ccp_mask = s_cc_m.isin(['$CCP', 'CCP'])
 
-                    # Regra estrita para LCL avulso: Cartão de Crédito, Não Planejado (valor_plan == 0) e Não Parcial
+                    # LCLs avulsos (não planejados e não parciais)
                     p_real = df_mes.get('parcial_real', pd.Series(0, index=df_mes.index)).fillna(0)
                     is_lcl_valido = (s_cc_m == 'LCL') & (df_mes['valor_plan'] == 0) & (p_real == 0)
 
-                    # Exibe os lançamentos normais (ou LCLs mestres planejados) + LCLs avulsos válidos
+                    # EXIBIÇÃO: Permite exibir LCLs desde que tenham valor planejado (valor_plan > 0)
                     df_exibir = df_mes[
                         (((df_mes['valor_plan'] > 0) | (df_mes['valor_real'] > 0) | eh_ccp_mask) &
                          ((s_cc_m != 'LCL') | (df_mes['valor_plan'] > 0))) |
@@ -229,7 +230,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         v_re = v_ac if v_ac > 0 else row['valor_real']
                         eh_cartao_ccp = str(row.get('cc_tipo', '')).strip().upper() in ['$CCP', 'CCP']
 
-                        # Busca LCLs vinculadas (compras do cartão associadas à fatura/cartão pai)
+                        # Busca LCLs vinculadas ao cartão (por descricao ou cc_descricao)
                         df_lcls_cartao = pd.DataFrame()
                         if eh_cartao_ccp:
                             mask_lcl = (df_mes.get('cc_tipo', pd.Series('')).fillna('').astype(str).str.strip().str.upper() == 'LCL')
