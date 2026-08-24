@@ -1,14 +1,15 @@
-from datetime import datetime
 import json
 import re
 import time
 import zoneinfo
+from datetime import datetime
 from groq import Groq
 import pandas as pd
 import streamlit as st
 
 # CONSUMO DIRETO DO MOTOR DE CONCILIAÇÃO UNIFICADO
 from orcas_v01_conciliacao import (
+    buscar_cartoes_lcp,
     salvar_lancamento_oficial,
 )
 
@@ -72,7 +73,7 @@ def processar_texto_groq(
     Regras de extração:
     1. "descricao": Nome limpo do item (ex: "Mercado"). Remova verbos ("comprei"), marcas não essenciais, artigos e preços.
     2. "valor": Valor numérico total em float. Ex: "444,00" -> 444.00.
-    3. "cartao": Nome da bandeira/banco do cartão de crédito citado (ex: "Visa", "Mastercard"). Se nenhum for citado, retorne null.
+    3. "cartao": Extraia EXATAMENTE o nome do cartão de crédito citado pelo usuário (ex: "MASTER", "Cartão do Fulano", "Nubank", "VISA"). O usuário pode dar qualquer nome ao cartão dele. Se nenhum for citado, retorne null.
     4. "parcelas": Quantidade de parcelas como inteiro. Considerar "3x", "3 vezes" e "3 meses" como 3. Padrão: 1.
     5. "intencao": "REALIZAR" para compras efetuadas, "PROJETAR" para gastos futuros.
     6. "tipo": "Saída" para compras/gastos e "Entrada" para receitas.
@@ -81,7 +82,7 @@ def processar_texto_groq(
     {{
       "descricao": "Mercado",
       "valor": 444.00,
-      "cartao": "Visa",
+      "cartao": "MASTER",
       "parcelas": 3,
       "intencao": "REALIZAR",
       "tipo": "Saída"
@@ -155,6 +156,8 @@ def processar_texto_groq(
         "",
     ]:
       cartao_extraido = None
+    elif isinstance(cartao_extraido, str):
+      cartao_extraido = cartao_extraido.strip()
 
     return {
         "transcricao": texto_transcrito,
@@ -255,6 +258,22 @@ def fechar_modal_voz():
   st.session_state.audio_key = st.session_state.get("audio_key", 0) + 1
 
 
+def buscar_df_lancamentos_projeto(supabase, projeto_id):
+  """Busca os lançamentos do projeto no banco para extrair cartões ($CCP)."""
+  try:
+    res = (
+        supabase.table("lancamentos")
+        .select("*")
+        .eq("projeto_id", str(projeto_id))
+        .execute()
+    )
+    if res and res.data:
+      return pd.DataFrame(res.data)
+  except Exception:
+    pass
+  return pd.DataFrame()
+
+
 @st.dialog("🎙️ Conversar com o ORCAS")
 def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
   plano_ativo = st.session_state.get("projeto_ativo", planos_disponiveis[0])
@@ -330,6 +349,28 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
     if dados.get("erro"):
       st.error(f"⚠️ **Detalhe do erro da IA:** `{dados.get('erro')}`")
 
+    # BUSCA OPÇÕES DE CARTÕES DISPONÍVEIS NO PLANO ATIVO
+    df_proj = buscar_df_lancamentos_projeto(supabase, plano_ativo)
+    opcoes_cartoes = buscar_cartoes_lcp(df_proj)
+
+    # CORRESPONDÊNCIA / MONTAGEM DA LISTA
+    cartao_detectado = dados.get("cartao")
+    if cartao_detectado:
+      cartao_clean = str(cartao_detectado).strip()
+      match_opt = next(
+          (opt for opt in opcoes_cartoes if opt.upper() == cartao_clean.upper()),
+          None,
+      )
+
+      if match_opt:
+        idx_cartao = opcoes_cartoes.index(match_opt)
+      else:
+        # Se for um nome personalizado de cartão não cadastrado ainda, insere no dropdown antes de "+ Outro Cartão..."
+        opcoes_cartoes.insert(-1, cartao_clean)
+        idx_cartao = opcoes_cartoes.index(cartao_clean)
+    else:
+      idx_cartao = 0
+
     with st.form("form_confirmacao_voz"):
       c1, c2 = st.columns(2)
       with c1:
@@ -343,9 +384,16 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
 
         intencao = st.selectbox("Ação", opcoes_acao, index=idx_intencao)
         descricao = st.text_input("Descrição", value=dados.get("descricao", ""))
-        cartao = st.text_input(
-            "Cartão de Crédito", value=dados.get("cartao") or "Nenhum"
+        cartao_sel = st.selectbox(
+            "Cartão de Crédito", opcoes_cartoes, index=idx_cartao
         )
+
+        cartao_manual = ""
+        if cartao_sel == "+ Outro Cartão...":
+          cartao_manual = st.text_input(
+              "Nome do Cartão", placeholder="Ex: MEU CARTÃO PERSONALIZADO"
+          )
+
       with c2:
         valor = st.number_input(
             "Valor Total (R$)",
@@ -388,12 +436,17 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
       sub_sair = b_sair.form_submit_button("❌ Sair", use_container_width=True)
 
       if sub_salvar:
-        # GARANTIA ABSOLUTA: Registro filho parcial gerado NUNCA herda permite_parcial=True e gera NOVO registro (id_existente=None)
         id_final = (
             None if intencao == "PARCIAL" else dados.get("id_existente")
         )
         permite_parcial_final = (
             False if intencao == "PARCIAL" else chk_parcial
+        )
+
+        nome_cartao_final = (
+            cartao_manual.strip()
+            if cartao_sel == "+ Outro Cartão..."
+            else cartao_sel
         )
 
         dados_finais = {
@@ -403,7 +456,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
             "valor": valor,
             "tipo": dados.get("tipo", "Saída"),
             "data_vencimento": dt_venc.strftime("%Y-%m-%d"),
-            "cartao": cartao,
+            "cartao": nome_cartao_final,
             "parcelas": parcelas,
             "id_existente": id_final,
             "permite_parcial": permite_parcial_final,
