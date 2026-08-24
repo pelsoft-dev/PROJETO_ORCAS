@@ -11,12 +11,16 @@ from orcas_v01_ajuda_conciliacao import renderizar_ajuda_conciliacao
 
 
 def buscar_dados_cartao(supabase, df, nome_cartao):
-  """Busca o dia de corte e o dia de vencimento do cartão ($CCP)."""
+  """Busca o dia de corte e o dia de vencimento do cartão ($CCP).
+
+  O dia de vencimento é extraído diretamente da coluna 'data_vencimento'.
+  """
   if not nome_cartao or str(nome_cartao).strip().upper() == "NENHUM":
-    return 3, 10
+    return 25, 28
 
   nome_busca = str(nome_cartao).strip().upper()
 
+  # 1. BUSCA PRIMEIRO NO DATAFRAME EM MEMÓRIA
   if df is not None and not df.empty and "cc_tipo" in df.columns:
     df_ccp = df[
         (
@@ -34,19 +38,24 @@ def buscar_dados_cartao(supabase, df, nome_cartao):
     ]
     if not df_ccp.empty:
       row = df_ccp.iloc[0]
-      venc = row.get("cc_dia_vencimento")
       corte = row.get("cc_dia_corte")
-      if pd.notnull(venc) and pd.notnull(corte):
-        return int(corte), int(venc)
-      elif pd.notnull(venc):
-        venc_int = int(venc)
-        corte_calc = venc_int - 7 if venc_int > 7 else 3
-        return corte_calc, venc_int
+      dt_venc_str = row.get("data_vencimento")
 
+      venc = None
+      if pd.notnull(dt_venc_str):
+        try:
+          venc = pd.to_datetime(dt_venc_str).day
+        except Exception:
+          pass
+
+      if pd.notnull(corte) and venc is not None:
+        return int(corte), int(venc)
+
+  # 2. BUSCA NO SUPABASE SE NÃO ENCONTRAR NO DF
   try:
     res = (
         supabase.table("lancamentos")
-        .select("cc_dia_corte, cc_dia_vencimento")
+        .select("cc_dia_corte, data_vencimento")
         .eq("projeto_id", str(st.session_state.projeto_ativo))
         .ilike("descricao", nome_busca)
         .execute()
@@ -54,21 +63,27 @@ def buscar_dados_cartao(supabase, df, nome_cartao):
 
     if res.data:
       for item in res.data:
-        venc = item.get("cc_dia_vencimento")
         corte = item.get("cc_dia_corte")
-        if venc is not None and corte is not None:
+        dt_venc_str = item.get("data_vencimento")
+
+        venc = None
+        if dt_venc_str:
+          try:
+            # Extrai o dia da data de vencimento (ex: '2026-08-28' -> 28)
+            venc = int(str(dt_venc_str).split("-")[2])
+          except Exception:
+            pass
+
+        if corte is not None and venc is not None:
           return int(corte), int(venc)
-        elif venc is not None:
-          venc_int = int(venc)
-          corte_calc = venc_int - 7 if venc_int > 7 else 3
-          return corte_calc, venc_int
   except Exception:
     pass
 
-  return 3, 10
+  # RETORNO PADRÃO DE SEGURANÇA (AO INVÉS DE 3, 10)
+  return 25, 28
 
 
-def calcular_vencimento_fatura(data_compra, dia_corte=3, dia_vencimento=10):
+def calcular_vencimento_fatura(data_compra, dia_corte=25, dia_vencimento=28):
   """Calcula a data exata de vencimento da 1ª parcela com base no dia de corte da fatura."""
   corte = int(dia_corte)
   venc = int(dia_vencimento)
@@ -76,7 +91,7 @@ def calcular_vencimento_fatura(data_compra, dia_corte=3, dia_vencimento=10):
   ano = data_compra.year
   mes = data_compra.month
 
-  # CORREÇÃO: A fatura só vira para o mês seguinte se a compra for feita APÓS o dia de corte.
+  # A fatura só vira para o mês seguinte se a compra for feita APÓS o dia de corte.
   if data_compra.day > corte:
     mes += 1
     if mes > 12:
@@ -87,7 +102,7 @@ def calcular_vencimento_fatura(data_compra, dia_corte=3, dia_vencimento=10):
   return datetime(ano, mes, dia_final).date()
 
 
-def somar_meses_data(data_fatura_1a_parcela, i_parcela, dia_vencimento=10):
+def somar_meses_data(data_fatura_1a_parcela, i_parcela, dia_vencimento=28):
   """Gera a data de vencimento da parcela i a partir da data de vencimento da 1ª parcela."""
   total_meses = (data_fatura_1a_parcela.month - 1) + i_parcela
   novo_ano = data_fatura_1a_parcela.year + (total_meses // 12)
@@ -202,7 +217,6 @@ def atualizar_valor_plan_cartao(
           "status": "Planejado",
           "cc_tipo": "$CCP",
           "cc_dia_corte": corte,
-          "cc_dia_vencimento": venc,
       }).execute()
   except Exception as e:
     st.error(f"Erro ao atualizar Cartão Pai ($CCP): {e}")
@@ -278,7 +292,6 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
         "permite_parcial": False,
     }).execute()
 
-    # SE NÃO TIVER CARTÃO, ENCERRA AQUI. SE TIVER CARTÃO, CONTINUA PARA GERAR AS PARCELAS DO CARTÃO ABAIXO!
     if not is_cartao_valido:
       return (
           f"✅ Lançamento parcial de **R$ {valor:,.2f}** gravado para"
@@ -315,7 +328,6 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
           "cc_qtd_parcelas": parcelas,
       }).eq("id", id_existente).execute()
     elif not e_categoria_parcial:
-      # Só insere o mestre se NÃO for parcial (pois a parcial já gravou seu sub-registro no bloco 1)
       payload_mestre = {
           "projeto_id": projeto_id,
           "usuario_id": str(usuario_id),
@@ -591,7 +603,6 @@ def exibir_conciliacao(
           & (df_base_tela["dt_obj"] <= fim_mes_c)
       ].copy()
     else:
-      # Oculta itens que já estão "Realizado" / "REAL", a menos que sejam categorias parciais ativas
       df_f = df_base_tela[
           (df_base_tela["dt_obj"] >= ini_mes_c)
           & (df_base_tela["dt_obj"] <= hoje_c)
@@ -633,7 +644,6 @@ def exibir_conciliacao(
           .sum()
       )
 
-      # A cor vermelha só é acionada se o V.Real exceder o V.Plan planejado
       v_real_comparacao = (
           v_acumulado_desc if row["permite_parcial"] else row["valor_real"]
       )
