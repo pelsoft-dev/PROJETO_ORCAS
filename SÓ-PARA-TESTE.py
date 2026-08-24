@@ -208,17 +208,28 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                     s_cc_m = df_mes.get('cc_tipo', pd.Series('', index=df_mes.index)).fillna('').astype(str).str.strip().str.upper()
                     eh_ccp_mask = s_cc_m.isin(['$CCP', 'CCP'])
 
-                    # --- CORREÇÃO DA DUPLICAÇÃO ---
-                    # Para a linha PRINCIPAL: Exibe apenas itens com valor_plan > 0 ou cartões CCP mestres.
-                    # As baixas parciais (valor_plan == 0 com parcial_real > 0) não entram aqui como linhas principais, 
-                    # apenas dentro do expansor (filhos_parciais).
-                    mask_item_principal = (df_mes['valor_plan'] > 0) | eh_ccp_mask
-                    
-                    # Oculta LCLs planejados da lista principal
-                    v_parcial_series = df_mes.get('parcial_real', pd.Series(0, index=df_mes.index)).fillna(0)
-                    mask_exibir_item = (s_cc_m != 'LCL') | ((s_cc_m == 'LCL') & ((df_mes['valor_real'] > 0) | (v_parcial_series > 0)))
+                    # Identifica os nomes/descrições de itens que aceitam parciais (pais)
+                    desc_pais_parciais = set(
+                        df_mes[df_mes.get('permite_parcial', False) == True]['descricao']
+                        .fillna('').astype(str).str.strip().str.upper()
+                    )
 
-                    df_exibir = df_mes[mask_item_principal & mask_exibir_item].sort_values('data')
+                    # Um item só é "filho de parcial" se sua descrição bater com um pai e seu valor_plan for 0 com parcial_real > 0
+                    is_filho_parcial = (
+                        df_mes['descricao'].fillna('').astype(str).str.strip().str.upper().isin(desc_pais_parciais) &
+                        (df_mes['valor_plan'] == 0) &
+                        (df_mes.get('parcial_real', pd.Series(0, index=df_mes.index)).fillna(0) > 0)
+                    )
+
+                    # 1. Deve possuir algum valor (planejado ou realizado) OU ser cartão mestre
+                    v_parcial_series = df_mes.get('parcial_real', pd.Series(0, index=df_mes.index)).fillna(0)
+                    mask_tem_valor = (df_mes['valor_plan'] > 0) | (df_mes['valor_real'] > 0) | (v_parcial_series > 0) | eh_ccp_mask
+
+                    # 2. Esconde LCLs planejados da lista principal
+                    mask_nao_lcl = (s_cc_m != 'LCL') | ((s_cc_m == 'LCL') & ((df_mes['valor_real'] > 0) | (v_parcial_series > 0)))
+
+                    # 3. Esconde exclusivamente as parciais filhas da lista principal
+                    df_exibir = df_mes[mask_tem_valor & mask_nao_lcl & (~is_filho_parcial)].sort_values('data')
                     
                     # Cabeçalho da tabela
                     h_hdr = '<div class="tab-scroll"><div class="tab-body">'
