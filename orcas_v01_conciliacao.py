@@ -251,7 +251,14 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
     except Exception:
       pass
 
-  # REGRA PARCIAL SUPREMA: SE FOR PARCIAL (EX: MERCADO), DEVE GRAVAR APENAS COMO SUB-LANÇAMENTO PARCIAL
+  # VERIFICA SE O CARTÃO É VÁLIDO
+  is_cartao_valido = (
+      cartao
+      and str(cartao).strip().upper() not in ["NENHUM", "NONE", "NULL", ""]
+      and parcelas >= 1
+  )
+
+  # REGRA PARCIAL SUPREMA: SE FOR PARCIAL (EX: MERCADO), DEVE GRAVAR COMO SUB-LANÇAMENTO PARCIAL
   if e_categoria_parcial and intencao == "PARCIAL":
     dt_1_dia = dt_compra.replace(day=1).strftime("%Y-%m-%d")
     supabase.table("lancamentos").insert({
@@ -266,21 +273,20 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
         "parcial_real": valor,
         "parcial_data": dt_venc,
         "status": "Realizado",
-        "cc_tipo": "LCL" if cartao and cartao != "Nenhum" else None,
+        "cc_tipo": "LCL" if is_cartao_valido else None,
         "permite_parcial": False,
     }).execute()
-    return f"✅ Lançamento parcial de **R$ {valor:,.2f}** gravado para **{descricao}**!"
 
-  # 2. CARTÃO DE CRÉDITO
-  is_cartao_valido = (
-      cartao
-      and str(cartao).strip().upper() not in ["NENHUM", "NONE", "NULL", ""]
-      and parcelas >= 1
-  )
+    # SE NÃO TIVER CARTÃO, ENCERRA AQUI. SE TIVER CARTÃO, CONTINUA PARA GERAR AS PARCELAS DO CARTÃO ABAIXO!
+    if not is_cartao_valido:
+      return (
+          f"✅ Lançamento parcial de **R$ {valor:,.2f}** gravado para"
+          f" **{descricao}**!"
+      )
 
+  # 2. CARTÃO DE CRÉDITO (Gera as parcelas LCL e atualiza a fatura mestre do cartão)
   if is_cartao_valido:
     corte, venc = buscar_dados_cartao(supabase, None, cartao)
-
     dt_1_venc = calcular_vencimento_fatura(
         dt_compra, dia_corte=corte, dia_vencimento=venc
     )
@@ -293,7 +299,6 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
     )
     v_real_mestre = valor if (not id_existente or intencao == "REALIZAR") else 0.0
 
-    # Nome unificado exigido: "Descrição - Cartão nX"
     f_desc_mestre = (
         f"{descricao} - {cartao} {parcelas}X"
         if not f"{cartao} {parcelas}X" in descricao
@@ -301,7 +306,6 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
     )
 
     if id_existente:
-      # PRESERVA O VALOR_PLAN ORIGINAL SE JÁ EXISTIA
       supabase.table("lancamentos").update({
           "descricao": f_desc_mestre,
           "valor_real": v_real_mestre,
@@ -309,8 +313,8 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
           "cc_tipo": "LCL",
           "cc_qtd_parcelas": parcelas,
       }).eq("id", id_existente).execute()
-    else:
-      # SEM PLANEJAMENTO PRÉVIO: valor_plan fica 0.0
+    elif not e_categoria_parcial:
+      # Só insere o mestre se NÃO for parcial (pois a parcial já gravou seu sub-registro no bloco 1)
       payload_mestre = {
           "projeto_id": projeto_id,
           "usuario_id": str(usuario_id),
@@ -327,6 +331,7 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
       }
       supabase.table("lancamentos").insert(payload_mestre).execute()
 
+    # GERADOR DAS N PARCELAS DE CARTÃO (LCLs)
     for i in range(parcelas):
       v_parc = base_val + (residuo if i == (parcelas - 1) else 0.0)
       dt_venc_p = somar_meses_data(dt_1_venc, i, dia_vencimento=venc)
@@ -353,7 +358,7 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
 
     return f"✅ Compra **{f_desc_mestre}** registrada no cartão **{cartao}** ({parcelas}x de R$ {base_val:.2f})!"
 
-  # 3. CONVENCIONAL (SEM CARTÃO DE CRÉDITO)
+  # 3. CONVENCIONAL (SEM CARTÃO DE CRÉDITO E SEM SER PARCIAL)
   if id_existente and intencao in ["REALIZAR", "ALTERAR"]:
     supabase.table("lancamentos").update({
         "valor_real": valor if intencao == "REALIZAR" else 0.0,
@@ -366,7 +371,6 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
         "data_vencimento": dt_venc,
     }).eq("id", id_existente).execute()
     return f"✅ Lançamento **{descricao}** atualizado!"
-
   else:
     status = "Realizado" if intencao == "REALIZAR" else "Planejado"
     supabase.table("lancamentos").insert({
