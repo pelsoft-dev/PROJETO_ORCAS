@@ -69,7 +69,6 @@ def buscar_dados_cartao(supabase, df, nome_cartao):
         venc = None
         if dt_venc_str:
           try:
-            # Extrai o dia da data de vencimento (ex: '2026-08-28' -> 28)
             venc = int(str(dt_venc_str).split("-")[2])
           except Exception:
             pass
@@ -79,7 +78,6 @@ def buscar_dados_cartao(supabase, df, nome_cartao):
   except Exception:
     pass
 
-  # RETORNO PADRÃO DE SEGURANÇA (AO INVÉS DE 3, 10)
   return 25, 28
 
 
@@ -91,7 +89,6 @@ def calcular_vencimento_fatura(data_compra, dia_corte=25, dia_vencimento=28):
   ano = data_compra.year
   mes = data_compra.month
 
-  # A fatura só vira para o mês seguinte se a compra for feita APÓS o dia de corte.
   if data_compra.day > corte:
     mes += 1
     if mes > 12:
@@ -273,13 +270,18 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
       and parcelas >= 1
   )
 
-  # REGRA PARCIAL SUPREMA: SE FOR PARCIAL (EX: MERCADO), DEVE GRAVAR COMO SUB-LANÇAMENTO PARCIAL
+  # REGRA PARCIAL SUPREMA: SE FOR PARCIAL (EX: MERCADO), GRAVA SUB-LANÇAMENTO E ENCERRA O FLUXO
   if e_categoria_parcial and intencao == "PARCIAL":
     dt_1_dia = dt_compra.replace(day=1).strftime("%Y-%m-%d")
+    
+    # Define se é LCL (Cartão) ou None (Pix/Dinheiro)
+    cc_tipo_val = "LCL" if is_cartao_valido else None
+    cc_desc_val = f"{cartao} {parcelas}X" if is_cartao_valido else None
+
     supabase.table("lancamentos").insert({
         "projeto_id": projeto_id,
         "usuario_id": str(usuario_id),
-        "descricao": descricao,
+        "descricao": descricao,  # Mantém "MERCADO" para agrupar
         "data": dt_1_dia,
         "data_vencimento": dt_1_dia,
         "tipo": tipo,
@@ -288,17 +290,49 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
         "parcial_real": valor,
         "parcial_data": dt_venc,
         "status": "Realizado",
-        "cc_tipo": "LCL" if is_cartao_valido else None,
+        "cc_tipo": cc_tipo_val,
+        "cc_descricao": cc_desc_val,
         "permite_parcial": False,
     }).execute()
 
-    if not is_cartao_valido:
-      return (
-          f"✅ Lançamento parcial de **R$ {valor:,.2f}** gravado para"
-          f" **{descricao}**!"
+    # Se usou cartão na parcial, gera as parcelas no cartão pai ($CCP)
+    if is_cartao_valido:
+      corte, venc = buscar_dados_cartao(supabase, None, cartao)
+      dt_1_venc = calcular_vencimento_fatura(
+          dt_compra, dia_corte=corte, dia_vencimento=venc
       )
+      base_val = round(valor / parcelas, 2)
+      residuo = round(valor - (base_val * parcelas), 2)
 
-  # 2. CARTÃO DE CRÉDITO (Gera as parcelas LCL e atualiza a fatura mestre do cartão)
+      for i in range(parcelas):
+        v_parc = base_val + (residuo if i == (parcelas - 1) else 0.0)
+        dt_venc_p = somar_meses_data(dt_1_venc, i, dia_vencimento=venc)
+
+        supabase.table("lancamentos").insert({
+            "projeto_id": projeto_id,
+            "usuario_id": str(usuario_id),
+            "descricao": cartao,
+            "cc_descricao": f"{descricao} ({i+1:02d}/{parcelas:02d})",
+            "data": dt_venc_p.strftime("%Y-%m-%d"),
+            "data_vencimento": dt_venc_p.strftime("%Y-%m-%d"),
+            "cc_data_compra": dt_compra.strftime("%Y-%m-%d"),
+            "tipo": "Saída",
+            "valor_plan": round(v_parc, 2),
+            "valor_real": 0.0,
+            "status": "Planejado",
+            "cc_tipo": "LCL",
+            "cc_qtd_parcelas": 0,
+        }).execute()
+
+        atualizar_valor_plan_cartao(
+            supabase, None, cartao, dt_venc_p, usuario_id
+        )
+
+      return f"✅ Parcial de **R$ {valor:,.2f}** para **{descricao}** lançada no cartão **{cartao}**!"
+    
+    return f"✅ Lançamento parcial de **R$ {valor:,.2f}** gravado para **{descricao}**!"
+
+  # 2. CARTÃO DE CRÉDITO CONVENCIONAL (Não-parcial)
   if is_cartao_valido:
     corte, venc = buscar_dados_cartao(supabase, None, cartao)
     dt_1_venc = calcular_vencimento_fatura(
@@ -344,7 +378,6 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
       }
       supabase.table("lancamentos").insert(payload_mestre).execute()
 
-    # GERADOR DAS N PARCELAS DE CARTÃO (LCLs)
     for i in range(parcelas):
       v_parc = base_val + (residuo if i == (parcelas - 1) else 0.0)
       dt_venc_p = somar_meses_data(dt_1_venc, i, dia_vencimento=venc)
