@@ -85,7 +85,11 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                     for _, x in itens_principais.iterrows():
                         if x.get('permite_parcial', False):
                             desc_pai = str(x['descricao']).strip().upper()
-                            mask_filhos = (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_pai) & (df_mes['valor_plan'] == 0)
+                            mask_filhos = (
+                                (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_pai) & 
+                                (df_mes['valor_plan'] == 0) & 
+                                (df_mes.get('cc_tipo', pd.Series('')).fillna('').astype(str).str.strip().str.upper() != 'LCL')
+                            )
                             v_parciais = df_mes[mask_filhos].get('parcial_real', pd.Series(0)).sum()
                             total += v_parciais
                         else:
@@ -103,7 +107,11 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                     for _, x in itens_principais.iterrows():
                         if x.get('permite_parcial', False):
                             desc_pai = str(x['descricao']).strip().upper()
-                            mask_filhos = (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_pai) & (df_mes['valor_plan'] == 0)
+                            mask_filhos = (
+                                (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_pai) & 
+                                (df_mes['valor_plan'] == 0) & 
+                                (df_mes.get('cc_tipo', pd.Series('')).fillna('').astype(str).str.strip().str.upper() != 'LCL')
+                            )
                             v_parciais = df_mes[mask_filhos].get('parcial_real', pd.Series(0)).sum()
                             total += max(x['valor_plan'], v_parciais)
                         else:
@@ -214,21 +222,22 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         .fillna('').astype(str).str.strip().str.upper()
                     )
 
-                    # Um item só é "filho de parcial" se sua descrição bater com um pai e seu valor_plan for 0 com parcial_real > 0
+                    # Apenas parciais diretas (não LCL de cartão) contam como filhas diretas do lançamento
                     is_filho_parcial = (
                         df_mes['descricao'].fillna('').astype(str).str.strip().str.upper().isin(desc_pais_parciais) &
                         (df_mes['valor_plan'] == 0) &
-                        (df_mes.get('parcial_real', pd.Series(0, index=df_mes.index)).fillna(0) > 0)
+                        (df_mes.get('parcial_real', pd.Series(0, index=df_mes.index)).fillna(0) > 0) &
+                        (s_cc_m != 'LCL')
                     )
 
                     # 1. Deve possuir algum valor (planejado ou realizado) OU ser cartão mestre
                     v_parcial_series = df_mes.get('parcial_real', pd.Series(0, index=df_mes.index)).fillna(0)
                     mask_tem_valor = (df_mes['valor_plan'] > 0) | (df_mes['valor_real'] > 0) | (v_parcial_series > 0) | eh_ccp_mask
 
-                    # 2. Esconde LCLs planejados da lista principal
-                    mask_nao_lcl = (s_cc_m != 'LCL') | ((s_cc_m == 'LCL') & ((df_mes['valor_real'] > 0) | (v_parcial_series > 0)))
+                    # 2. Esconde LCLs da lista principal (já vão para a fatura mestre VISA)
+                    mask_nao_lcl = (s_cc_m != 'LCL')
 
-                    # 3. Esconde exclusivamente as parciais filhas da lista principal
+                    # 3. Esconde exclusivamente as parciais filhas de débito/dinheiro da lista principal
                     df_exibir = df_mes[mask_tem_valor & mask_nao_lcl & (~is_filho_parcial)].sort_values('data')
                     
                     # Cabeçalho da tabela
@@ -238,9 +247,12 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                     for idx, row in df_exibir.iterrows():
                         desc_row_upper = str(row['descricao']).strip().upper()
                         
-                        v_ac = df_mes[
-                            df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_row_upper
-                        ].get('parcial_real', pd.Series(0)).sum()
+                        # Soma apenas parciais registradas sem cartão
+                        mask_parciais_diretas = (
+                            (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_row_upper) &
+                            (df_mes.get('cc_tipo', pd.Series('')).fillna('').astype(str).str.strip().str.upper() != 'LCL')
+                        )
+                        v_ac = df_mes[mask_parciais_diretas].get('parcial_real', pd.Series(0)).sum()
                         
                         v_plan = row['valor_plan']
                         v_re = v_ac if v_ac > 0 else row['valor_real']
@@ -268,11 +280,12 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                             elif row['tipo'] == 'Entrada':
                                 classe_cor = " linha-alerta-entrada"
                         
-                        # Identifica lançamentos de baixa parcial (filhos)
+                        # Identifica lançamentos de baixa parcial diretos (sem cartão LCL)
                         filhos_parciais = df_mes[
                             (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_row_upper) & 
                             (df_mes['valor_plan'] == 0) & 
-                            (df_mes.get('parcial_real', pd.Series(0)) > 0)
+                            (df_mes.get('parcial_real', pd.Series(0)) > 0) &
+                            (df_mes.get('cc_tipo', pd.Series('')).fillna('').astype(str).str.strip().str.upper() != 'LCL')
                         ]
 
                         tem_subitens = (eh_cartao_ccp and not df_lcls_cartao.empty) or (not filhos_parciais.empty)
@@ -287,7 +300,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                             h_hdr += '</div></summary>'
 
                             # Subitens exibidos quando aberto
-                            # 1. Compras no Cartão de Crédito
+                            # 1. Compras no Cartão de Crédito (LCLs)
                             if eh_cartao_ccp and not df_lcls_cartao.empty:
                                 for _, lcl in df_lcls_cartao.iterrows():
                                     desc_cc_val = str(lcl.get('cc_descricao', '')).strip()
@@ -301,7 +314,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                                     h_hdr += f'<div class="c-vl">{format_moeda(lcl["valor_plan"])}</div><div class="c-vl">{format_moeda(lcl["valor_real"])}</div><div class="c-st">PLAN</div><div class="c-act"></div>'
                                     h_hdr += f'</div>'
                             
-                            # 2. Parciais
+                            # 2. Parciais diretas (em dinheiro/débito)
                             if not filhos_parciais.empty:
                                 for _, f in filhos_parciais.iterrows():
                                     dt_f = pd.to_datetime(f['parcial_data']).strftime('%d/%m/%Y')
