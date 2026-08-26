@@ -332,7 +332,7 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                                         desc_subitem = f"Parcial: {dt_f}"
 
                                     h_hdr += f'<div class="tab-row{classe_cor}" style="font-style: italic; opacity: 0.85; background-color: #f1f5f9;">'
-                                    h_hdr += f'<div class="c-dt"></div><div class="c-ds" style="padding-left:15px;">> {desc_subitem}</div><div class="c-es">{f["tipo"][0]}</div>'
+                                    h_hdr += f'<div class="c-dt"></div><div class="c-ds" style="padding-left:15px;">{desc_subitem}</div><div class="c-es">{f["tipo"][0]}</div>'
                                     h_hdr += f'<div class="c-vl">---</div><div class="c-vl">{format_moeda(f["parcial_real"])}</div><div class="c-st">REAL</div><div class="c-act"></div>'
                                     h_hdr += f'</div>'
 
