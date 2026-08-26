@@ -86,8 +86,18 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         if x.get('permite_parcial', False):
                             desc_pai = str(x['descricao']).strip().upper()
                             mask_filhos = (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_pai) & (df_mes['valor_plan'] == 0)
-                            v_parciais = df_mes[mask_filhos].get('parcial_real', pd.Series(0)).sum()
-                            total += v_parciais
+                            df_filhos = df_mes[mask_filhos]
+                            
+                            v_parciais_total = df_filhos.get('parcial_real', pd.Series(0)).sum()
+                            v_plan_pai = x['valor_plan']
+
+                            # Se V.Plan > V.Real (soma parciais), soma V.Plan
+                            if v_plan_pai > v_parciais_total:
+                                total += v_plan_pai
+                            else:
+                                # Se V.Real >= V.Plan, soma apenas parciais sem cartão (cc_tipo == none/vazio)
+                                mask_sem_cartao = df_filhos.get('cc_tipo', pd.Series('')).fillna('').astype(str).str.strip().str.upper().isin(['', 'NONE'])
+                                total += df_filhos[mask_sem_cartao].get('parcial_real', pd.Series(0)).sum()
                         else:
                             if x.get('status') == 'Realizado':
                                 if str(x.get('cc_tipo', '')).strip().upper() in ['$CCP', 'CCP']:
@@ -104,8 +114,18 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                         if x.get('permite_parcial', False):
                             desc_pai = str(x['descricao']).strip().upper()
                             mask_filhos = (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_pai) & (df_mes['valor_plan'] == 0)
-                            v_parciais = df_mes[mask_filhos].get('parcial_real', pd.Series(0)).sum()
-                            total += max(x['valor_plan'], v_parciais)
+                            df_filhos = df_mes[mask_filhos]
+                            
+                            v_parciais_total = df_filhos.get('parcial_real', pd.Series(0)).sum()
+                            v_plan_pai = x['valor_plan']
+
+                            # Se V.Plan > V.Real (soma parciais), soma V.Plan
+                            if v_plan_pai > v_parciais_total:
+                                total += v_plan_pai
+                            else:
+                                # Se V.Real >= V.Plan, soma apenas parciais sem cartão (cc_tipo == none/vazio)
+                                mask_sem_cartao = df_filhos.get('cc_tipo', pd.Series('')).fillna('').astype(str).str.strip().str.upper().isin(['', 'NONE'])
+                                total += df_filhos[mask_sem_cartao].get('parcial_real', pd.Series(0)).sum()
                         else:
                             if str(x.get('cc_tipo', '')).strip().upper() in ['$CCP', 'CCP']:
                                 desc_cc = str(x['descricao']).strip().upper()
@@ -304,9 +324,15 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                             # 2. Parciais
                             if not filhos_parciais.empty:
                                 for _, f in filhos_parciais.iterrows():
-                                    dt_f = pd.to_datetime(f['parcial_data']).strftime('%d/%m/%Y')
+                                    cc_desc_f = str(f.get('cc_descricao', '')).strip()
+                                    if cc_desc_f:
+                                        desc_subitem = cc_desc_f
+                                    else:
+                                        dt_f = pd.to_datetime(f['parcial_data']).strftime('%d/%m/%Y')
+                                        desc_subitem = f"Parcial: {dt_f}"
+
                                     h_hdr += f'<div class="tab-row{classe_cor}" style="font-style: italic; opacity: 0.85; background-color: #f1f5f9;">'
-                                    h_hdr += f'<div class="c-dt"></div><div class="c-ds" style="padding-left:15px;">> Parcial: {dt_f}</div><div class="c-es">{f["tipo"][0]}</div>'
+                                    h_hdr += f'<div class="c-dt"></div><div class="c-ds" style="padding-left:15px;">> {desc_subitem}</div><div class="c-es">{f["tipo"][0]}</div>'
                                     h_hdr += f'<div class="c-vl">---</div><div class="c-vl">{format_moeda(f["parcial_real"])}</div><div class="c-st">REAL</div><div class="c-act"></div>'
                                     h_hdr += f'</div>'
 
