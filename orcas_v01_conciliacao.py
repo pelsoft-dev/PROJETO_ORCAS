@@ -69,7 +69,6 @@ def buscar_dados_cartao(supabase, df, nome_cartao):
         venc = None
         if dt_venc_str:
           try:
-            # Extrai o dia da data de vencimento (ex: '2026-08-28' -> 28)
             venc = int(str(dt_venc_str).split("-")[2])
           except Exception:
             pass
@@ -79,7 +78,6 @@ def buscar_dados_cartao(supabase, df, nome_cartao):
   except Exception:
     pass
 
-  # RETORNO PADRÃO DE SEGURANÇA (AO INVÉS DE 3, 10)
   return 25, 28
 
 
@@ -91,7 +89,6 @@ def calcular_vencimento_fatura(data_compra, dia_corte=25, dia_vencimento=28):
   ano = data_compra.year
   mes = data_compra.month
 
-  # A fatura só vira para o mês seguinte se a compra for feita APÓS o dia de corte.
   if data_compra.day > corte:
     mes += 1
     if mes > 12:
@@ -278,7 +275,6 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
     dt_1_dia = dt_compra.replace(day=1).strftime("%Y-%m-%d")
     dt_formatada = dt_compra.strftime("%d/%m/%Y")
 
-    # Monta o texto formatado exato (> dd/mm/aaaa - CARTÃO nX ou > dd/mm/aaaa)
     if is_cartao_valido:
       texto_cc_descricao = f"> {dt_formatada} - {cartao.upper()} {parcelas}X"
       cc_tipo_parcial = "LCL"
@@ -290,7 +286,7 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
         "projeto_id": projeto_id,
         "usuario_id": str(usuario_id),
         "descricao": descricao,
-        "cc_descricao": texto_cc_descricao,  # <-- Salvo diretamente em cc_descricao
+        "cc_descricao": texto_cc_descricao,
         "data": dt_1_dia,
         "data_vencimento": dt_1_dia,
         "tipo": tipo,
@@ -355,7 +351,6 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
       }
       supabase.table("lancamentos").insert(payload_mestre).execute()
 
-    # GERADOR DAS N PARCELAS DE CARTÃO (LCLs)
     for i in range(parcelas):
       v_parc = base_val + (residuo if i == (parcelas - 1) else 0.0)
       dt_venc_p = somar_meses_data(dt_1_venc, i, dia_vencimento=venc)
@@ -384,16 +379,16 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
 
   # 3. CONVENCIONAL (SEM CARTÃO DE CRÉDITO E SEM SER PARCIAL)
   if id_existente and intencao in ["REALIZAR", "ALTERAR"]:
-    supabase.table("lancamentos").update({
+    payload_update = {
         "valor_real": valor if intencao == "REALIZAR" else 0.0,
-        "valor_plan": (
-            valor
-            if intencao == "ALTERAR"
-            else row_valor_plan_se_necessario(valor, intencao)
-        ),
         "status": "Realizado" if intencao == "REALIZAR" else "Planejado",
         "data_vencimento": dt_venc,
-    }).eq("id", id_existente).execute()
+    }
+    # Mantém o valor_plan original ao REALIZAR, e só altera o valor_plan se intencao == "ALTERAR"
+    if intencao == "ALTERAR":
+      payload_update["valor_plan"] = valor
+
+    supabase.table("lancamentos").update(payload_update).eq("id", id_existente).execute()
     return f"✅ Lançamento **{descricao}** atualizado!"
   else:
     status = "Realizado" if intencao == "REALIZAR" else "Planejado"
@@ -410,10 +405,6 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
         "permite_parcial": permite_parcial,
     }).execute()
     return f"✅ Lançamento **{descricao}** salvo com sucesso!"
-
-
-def row_valor_plan_se_necessario(valor, intencao):
-  return valor if intencao == "ALTERAR" else 0.0
 
 
 # ==============================================================================
@@ -519,7 +510,6 @@ def exibir_conciliacao(
 
   lista_cartoes_ccp = buscar_cartoes_lcp(df)
 
-  # --- ÁREA: LANÇAR SEM PLANEJAMENTO ---
   if st.session_state.abrir_sem_plan:
     cols_sp = st.columns(
         [1.8, 0.8, 1.0, 1.3, 0.6, 0.5], vertical_alignment="center"
@@ -605,7 +595,6 @@ def exibir_conciliacao(
         (df_c["parcial_real"] == 0) & ((~is_lcl) | is_mestre_lcl)
     ].copy()
 
-    # REGRAS DO FILTRO DE CONCILIAÇÃO
     if st.session_state.listar_todos_mes:
       proximo_mes = (ini_mes_c + timedelta(days=32)).replace(day=1)
       fim_mes_c = proximo_mes - timedelta(days=1)
@@ -832,6 +821,7 @@ def exibir_conciliacao(
               }
               salvar_lancamento_oficial(supabase, ID_USUARIO_LOGADO, dados_c)
             else:
+              # CORREÇÃO: Preserva o valor_plan e atualiza apenas o valor_real e o status
               supabase.table("lancamentos").update({
                   "valor_real": float(v_para_gravar),
                   "status": "Realizado",
