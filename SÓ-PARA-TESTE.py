@@ -5,6 +5,37 @@ from orcas_v01_security import supabase
 
 BATCH_SIZE = 100
 
+# Ordem exata das colunas da planilha (conforme anexo01)
+ORDEM_COLUNAS_EXCEL = [
+    "descricao",            # Coluna A (1)
+    "valor",                # Coluna B (2)
+    "tipo",                 # Coluna C (3)
+    "data_vencimento",      # Coluna D (4)
+    "realizado",            # Coluna E (5)
+    "valor_realizado",      # Coluna F (6)
+    "categoria",            # Coluna G (7)
+    "recorrente",           # Coluna H (8)
+    "valor_plan",           # Coluna I (9)
+    "valor_real",           # Coluna J (10)
+    "status",               # Coluna K (11)
+    "data",                 # Coluna L (12)
+    "permite_parcial",      # Coluna M (13)
+    "usar_media",           # Coluna N (14)
+    "complemento_tipo",     # Coluna O (15)
+    "complemento_texto",    # Coluna P (16)
+    "correcao_freq",        # Coluna Q (17)
+    "correcao_valor",       # Coluna R (18)
+    "id_pai",               # Coluna S (19)
+    "parcial_real",         # Coluna T (20)
+    "parcial_data",         # Coluna U (21)
+    "regra_parcial",        # Coluna V (22)
+    "cc_tipo",              # Coluna W (23)
+    "cc_dia_corte",         # Coluna X (24)
+    "cc_qtd_parcelas",      # Coluna Y (25)
+    "cc_descricao",         # Coluna Z (26)
+    "cc_data_compra",       # Coluna AA (27)
+]
+
 COLUNAS_VALIDAS_BANCO = {
     "usuario_id",
     "projeto_id",
@@ -117,13 +148,31 @@ def render_upload(usuario_id=None, projeto_id=None):
     ):
       with st.spinner("Lendo e tratando dados da planilha..."):
         try:
-          df = pd.read_excel(uploaded_file, engine="openpyxl")
+          # Leitura inicial das duas primeiras células da linha 1 para verificação
+          df_check = pd.read_excel(uploaded_file, nrows=1, header=None, engine="openpyxl")
+          
+          candidato_a1 = str(df_check.iloc[0, 0]).strip().lower() if df_check.shape[1] > 0 else ""
+          candidato_b1 = str(df_check.iloc[0, 1]).strip().lower() if df_check.shape[1] > 1 else ""
+
+          # Valida se possui a linha de cabeçalho exata (A1 == "descricao" e B1 == "valor")
+          tem_cabecalho = (candidato_a1 == "descricao") and (candidato_b1 == "valor")
+
+          if tem_cabecalho:
+            df = pd.read_excel(uploaded_file, engine="openpyxl")
+          else:
+            # Sem cabeçalho: lê sem header e atribui as colunas conforme o anexo01
+            df = pd.read_excel(uploaded_file, header=None, engine="openpyxl")
+            novas_colunas = {
+                i: ORDEM_COLUNAS_EXCEL[i]
+                for i in range(min(len(df.columns), len(ORDEM_COLUNAS_EXCEL)))
+            }
+            df.rename(columns=novas_colunas, inplace=True)
 
           if df.empty:
             st.warning("A planilha enviada está vazia.")
             return
 
-          # AMBAS AS OPÇÕES LIMPAM TODOS OS DADOS ANTERIORES DO BANCO DE DADOS
+          # Limpa os lançamentos anteriores do projeto
           st.toast("Limpando lançamentos anteriores do projeto...", icon="🗑️")
           supabase.table("lancamentos").delete().eq(
               "usuario_id", usr_id
@@ -138,7 +187,7 @@ def render_upload(usuario_id=None, projeto_id=None):
 
           records = []
           for _, row in df.iterrows():
-            # VERIFICAÇÃO DE PARADA: Ao encontrar a primeira descrição nula/vazia, encerra a leitura
+            # VERIFICAÇÃO DE PARADA: Ao encontrar a primeira célula A (descricao) nula/vazia, encerra o programa
             desc_val = sanitize_val(row.get("descricao"))
             if desc_val is None or str(desc_val).strip() == "":
               break
@@ -156,6 +205,14 @@ def render_upload(usuario_id=None, projeto_id=None):
 
             item = {}
             item["descricao"] = str(desc_val).strip()
+
+            # Trata 'complemento' unindo os campos de complemento se existirem
+            comp_texto = sanitize_val(row.get("complemento_texto"))
+            comp_orig = sanitize_val(row.get("complemento"))
+            if comp_texto is not None:
+              item["complemento"] = str(comp_texto).strip()
+            elif comp_orig is not None:
+              item["complemento"] = str(comp_orig).strip()
 
             # Leitura de Valores
             val_orig = parse_float_val(row.get("valor"))
@@ -182,12 +239,13 @@ def render_upload(usuario_id=None, projeto_id=None):
             item["valor_plan"] = final_plan
             item["valor_real"] = final_real
 
-            # Copia colunas válidas da planilha
+            # Copia colunas válidas da planilha para o objeto final do banco
             for col in df.columns:
               if col in COLUNAS_VALIDAS_BANCO and col not in [
                   "valor_plan",
                   "valor_real",
                   "descricao",
+                  "complemento",
               ]:
                 val = sanitize_val(row[col])
 
@@ -228,7 +286,7 @@ def render_upload(usuario_id=None, projeto_id=None):
             )
             return
 
-          # Envio em lotes
+          # Envio em lotes para o Supabase
           progress_bar = st.progress(0)
           uploaded_count = 0
 
