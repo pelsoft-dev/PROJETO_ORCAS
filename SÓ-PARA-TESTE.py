@@ -11,10 +11,7 @@ from orcas_v01_ajuda_conciliacao import renderizar_ajuda_conciliacao
 
 
 def buscar_dados_cartao(supabase, df, nome_cartao):
-  """Busca o dia de corte e o dia de vencimento do cartão ($CCP).
-
-  O dia de vencimento é extraído diretamente da coluna 'data_vencimento'.
-  """
+  """Busca o dia de corte e o dia de vencimento do cartão ($CCP)."""
   if not nome_cartao or str(nome_cartao).strip().upper() == "NENHUM":
     return 25, 28
 
@@ -141,6 +138,7 @@ def atualizar_valor_plan_cartao(
     dt_vencimento,
     ID_USUARIO_LOGADO,
     cc_dia_corte=None,
+    cc_dia_venc=None,
 ):
   """Recalcula o valor_plan do Cartão Pai ($CCP) consultando diretamente o Supabase."""
   nome_busca = str(nome_cartao).strip().upper()
@@ -203,13 +201,26 @@ def atualizar_valor_plan_cartao(
       payload_upd = {"valor_plan": round(soma_lcls, 2)}
       if cc_dia_corte is not None:
         payload_upd["cc_dia_corte"] = int(cc_dia_corte)
+
+      # Atualiza também o dia da data_vencimento do mestre se um novo dia de vencimento for repassado
+      if cc_dia_venc is not None:
+        dia_mestre = min(
+            int(cc_dia_venc), calendar.monthrange(ano_venc, mes_venc)[1]
+        )
+        payload_upd["data_vencimento"] = (
+            f"{ano_venc:04d}-{mes_venc:02d}-{dia_mestre:02d}"
+        )
+        payload_upd["data"] = payload_upd["data_vencimento"]
+
       supabase.table("lancamentos").update(payload_upd).eq(
           "id", id_ccp
       ).execute()
     else:
       corte_def, venc_def = buscar_dados_cartao(supabase, df, nome_cartao)
       corte = int(cc_dia_corte) if cc_dia_corte is not None else corte_def
-      dia_final = min(venc_def, calendar.monthrange(ano_venc, mes_venc)[1])
+      venc = int(cc_dia_venc) if cc_dia_venc is not None else venc_def
+
+      dia_final = min(venc, calendar.monthrange(ano_venc, mes_venc)[1])
       dt_exata_ccp = datetime(ano_venc, mes_venc, dia_final).date()
 
       supabase.table("lancamentos").insert({
@@ -403,6 +414,7 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
           dt_venc_p,
           usuario_id,
           cc_dia_corte=corte,
+          cc_dia_venc=venc,
       )
 
     return f"✅ Compra **{f_desc_mestre}** registrada no cartão **{cartao}** ({parcelas}x de R$ {base_val:.2f})!"
@@ -571,21 +583,21 @@ def exibir_conciliacao(
     sp_dia_corte = 25
     sp_dia_venc = 28
     if sp_cartao_sel == "+ Outro Cartão...":
-      c_nc1, c_nc2, c_nc3 = st.columns([2, 1, 1])
+      c_nc1, c_nc2, c_nc3 = st.columns([1, 1, 1])
       sp_cartao_manual = c_nc1.text_input(
-          "Digite o nome do Cartão",
+          "Nome do Cartão",
           key=f"sp_cartao_manual_input_{reset_key}",
           placeholder="Ex: ITAÚ MASTER",
       )
       sp_dia_corte = c_nc2.number_input(
-          "Dia inicial (apenas dia) para a próxima fatura",
+          "Corte (Início Fatura)",
           min_value=1,
           max_value=31,
           value=25,
           key=f"sp_corte_{reset_key}",
       )
       sp_dia_venc = c_nc3.number_input(
-          "Dia (apenas dia) de Vencimento",
+          "Dia Vencimento",
           min_value=1,
           max_value=31,
           value=28,
@@ -694,7 +706,6 @@ def exibir_conciliacao(
     st.divider()
 
     for _, row in df_final_concilia.iterrows():
-      # ITEM (2) CORREÇÃO: Calcula o acumulado filtrando apenas pelo MÊS E ANO do próprio lançamento exibido
       row_dt = row["dt_obj"]
       ini_mes_item = row_dt.replace(day=1)
       fim_mes_item = (ini_mes_item + timedelta(days=32)).replace(
@@ -780,21 +791,21 @@ def exibir_conciliacao(
         dia_corte_p = 25
         dia_venc_p = 28
         if cc_sel == "+ Outro Cartão...":
-          c_nc1, c_nc2, c_nc3 = st.columns([2, 1, 1])
+          c_nc1, c_nc2, c_nc3 = st.columns([1, 1, 1])
           cc_outro_nome = c_nc1.text_input(
-              "Digite o nome do Cartão",
+              "Nome do Cartão",
               key=f"cc_outro_p_{row['id']}_{reset_key}",
               placeholder="Ex: ITAÚ MASTER",
           )
           dia_corte_p = c_nc2.number_input(
-              "Dia inicial (apenas dia) para a próxima fatura",
+              "Corte (Início Fatura)",
               min_value=1,
               max_value=31,
               value=25,
               key=f"cc_corte_p_{row['id']}_{reset_key}",
           )
           dia_venc_p = c_nc3.number_input(
-              "Dia (apenas dia) de Vencimento",
+              "Dia Vencimento",
               min_value=1,
               max_value=31,
               value=28,
@@ -870,21 +881,21 @@ def exibir_conciliacao(
           dia_corte_n = 25
           dia_venc_n = 28
           if cc_norm_sel == "+ Outro Cartão...":
-            c_nc1, c_nc2, c_nc3 = st.columns([2, 1, 1])
+            c_nc1, c_nc2, c_nc3 = st.columns([1, 1, 1])
             cc_norm_outro_nome = c_nc1.text_input(
-                "Digite o nome do Cartão",
+                "Nome do Cartão",
                 key=f"cc_outro_n_{row['id']}_{reset_key}",
                 placeholder="Ex: ITAÚ MASTER",
             )
             dia_corte_n = c_nc2.number_input(
-                "Dia inicial (apenas dia) para a próxima fatura",
+                "Corte (Início Fatura)",
                 min_value=1,
                 max_value=31,
                 value=25,
                 key=f"cc_corte_n_{row['id']}_{reset_key}",
             )
             dia_venc_n = c_nc3.number_input(
-                "Dia (apenas dia) de Vencimento",
+                "Dia Vencimento",
                 min_value=1,
                 max_value=31,
                 value=28,
