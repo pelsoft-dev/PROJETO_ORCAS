@@ -89,7 +89,8 @@ def calcular_vencimento_fatura(data_compra, dia_corte=25, dia_vencimento=28):
   ano = data_compra.year
   mes = data_compra.month
 
-  if data_compra.day > corte:
+  # Regra: Se o dia da compra for maior ou igual ao dia de corte, joga para a fatura do mês seguinte
+  if data_compra.day >= corte:
     mes += 1
     if mes > 12:
       mes = 1
@@ -134,7 +135,12 @@ def buscar_cartoes_lcp(df):
 
 
 def atualizar_valor_plan_cartao(
-    supabase, df, nome_cartao, dt_vencimento, ID_USUARIO_LOGADO
+    supabase,
+    df,
+    nome_cartao,
+    dt_vencimento,
+    ID_USUARIO_LOGADO,
+    cc_dia_corte=None,
 ):
   """Recalcula o valor_plan do Cartão Pai ($CCP) consultando diretamente o Supabase."""
   nome_busca = str(nome_cartao).strip().upper()
@@ -194,12 +200,16 @@ def atualizar_valor_plan_cartao(
   try:
     if not df_ccp.empty:
       id_ccp = df_ccp.iloc[0]["id"]
-      supabase.table("lancamentos").update(
-          {"valor_plan": round(soma_lcls, 2)}
-      ).eq("id", id_ccp).execute()
+      payload_upd = {"valor_plan": round(soma_lcls, 2)}
+      if cc_dia_corte is not None:
+        payload_upd["cc_dia_corte"] = int(cc_dia_corte)
+      supabase.table("lancamentos").update(payload_upd).eq(
+          "id", id_ccp
+      ).execute()
     else:
-      corte, venc = buscar_dados_cartao(supabase, df, nome_cartao)
-      dia_final = min(venc, calendar.monthrange(ano_venc, mes_venc)[1])
+      corte_def, venc_def = buscar_dados_cartao(supabase, df, nome_cartao)
+      corte = int(cc_dia_corte) if cc_dia_corte is not None else corte_def
+      dia_final = min(venc_def, calendar.monthrange(ano_venc, mes_venc)[1])
       dt_exata_ccp = datetime(ano_venc, mes_venc, dia_final).date()
 
       supabase.table("lancamentos").insert({
@@ -234,6 +244,8 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
   intencao = dados.get("intencao", "REALIZAR")
   id_existente = dados.get("id_existente")
   permite_parcial = bool(dados.get("permite_parcial"))
+  cc_dia_corte_input = dados.get("cc_dia_corte")
+  cc_dia_venc_input = dados.get("cc_dia_vencimento")
 
   try:
     dt_compra = datetime.strptime(dt_venc, "%Y-%m-%d").date()
@@ -307,7 +319,16 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
 
   # 2. CARTÃO DE CRÉDITO (Gera as parcelas LCL e atualiza a fatura mestre do cartão)
   if is_cartao_valido:
-    corte, venc = buscar_dados_cartao(supabase, None, cartao)
+    corte_db, venc_db = buscar_dados_cartao(supabase, None, cartao)
+    corte = (
+        int(cc_dia_corte_input)
+        if cc_dia_corte_input is not None
+        else corte_db
+    )
+    venc = (
+        int(cc_dia_venc_input) if cc_dia_venc_input is not None else venc_db
+    )
+
     dt_1_venc = calcular_vencimento_fatura(
         dt_compra, dia_corte=corte, dia_vencimento=venc
     )
@@ -316,9 +337,13 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
     residuo = round(valor - (base_val * parcelas), 2)
 
     status_mestre = (
-        "Realizado" if (not id_existente or intencao == "REALIZAR") else "Planejado"
+        "Realizado"
+        if (not id_existente or intencao == "REALIZAR")
+        else "Planejado"
     )
-    v_real_mestre = valor if (not id_existente or intencao == "REALIZAR") else 0.0
+    v_real_mestre = (
+        valor if (not id_existente or intencao == "REALIZAR") else 0.0
+    )
 
     f_desc_mestre = (
         f"{descricao} - {cartao} {parcelas}X"
@@ -372,7 +397,12 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
       }).execute()
 
       atualizar_valor_plan_cartao(
-          supabase, None, cartao, dt_venc_p, usuario_id
+          supabase,
+          None,
+          cartao,
+          dt_venc_p,
+          usuario_id,
+          cc_dia_corte=corte,
       )
 
     return f"✅ Compra **{f_desc_mestre}** registrada no cartão **{cartao}** ({parcelas}x de R$ {base_val:.2f})!"
@@ -384,11 +414,12 @@ def salvar_lancamento_oficial(supabase, usuario_id, dados):
         "status": "Realizado" if intencao == "REALIZAR" else "Planejado",
         "data_vencimento": dt_venc,
     }
-    # Mantém o valor_plan original ao REALIZAR, e só altera o valor_plan se intencao == "ALTERAR"
     if intencao == "ALTERAR":
       payload_update["valor_plan"] = valor
 
-    supabase.table("lancamentos").update(payload_update).eq("id", id_existente).execute()
+    supabase.table("lancamentos").update(payload_update).eq(
+        "id", id_existente
+    ).execute()
     return f"✅ Lançamento **{descricao}** atualizado!"
   else:
     status = "Realizado" if intencao == "REALIZAR" else "Planejado"
@@ -537,11 +568,28 @@ def exibir_conciliacao(
     )
 
     sp_cartao_manual = ""
+    sp_dia_corte = 25
+    sp_dia_venc = 28
     if sp_cartao_sel == "+ Outro Cartão...":
-      sp_cartao_manual = st.text_input(
-          "Nome do Cartão",
+      c_nc1, c_nc2, c_nc3 = st.columns([2, 1, 1])
+      sp_cartao_manual = c_nc1.text_input(
+          "Digite o nome do Cartão",
           key=f"sp_cartao_manual_input_{reset_key}",
           placeholder="Ex: ITAÚ MASTER",
+      )
+      sp_dia_corte = c_nc2.number_input(
+          "Dia inicial (apenas dia) para a próxima fatura",
+          min_value=1,
+          max_value=31,
+          value=25,
+          key=f"sp_corte_{reset_key}",
+      )
+      sp_dia_venc = c_nc3.number_input(
+          "Dia (apenas dia) de Vencimento",
+          min_value=1,
+          max_value=31,
+          value=28,
+          key=f"sp_venc_{reset_key}",
       )
 
     with cols_sp[5]:
@@ -571,6 +619,12 @@ def exibir_conciliacao(
             "parcelas": int(sp_parc),
             "intencao": "REALIZAR",
             "permite_parcial": False,
+            "cc_dia_corte": (
+                sp_dia_corte if sp_cartao_sel == "+ Outro Cartão..." else None
+            ),
+            "cc_dia_vencimento": (
+                sp_dia_venc if sp_cartao_sel == "+ Outro Cartão..." else None
+            ),
         }
 
         salvar_lancamento_oficial(supabase, ID_USUARIO_LOGADO, dados_sp)
@@ -589,7 +643,9 @@ def exibir_conciliacao(
 
     cc_tipo_str = df_c["cc_tipo"].fillna("").astype(str).str.strip().str.upper()
     is_lcl = cc_tipo_str.str.contains(r"LCL|\$CCL", regex=True)
-    is_mestre_lcl = is_lcl & (df_c["valor_real"] > 0) & (df_c["valor_plan"] == 0)
+    is_mestre_lcl = (
+        is_lcl & (df_c["valor_real"] > 0) & (df_c["valor_plan"] == 0)
+    )
 
     df_base_tela = df_c[
         (df_c["parcial_real"] == 0) & ((~is_lcl) | is_mestre_lcl)
@@ -638,11 +694,19 @@ def exibir_conciliacao(
     st.divider()
 
     for _, row in df_final_concilia.iterrows():
-      v_acumulado_desc = (
-          df[df["descricao"] == row["descricao"]]["parcial_real"]
-          .fillna(0)
-          .sum()
-      )
+      # ITEM (2) CORREÇÃO: Calcula o acumulado filtrando apenas pelo MÊS E ANO do próprio lançamento exibido
+      row_dt = row["dt_obj"]
+      ini_mes_item = row_dt.replace(day=1)
+      fim_mes_item = (ini_mes_item + timedelta(days=32)).replace(
+          day=1
+      ) - timedelta(days=1)
+
+      df_filtrado_desc = df[
+          (df["descricao"] == row["descricao"])
+          & (pd.to_datetime(df["data"]).dt.date >= ini_mes_item)
+          & (pd.to_datetime(df["data"]).dt.date <= fim_mes_item)
+      ]
+      v_acumulado_desc = df_filtrado_desc["parcial_real"].fillna(0).sum()
 
       v_real_comparacao = (
           v_acumulado_desc if row["permite_parcial"] else row["valor_real"]
@@ -713,11 +777,28 @@ def exibir_conciliacao(
         )
 
         cc_outro_nome = ""
+        dia_corte_p = 25
+        dia_venc_p = 28
         if cc_sel == "+ Outro Cartão...":
-          cc_outro_nome = st.text_input(
-              "Digite o Cartão",
+          c_nc1, c_nc2, c_nc3 = st.columns([2, 1, 1])
+          cc_outro_nome = c_nc1.text_input(
+              "Digite o nome do Cartão",
               key=f"cc_outro_p_{row['id']}_{reset_key}",
               placeholder="Ex: ITAÚ MASTER",
+          )
+          dia_corte_p = c_nc2.number_input(
+              "Dia inicial (apenas dia) para a próxima fatura",
+              min_value=1,
+              max_value=31,
+              value=25,
+              key=f"cc_corte_p_{row['id']}_{reset_key}",
+          )
+          dia_venc_p = c_nc3.number_input(
+              "Dia (apenas dia) de Vencimento",
+              min_value=1,
+              max_value=31,
+              value=28,
+              key=f"cc_venc_p_{row['id']}_{reset_key}",
           )
 
         if c8.button("Ok", key=f"btn_p_{row['id']}", use_container_width=True):
@@ -739,6 +820,12 @@ def exibir_conciliacao(
                 "parcelas": int(qtd_parc_in),
                 "intencao": "PARCIAL",
                 "permite_parcial": False,
+                "cc_dia_corte": (
+                    dia_corte_p if cc_sel == "+ Outro Cartão..." else None
+                ),
+                "cc_dia_vencimento": (
+                    dia_venc_p if cc_sel == "+ Outro Cartão..." else None
+                ),
             }
 
             salvar_lancamento_oficial(supabase, ID_USUARIO_LOGADO, dados_p)
@@ -780,11 +867,28 @@ def exibir_conciliacao(
           )
 
           cc_norm_outro_nome = ""
+          dia_corte_n = 25
+          dia_venc_n = 28
           if cc_norm_sel == "+ Outro Cartão...":
-            cc_norm_outro_nome = st.text_input(
-                "Digite o Cartão",
+            c_nc1, c_nc2, c_nc3 = st.columns([2, 1, 1])
+            cc_norm_outro_nome = c_nc1.text_input(
+                "Digite o nome do Cartão",
                 key=f"cc_outro_n_{row['id']}_{reset_key}",
                 placeholder="Ex: ITAÚ MASTER",
+            )
+            dia_corte_n = c_nc2.number_input(
+                "Dia inicial (apenas dia) para a próxima fatura",
+                min_value=1,
+                max_value=31,
+                value=25,
+                key=f"cc_corte_n_{row['id']}_{reset_key}",
+            )
+            dia_venc_n = c_nc3.number_input(
+                "Dia (apenas dia) de Vencimento",
+                min_value=1,
+                max_value=31,
+                value=28,
+                key=f"cc_venc_n_{row['id']}_{reset_key}",
             )
 
           if c8.button(
@@ -818,10 +922,19 @@ def exibir_conciliacao(
                   "intencao": "REALIZAR",
                   "id_existente": row["id"],
                   "permite_parcial": False,
+                  "cc_dia_corte": (
+                      dia_corte_n
+                      if cc_norm_sel == "+ Outro Cartão..."
+                      else None
+                  ),
+                  "cc_dia_vencimento": (
+                      dia_venc_n
+                      if cc_norm_sel == "+ Outro Cartão..."
+                      else None
+                  ),
               }
               salvar_lancamento_oficial(supabase, ID_USUARIO_LOGADO, dados_c)
             else:
-              # CORREÇÃO: Preserva o valor_plan e atualiza apenas o valor_real e o status
               supabase.table("lancamentos").update({
                   "valor_real": float(v_para_gravar),
                   "status": "Realizado",
