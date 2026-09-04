@@ -8,3 +8,4 @@ streamlit-js-eval
 google-genai
 groq
 openpyxl
+reportlab
