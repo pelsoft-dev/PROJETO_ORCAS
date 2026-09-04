@@ -4,6 +4,7 @@ from orcas_v01_dbupdate import renderizar_dbupdate
 from orcas_v01_download import render_download
 from orcas_v01_upload import render_upload
 from orcas_v01_ajuda_admin import renderizar_ajuda_admin
+from orcas_v01_relatorio_a1 import exibir_tela_relatorio_a1
 
 def exibir_admin(df, supabase, ID_USUARIO_LOGADO, ir_para_o_topo):
     """
@@ -52,7 +53,8 @@ def exibir_admin(df, supabase, ID_USUARIO_LOGADO, ir_para_o_topo):
         options=[
             "✏️ Edição Direta (DB Update)",
             "📥 Download (Exportar)",
-            "📤 Upload (Importar)"
+            "📤 Upload (Importar)",
+            "📊 Gerar relatório A1 - Lançamentos em 12 meses"
         ],
         index=None,
         key="admin_modulo_radio"
@@ -69,6 +71,9 @@ def exibir_admin(df, supabase, ID_USUARIO_LOGADO, ir_para_o_topo):
 
     elif opcao_admin == "📤 Upload (Importar)":
         render_upload(usuario_id=ID_USUARIO_LOGADO, projeto_id=projeto_ativo)
+
+    elif opcao_admin == "📊 Gerar relatório A1 - Lançamentos em 12 meses":
+        exibir_tela_relatorio_a1(supabase, df)
 
     else:
         st.info("💡 Por favor, escolha uma das opções acima para continuar.")
