@@ -7,14 +7,15 @@ import streamlit as st
 
 
 def limpar_descricao_parcelada(desc):
-  """Remove sufixos numéricos de parcelas (ex: '03 de 10', '1/12', '02 de 05')
+  """Remove sufixos numéricos de parcelas (ex: '03 de 10', '1/12', '02 de 05', '03 de 18')
 
-  para permitir a consolidação das linhas no relatório.
+  para permitir a consolidação de todas as parcelas em uma única linha.
   """
   if not isinstance(desc, str):
     return ""
+  # Trata "03 de 18", "3 de 18", "03/18", "03DE18", etc.
   desc_limpa = re.sub(
-      r"\s+\d{1,2}\s*(?:de|\/)\s*\d{1,2}\s*$",
+      r"\s*\d{1,2}\s*(?:de|\/)\s*\d{1,2}\s*$",
       "",
       desc,
       flags=re.IGNORECASE,
@@ -85,12 +86,25 @@ def gerar_pdf_monorca_a1(df, projeto_nome, mes_inicial, ano_inicial):
   ]
 
   # --------------------------------------------------------------------------
-  # 2. CABEÇALHO DINÂMICO (AJUSTES DE COLUNA E NOME)
+  # 2. CABEÇALHO DINÂMICO E FORMATADO
   # --------------------------------------------------------------------------
-  # Linha 1: Anos deslocados 1 coluna para a direita
+  styles = getSampleStyleSheet()
+
+  # Estilo para quebra de linha dentro da célula do tipo
+  header_tipo_style = ParagraphStyle(
+      "HeaderTipo",
+      parent=styles["Normal"],
+      fontName="Helvetica-Bold",
+      fontSize=6,
+      leading=7,
+      alignment=1,  # Centralizado
+      textColor=colors.black,
+  )
+
+  p_cab_tipo = Paragraph("E=Ent<br/>S=Sai<br/>X=Nulo", header_tipo_style)
+
   linha_cab_1 = ["", "", ""] + [str(d.year) for d in meses_colunas]
 
-  # Linha 2: REAL ou PLAN
   linha_cab_2 = ["", "", ""]
   for d in meses_colunas:
     if d < m_atual_first:
@@ -98,29 +112,29 @@ def gerar_pdf_monorca_a1(df, projeto_nome, mes_inicial, ano_inicial):
     else:
       linha_cab_2.append("PLAN")
 
-  # Linha 3: Legenda 'E=Ent S=Sai X=Nulo'
-  linha_cab_3 = ["DIA", "LANÇAMENTO", "E=Ent S=Sai X=Nulo"] + [
+  linha_cab_3 = ["DIA", "LANÇAMENTO", p_cab_tipo] + [
       nomes_meses_pt[d.month - 1] for d in meses_colunas
   ]
 
   # --------------------------------------------------------------------------
-  # 3. TRATAMENTO E CONSOLIDAÇÃO DOS DADOS
+  # 3. TRATAMENTO E PREPARAÇÃO DOS DADOS
   # --------------------------------------------------------------------------
   df_work = df.copy() if df is not None and not df.empty else pd.DataFrame()
 
   if not df_work.empty:
+    # Garantir que a ordenação e o agrupamento utilizem a data de vencimento PLANEJADA
     df_work["dt_venc"] = pd.to_datetime(
         df_work["data_vencimento"], errors="coerce"
     )
     df_work["dia"] = df_work["dt_venc"].dt.day.fillna(0).astype(int)
     df_work["ano_mes"] = df_work["dt_venc"].dt.strftime("%Y-%m")
 
-    # Regra 5: Limpar descrição de parcelas para consolidação
+    # Limpar descrição para unir parcelas na mesma linha
     df_work["desc_base"] = df_work["descricao"].apply(
         limpar_descricao_parcelada
     )
 
-    # Regra 4: Definição de Nulo (X)
+    # Identificar Tipo (E, S ou X)
     def verificar_tipo(row):
       parcial_real = float(row.get("parcial_real", 0) or 0)
       cc_tipo = str(row.get("cc_tipo", "") or "").upper()
@@ -132,7 +146,9 @@ def gerar_pdf_monorca_a1(df, projeto_nome, mes_inicial, ano_inicial):
 
     df_work["tipo_calculado"] = df_work.apply(verificar_tipo, axis=1)
 
-  # Cálculo de saldos mensais para a linha de TOTAL
+  # --------------------------------------------------------------------------
+  # 4. CÁLCULO DOS TOTAIS MENSAIS (DESCONSIDERANDO X)
+  # --------------------------------------------------------------------------
   linha_totais = ["", "TOTAL >>>", ""]
   totais_por_mes = []
 
@@ -141,15 +157,20 @@ def gerar_pdf_monorca_a1(df, projeto_nome, mes_inicial, ano_inicial):
     if not df_work.empty:
       df_m = df_work[df_work["ano_mes"] == chave_m]
 
-      # Regra 1: Mês fechado vs mês em aberto
+      # Desconsidera lançamentos "X"
+      df_m_valida = df_m[df_m["tipo_calculado"] != "X"]
+
       if m_dt < m_atual_first:
-        entradas = df_m[df_m["tipo"] == "Entrada"][
+        # Mês fechado: Apenas valor_real
+        entradas = df_m_valida[df_m_valida["tipo_calculado"] == "E"][
             "valor_real"
-        ].sum()  # Apenas valor_real
-        saidas = df_m[df_m["tipo"] == "Saída"]["valor_real"].sum()
+        ].sum()
+        saidas = df_m_valida[df_m_valida["tipo_calculado"] == "S"][
+            "valor_real"
+        ].sum()
       else:
-        # Em aberto: valor_real se > 0 senão valor_plan
-        v_calc = df_m.apply(
+        # Mês em aberto: valor_real se > 0 senão valor_plan
+        v_calc = df_m_valida.apply(
             lambda r: (
                 float(r["valor_real"])
                 if float(r.get("valor_real", 0) or 0) > 0
@@ -157,8 +178,8 @@ def gerar_pdf_monorca_a1(df, projeto_nome, mes_inicial, ano_inicial):
             ),
             axis=1,
         )
-        entradas = v_calc[df_m["tipo"] == "Entrada"].sum()
-        saidas = v_calc[df_m["tipo"] == "Saída"].sum()
+        entradas = v_calc[df_m_valida["tipo_calculado"] == "E"].sum()
+        saidas = v_calc[df_m_valida["tipo_calculado"] == "S"].sum()
 
       saldo = entradas - saidas
     else:
@@ -171,11 +192,9 @@ def gerar_pdf_monorca_a1(df, projeto_nome, mes_inicial, ano_inicial):
   linha_totais.extend(totais_por_mes)
 
   # --------------------------------------------------------------------------
-  # 4. CONSTRUÇÃO DA GRADE (DIAS 1 A 31)
+  # 5. CONSTRUÇÃO DA GRADE (DIAS 1 A 31)
   # --------------------------------------------------------------------------
   corpo_tabela = [linha_cab_1, linha_cab_2, linha_cab_3, linha_totais]
-
-  # Mapeia linhas que devem ter valores em cor cinza (Tipo 'X')
   linhas_cinzas = []
 
   for dia in range(1, 32):
@@ -186,11 +205,16 @@ def gerar_pdf_monorca_a1(df, projeto_nome, mes_inicial, ano_inicial):
     )
 
     if not df_dia.empty:
-      # Agrupa pelas descrições consolidadas
-      descricoes = df_dia["desc_base"].unique()
-      for idx_desc, desc in enumerate(descricoes):
-        df_item = df_dia[df_dia["desc_base"] == desc]
-        tipo_es = df_item.iloc[0]["tipo_calculado"]
+      # Agrupa por desc_base e tipo_calculado no dia do vencimento planejado
+      agrupamento = (
+          df_dia[["desc_base", "tipo_calculado"]].drop_duplicates().values
+      )
+
+      for idx_desc, (desc, tipo_es) in enumerate(agrupamento):
+        df_item = df_dia[
+            (df_dia["desc_base"] == desc)
+            & (df_dia["tipo_calculado"] == tipo_es)
+        ]
 
         linha_idx = len(corpo_tabela)
         if tipo_es == "X":
@@ -203,7 +227,6 @@ def gerar_pdf_monorca_a1(df, projeto_nome, mes_inicial, ano_inicial):
           df_m_item = df_item[df_item["ano_mes"] == chave_m]
 
           if not df_m_item.empty:
-            # Aplicação da Regra 1 por mês
             if m_dt < m_atual_first:
               v = df_m_item["valor_real"].sum()
             else:
@@ -235,9 +258,9 @@ def gerar_pdf_monorca_a1(df, projeto_nome, mes_inicial, ano_inicial):
       corpo_tabela.append(linha_vazia)
 
   # --------------------------------------------------------------------------
-  # 5. ESTILIZAÇÃO E MONTAGEM DO DOCUMENTO
+  # 6. ESTILIZAÇÃO E MONTAGEM DO DOCUMENTO
   # --------------------------------------------------------------------------
-  col_widths = [20, 155, 60] + [48] * 12
+  col_widths = [20, 180, 35] + [48] * 12
 
   estilos_base = [
       ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
@@ -256,7 +279,6 @@ def gerar_pdf_monorca_a1(df, projeto_nome, mes_inicial, ano_inicial):
       ("LINEBELOW", (0, 3), (-1, 3), 1.2, colors.black),
   ]
 
-  # Aplica a cor cinza para os lançamentos com tipo 'X'
   for l_idx in linhas_cinzas:
     estilos_base.append(
         ("TEXTCOLOR", (3, l_idx), (-1, l_idx), colors.HexColor("#888888"))
@@ -266,7 +288,6 @@ def gerar_pdf_monorca_a1(df, projeto_nome, mes_inicial, ano_inicial):
   tabela = Table(corpo_tabela, colWidths=col_widths, repeatRows=4)
   tabela.setStyle(table_style)
 
-  styles = getSampleStyleSheet()
   title_style = ParagraphStyle(
       "TitleStyle",
       parent=styles["Heading1"],
