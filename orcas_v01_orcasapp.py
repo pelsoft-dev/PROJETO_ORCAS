@@ -70,6 +70,43 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# --- INJEÇÃO PWA E AJUSTES DE TELA MOBILE ---
+pwa_code = """
+<script>
+    // 1. Trava o zoom em telas de celulares/tablets para navegação fluida como App Nativo
+    var meta = document.createElement('meta');
+    meta.name = 'viewport';
+    meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
+    window.parent.document.getElementsByTagName('head')[0].appendChild(meta);
+
+    // 2. Registra o Manifest do PWA para acionar "Adicionar à Tela Inicial"
+    var link = document.createElement('link');
+    link.rel = 'manifest';
+    link.href = 'data:application/manifest+json;charset=utf-8,' + encodeURIComponent(JSON.stringify({
+        "name": "ORCAS Financeiro",
+        "short_name": "ORCAS",
+        "start_url": "/",
+        "display": "standalone",
+        "background_color": "#1E3A8A",
+        "theme_color": "#1E3A8A",
+        "icons": [
+            {
+                "src": "https://oqmeyhkyxuprubwqcwuj.supabase.co/storage/v1/object/public/public_assets/orca_icon_192.png",
+                "sizes": "192x192",
+                "type": "image/png"
+            },
+            {
+                "src": "https://oqmeyhkyxuprubwqcwuj.supabase.co/storage/v1/object/public/public_assets/orca_icon_512.png",
+                "sizes": "512x512",
+                "type": "image/png"
+            }
+        ]
+    }));
+    window.parent.document.getElementsByTagName('head')[0].appendChild(link);
+</script>
+"""
+components.html(pwa_code, height=0, width=0)
+
 
 def ir_para_o_topo():
     components.html(
