@@ -900,7 +900,6 @@ elif st.session_state.escolha == "📝 Lançamentos" and not bloqueado:
         d_fim_db,
         s_db,
         format_moeda,
-        ir_para_o_topo,
     )
 elif st.session_state.escolha == "🗓️ Projetar" and not bloqueado:
     proj.exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, parse_moeda)
