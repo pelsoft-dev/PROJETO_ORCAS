@@ -378,7 +378,7 @@ if "bypass_uid" in query_params and "bypass_val" in query_params:
             )
             st.query_params.clear()
 
-    except Exception erro_bypass:
+    except Exception as erro_bypass:
         st.error(
             "Erro interno ao processar validação automática:"
             f" {erro_bypass}"
