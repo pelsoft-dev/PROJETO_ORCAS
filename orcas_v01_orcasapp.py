@@ -62,12 +62,16 @@ except Exception as e:
     st.error(f"Erro de conexão: Verifique o arquivo security.py. {e}")
     st.stop()
 
+# --- CONTROLADOR DO ESTADO DA SIDEBAR ---
+if "sidebar_state" not in st.session_state:
+    st.session_state.sidebar_state = "expanded"
+
 # --- 3. CONFIGURAÇÃO E ESTILO ---
 st.set_page_config(
     page_title="ORCAS - Gestão Financeira",
     page_icon="🐋",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state=st.session_state.sidebar_state,
 )
 
 # --- INJEÇÃO PWA E AJUSTES DE TELA MOBILE ---
@@ -111,18 +115,6 @@ components.html(pwa_code, height=0, width=0)
 def ir_para_o_topo():
     components.html(
         """<script>window.parent.document.getElementById('topo-ancora').scrollIntoView();</script>""",
-        height=0,
-    )
-
-
-def recolher_menu_via_clique():
-    components.html(
-        """
-        <script>
-            var fechar = window.parent.document.querySelector('button[aria-label="Close sidebar"]');
-            if (fechar) { fechar.click(); }
-        </script>
-        """,
         height=0,
     )
 
@@ -729,9 +721,6 @@ if "escolha" not in st.session_state:
         "🏠 Dashboard" if st.session_state.projeto_ativo else "⚙️ Gestão"
     )
 
-if "menu_interagido" not in st.session_state:
-    st.session_state.menu_interagido = False
-
 s_db, d_ini_db, d_fim_db = 0.0, None, None
 if st.session_state.projeto_ativo and ID_USUARIO_LOGADO:
     try:
@@ -828,10 +817,7 @@ with st.sidebar:
 
     if escolha_sidebar != st.session_state.escolha:
         st.session_state.escolha = escolha_sidebar
-        if st.session_state.menu_interagido:
-            recolher_menu_via_clique()
-        else:
-            st.session_state.menu_interagido = True
+        st.session_state.sidebar_state = "collapsed"
         st.rerun()
 
     st.divider()
