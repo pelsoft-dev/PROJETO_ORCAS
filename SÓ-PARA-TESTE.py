@@ -67,7 +67,7 @@ st.set_page_config(
     page_title="ORCAS - Gestão Financeira",
     page_icon="🐋",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",  # Definido como 'collapsed' para já iniciar recuado no celular
 )
 
 # --- INJEÇÃO PWA E AJUSTES DE TELA MOBILE ---
@@ -729,9 +729,6 @@ if "escolha" not in st.session_state:
         "🏠 Dashboard" if st.session_state.projeto_ativo else "⚙️ Gestão"
     )
 
-if "menu_interagido" not in st.session_state:
-    st.session_state.menu_interagido = False
-
 s_db, d_ini_db, d_fim_db = 0.0, None, None
 if st.session_state.projeto_ativo and ID_USUARIO_LOGADO:
     try:
@@ -828,10 +825,6 @@ with st.sidebar:
 
     if escolha_sidebar != st.session_state.escolha:
         st.session_state.escolha = escolha_sidebar
-        if st.session_state.menu_interagido:
-            recolher_menu_via_clique()
-        else:
-            st.session_state.menu_interagido = True
         st.rerun()
 
     st.divider()
