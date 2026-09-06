@@ -67,10 +67,10 @@ st.set_page_config(
     page_title="ORCAS - Gestão Financeira",
     page_icon="🐋",
     layout="wide",
-    initial_sidebar_state="collapsed",  # Definido como 'collapsed' para já iniciar recuado
+    initial_sidebar_state="collapsed",  # Definido como 'collapsed' para já iniciar recuado no celular
 )
 
-# --- INJEÇÃO PWA, AJUSTES MOBILE E FECHAMENTO AUTO DO MENU APENAS EM SMARTPHONES ---
+# --- INJEÇÃO PWA E AJUSTES DE TELA MOBILE ---
 pwa_code = """
 <script>
     // 1. Trava o zoom em telas de celulares/tablets para navegação fluida como App Nativo
@@ -103,34 +103,6 @@ pwa_code = """
         ]
     }));
     window.parent.document.getElementsByTagName('head')[0].appendChild(link);
-
-    // 3. Monitor de cliques no menu para fechar a barra automaticamente APENAS EM SMARTPHONES
-    function autoFecharMenuMobile() {
-        if (window.innerWidth <= 768) {
-            var doc = window.parent.document;
-            var sidebar = doc.querySelector('[data-testid="stSidebar"]');
-            
-            if (sidebar) {
-                var opcoesMenu = sidebar.querySelectorAll('div[role="radiogroup"] label');
-                opcoesMenu.forEach(function(opcao) {
-                    if (!opcao.dataset.hasCloseListener) {
-                        opcao.dataset.hasCloseListener = "true";
-                        opcao.addEventListener('click', function() {
-                            setTimeout(function() {
-                                var botaoFechar = doc.querySelector('button[aria-label="Close sidebar"]') || 
-                                                  doc.querySelector('[data-testid="stSidebarCollapseButton"]');
-                                if (botaoFechar) {
-                                    botaoFechar.click();
-                                }
-                            }, 150);
-                        });
-                    }
-                });
-            }
-        }
-    }
-
-    setInterval(autoFecharMenuMobile, 500);
 </script>
 """
 components.html(pwa_code, height=0, width=0)
@@ -147,11 +119,8 @@ def recolher_menu_via_clique():
     components.html(
         """
         <script>
-            if (window.parent.innerWidth <= 768) {
-                var fechar = window.parent.document.querySelector('button[aria-label="Close sidebar"]') || 
-                             window.parent.document.querySelector('[data-testid="stSidebarCollapseButton"]');
-                if (fechar) { fechar.click(); }
-            }
+            var fechar = window.parent.document.querySelector('button[aria-label="Close sidebar"]');
+            if (fechar) { fechar.click(); }
         </script>
         """,
         height=0,
@@ -166,16 +135,6 @@ st.markdown(
     .stAppDeployButton {display:none !important;}
     [data-testid="stStatusWidget"] {display:none !important;}
     
-    /* --- CONFIGURAÇÃO ESPECÍFICA PARA DISPOSITIVOS MÓVEIS (SMARTPHONES) --- */
-    @media (max-width: 768px) {
-        [data-testid="stSidebar"][aria-expanded="true"] {
-            margin-left: 0px !important;
-        }
-        [data-testid="stSidebar"][aria-expanded="false"] {
-            margin-left: -336px !important;
-        }
-    }
-
     [data-testid="stSidebarCollapsedControl"] {
         top: 60px !important; 
         left: 20px !important;
