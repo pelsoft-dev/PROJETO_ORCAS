@@ -70,67 +70,70 @@ st.set_page_config(
     initial_sidebar_state="collapsed",  # Definido como 'collapsed' para já iniciar recuado
 )
 
-# --- INJEÇÃO PWA, AJUSTES MOBILE E FECHAMENTO AUTO DO MENU APENAS EM SMARTPHONES ---
+# --- INJEÇÃO PWA E AUTO-FECHAMENTO DA SIDEBAR NO MOBILE ---
 pwa_code = """
 <script>
+    var doc = window.parent.document;
+
     // 1. Trava o zoom em telas de celulares/tablets para navegação fluida como App Nativo
-    var meta = document.createElement('meta');
-    meta.name = 'viewport';
-    meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
-    window.parent.document.getElementsByTagName('head')[0].appendChild(meta);
+    if (!doc.querySelector('meta[name="viewport"]')) {
+        var meta = doc.createElement('meta');
+        meta.name = 'viewport';
+        meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
+        doc.getElementsByTagName('head')[0].appendChild(meta);
+    }
 
     // 2. Registra o Manifest do PWA para acionar "Adicionar à Tela Inicial"
-    var link = document.createElement('link');
-    link.rel = 'manifest';
-    link.href = 'data:application/manifest+json;charset=utf-8,' + encodeURIComponent(JSON.stringify({
-        "name": "ORCAS Financeiro",
-        "short_name": "ORCAS",
-        "start_url": "/",
-        "display": "standalone",
-        "background_color": "#1E3A8A",
-        "theme_color": "#1E3A8A",
-        "icons": [
-            {
-                "src": "https://oqmeyhkyxuprubwqcwuj.supabase.co/storage/v1/object/public/public_assets/orca_icon_192.png",
-                "sizes": "192x192",
-                "type": "image/png"
-            },
-            {
-                "src": "https://oqmeyhkyxuprubwqcwuj.supabase.co/storage/v1/object/public/public_assets/orca_icon_512.png",
-                "sizes": "512x512",
-                "type": "image/png"
-            }
-        ]
-    }));
-    window.parent.document.getElementsByTagName('head')[0].appendChild(link);
+    if (!doc.querySelector('link[rel="manifest"]')) {
+        var link = doc.createElement('link');
+        link.rel = 'manifest';
+        link.href = 'data:application/manifest+json;charset=utf-8,' + encodeURIComponent(JSON.stringify({
+            "name": "ORCAS Financeiro",
+            "short_name": "ORCAS",
+            "start_url": "/",
+            "display": "standalone",
+            "background_color": "#1E3A8A",
+            "theme_color": "#1E3A8A",
+            "icons": [
+                {
+                    "src": "https://oqmeyhkyxuprubwqcwuj.supabase.co/storage/v1/object/public/public_assets/orca_icon_192.png",
+                    "sizes": "192x192",
+                    "type": "image/png"
+                },
+                {
+                    "src": "https://oqmeyhkyxuprubwqcwuj.supabase.co/storage/v1/object/public/public_assets/orca_icon_512.png",
+                    "sizes": "512x512",
+                    "type": "image/png"
+                }
+            ]
+        }));
+        doc.getElementsByTagName('head')[0].appendChild(link);
+    }
 
-    // 3. Monitor de cliques no menu para fechar a barra automaticamente APENAS EM SMARTPHONES
-    function autoFecharMenuMobile() {
-        if (window.innerWidth <= 768) {
-            var doc = window.parent.document;
+    // 3. FECHAMENTO AUTOMÁTICO EM CELULARES VIA CAPTURA NO CONTAINER PAI
+    function fecharSidebarMobile() {
+        if (window.parent.innerWidth <= 768) {
             var sidebar = doc.querySelector('[data-testid="stSidebar"]');
             
             if (sidebar) {
-                var opcoesMenu = sidebar.querySelectorAll('div[role="radiogroup"] label');
-                opcoesMenu.forEach(function(opcao) {
-                    if (!opcao.dataset.hasCloseListener) {
-                        opcao.dataset.hasCloseListener = "true";
-                        opcao.addEventListener('click', function() {
-                            setTimeout(function() {
-                                var botaoFechar = doc.querySelector('button[aria-label="Close sidebar"]') || 
-                                                  doc.querySelector('[data-testid="stSidebarCollapseButton"]');
-                                if (botaoFechar) {
-                                    botaoFechar.click();
-                                }
-                            }, 150);
-                        });
-                    }
-                });
+                var radioGroup = sidebar.querySelector('div[role="radiogroup"]');
+                if (radioGroup && !radioGroup.dataset.hasListener) {
+                    radioGroup.dataset.hasListener = "true";
+                    radioGroup.addEventListener('click', function() {
+                        setTimeout(function() {
+                            var botaoFechar = doc.querySelector('button[aria-label="Close sidebar"]') || 
+                                              doc.querySelector('[data-testid="stSidebarCollapseButton"]');
+                            if (botaoFechar) {
+                                botaoFechar.click();
+                            }
+                        }, 200);
+                    }, true);
+                }
             }
         }
     }
 
-    setInterval(autoFecharMenuMobile, 500);
+    setInterval(fecharSidebarMobile, 300);
 </script>
 """
 components.html(pwa_code, height=0, width=0)
