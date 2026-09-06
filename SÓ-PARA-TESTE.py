@@ -67,73 +67,78 @@ st.set_page_config(
     page_title="ORCAS - Gestão Financeira",
     page_icon="🐋",
     layout="wide",
-    initial_sidebar_state="collapsed",  # Definido como 'collapsed' para já iniciar recuado
+    initial_sidebar_state="collapsed",  # Definido como 'collapsed' para já iniciar recuado[cite: 8]
 )
 
 # --- INJEÇÃO PWA E AUTO-FECHAMENTO DA SIDEBAR NO MOBILE ---
 pwa_code = """
 <script>
-    var doc = window.parent.document;
+    (function() {
+        var doc = window.parent.document;
 
-    // 1. Trava o zoom em telas de celulares/tablets para navegação fluida como App Nativo
-    if (!doc.querySelector('meta[name="viewport"]')) {
-        var meta = doc.createElement('meta');
-        meta.name = 'viewport';
-        meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
-        doc.getElementsByTagName('head')[0].appendChild(meta);
-    }
+        // 1. Trava o zoom em telas de celulares/tablets para navegação fluida como App Nativo[cite: 8]
+        if (!doc.querySelector('meta[name="viewport"]')) {
+            var meta = doc.createElement('meta');
+            meta.name = 'viewport';
+            meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
+            doc.getElementsByTagName('head')[0].appendChild(meta);
+        }
 
-    // 2. Registra o Manifest do PWA para acionar "Adicionar à Tela Inicial"
-    if (!doc.querySelector('link[rel="manifest"]')) {
-        var link = doc.createElement('link');
-        link.rel = 'manifest';
-        link.href = 'data:application/manifest+json;charset=utf-8,' + encodeURIComponent(JSON.stringify({
-            "name": "ORCAS Financeiro",
-            "short_name": "ORCAS",
-            "start_url": "/",
-            "display": "standalone",
-            "background_color": "#1E3A8A",
-            "theme_color": "#1E3A8A",
-            "icons": [
-                {
-                    "src": "https://oqmeyhkyxuprubwqcwuj.supabase.co/storage/v1/object/public/public_assets/orca_icon_192.png",
-                    "sizes": "192x192",
-                    "type": "image/png"
-                },
-                {
-                    "src": "https://oqmeyhkyxuprubwqcwuj.supabase.co/storage/v1/object/public/public_assets/orca_icon_512.png",
-                    "sizes": "512x512",
-                    "type": "image/png"
-                }
-            ]
-        }));
-        doc.getElementsByTagName('head')[0].appendChild(link);
-    }
+        // 2. Registra o Manifest do PWA para acionar "Adicionar à Tela Inicial"[cite: 8]
+        if (!doc.querySelector('link[rel="manifest"]')) {
+            var link = doc.createElement('link');
+            link.rel = 'manifest';
+            link.href = 'data:application/manifest+json;charset=utf-8,' + encodeURIComponent(JSON.stringify({
+                "name": "ORCAS Financeiro",
+                "short_name": "ORCAS",
+                "start_url": "/",
+                "display": "standalone",
+                "background_color": "#1E3A8A",
+                "theme_color": "#1E3A8A",
+                "icons": [
+                    {
+                        "src": "https://oqmeyhkyxuprubwqcwuj.supabase.co/storage/v1/object/public/public_assets/orca_icon_192.png",
+                        "sizes": "192x192",
+                        "type": "image/png"
+                    },
+                    {
+                        "src": "https://oqmeyhkyxuprubwqcwuj.supabase.co/storage/v1/object/public/public_assets/orca_icon_512.png",
+                        "sizes": "512x512",
+                        "type": "image/png"
+                    }
+                ]
+            }));
+            doc.getElementsByTagName('head')[0].appendChild(link);
+        }
 
-    // 3. FECHAMENTO AUTOMÁTICO EM CELULARES VIA CAPTURA NO CONTAINER PAI
-    function fecharSidebarMobile() {
-        if (window.parent.innerWidth <= 768) {
-            var sidebar = doc.querySelector('[data-testid="stSidebar"]');
-            
-            if (sidebar) {
-                var radioGroup = sidebar.querySelector('div[role="radiogroup"]');
-                if (radioGroup && !radioGroup.dataset.hasListener) {
-                    radioGroup.dataset.hasListener = "true";
-                    radioGroup.addEventListener('click', function() {
-                        setTimeout(function() {
-                            var botaoFechar = doc.querySelector('button[aria-label="Close sidebar"]') || 
-                                              doc.querySelector('[data-testid="stSidebarCollapseButton"]');
-                            if (botaoFechar) {
-                                botaoFechar.click();
-                            }
-                        }, 200);
+        // 3. Captura o clique nos itens do menu antes da recarga do Streamlit para fechar no Mobile
+        function aplicarFechamentoAuto() {
+            if (window.parent.innerWidth <= 768) {
+                var sidebar = doc.querySelector('[data-testid="stSidebar"]');
+                if (sidebar && !sidebar.dataset.hasAutoCloseListener) {
+                    sidebar.dataset.hasAutoCloseListener = "true";
+                    
+                    // Escuta cliques dentro da sidebar no modo de captura do DOM
+                    sidebar.addEventListener('click', function(e) {
+                        var target = e.target;
+                        // Verifica se o clique ocorreu sobre uma opção de navegação ou botão
+                        if (target.closest('label') || target.closest('button') || target.closest('[role="radiogroup"]')) {
+                            setTimeout(function() {
+                                var btnFechar = doc.querySelector('button[aria-label="Close sidebar"]') || 
+                                                doc.querySelector('[data-testid="stSidebarCollapseButton"]');
+                                if (btnFechar) {
+                                    btnFechar.click();
+                                }
+                            }, 50);
+                        }
                     }, true);
                 }
             }
         }
-    }
 
-    setInterval(fecharSidebarMobile, 300);
+        // Tenta aplicar a interceptação continuamente para resistir aos re-renders do Streamlit
+        setInterval(aplicarFechamentoAuto, 300);
+    })();
 </script>
 """
 components.html(pwa_code, height=0, width=0)
@@ -171,30 +176,33 @@ st.markdown(
     
     /* --- CONFIGURAÇÃO ESPECÍFICA PARA DISPOSITIVOS MÓVEIS (SMARTPHONES) --- */
     @media (max-width: 768px) {
-        [data-testid="stSidebar"][aria-expanded="true"] {
-            margin-left: 0px !important;
+        /* Força a sidebar a iniciar/permanecer fora da tela por padrão */
+        [data-testid="stSidebar"] {
+            transform: translateX(-100%) !important;
+            transition: transform 0.3s ease-in-out !important;
         }
-        [data-testid="stSidebar"][aria-expanded="false"] {
-            margin-left: -336px !important;
+        /* Quando aberta pelo usuário, sobrepõe a tela */
+        [data-testid="stSidebar"][aria-expanded="true"] {
+            transform: translateX(0%) !important;
         }
     }
 
     [data-testid="stSidebarCollapsedControl"] {
-        top: 60px !important; 
-        left: 20px !important;
+        top: 15px !important; 
+        left: 15px !important;
         background-color: #1E3A8A !important;
-        border-radius: 10px !important;
-        width: 45px !important;
-        height: 45px !important;
+        border-radius: 8px !important;
+        width: 40px !important;
+        height: 40px !important;
         display: flex !important;
         z-index: 9999999 !important;
-        box-shadow: 2px 2px 10px rgba(0,0,0,0.3) !important;
+        box-shadow: 2px 2px 8px rgba(0,0,0,0.3) !important;
     }
 
     [data-testid="stSidebarCollapsedControl"] button svg {
         fill: white !important;
-        width: 25px !important;
-        height: 25px !important;
+        width: 22px !important;
+        height: 22px !important;
     }
 
     [data-testid="stHeader"] {
