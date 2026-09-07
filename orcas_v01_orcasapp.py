@@ -131,11 +131,19 @@ st.markdown(
     .stAppDeployButton {display:none !important;}
     [data-testid="stStatusWidget"] {display:none !important;}
     
-    /* --- REMOÇÃO DO DEFEITO DO MENU VERTICAL EMAGRECIDO --- */
-    [data-testid="stSidebar"] {
-        min-width: 260px !important;
+    /* --- CORREÇÃO DEFINITIVA DA SIDEBAR (EXPANDIDA x RECOLHIDA) --- */
+    /* Aplica a largura mínima apenas quando a sidebar está ABERTA */
+    [data-testid="stSidebar"][aria-expanded="true"] {
+        min-width: 280px !important;
+        width: 280px !important;
     }
 
+    /* Esconde completamente o conteúdo interno da sidebar quando ela está FECHADA */
+    [data-testid="stSidebar"][aria-expanded="false"] {
+        margin-left: -100% !important;
+    }
+
+    /* Botão flutuante para abrir/fechar a sidebar */
     [data-testid="stSidebarCollapsedControl"] {
         top: 15px !important; 
         left: 15px !important;
@@ -144,6 +152,8 @@ st.markdown(
         width: 40px !important;
         height: 40px !important;
         display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
         z-index: 9999999 !important;
         box-shadow: 2px 2px 8px rgba(0,0,0,0.3) !important;
     }
@@ -188,6 +198,7 @@ st.markdown(
         color: #1E3A8A; 
         font-family: 'Arial Black', sans-serif; 
         margin-bottom: 20px; 
+        white-space: nowrap !important;
     }
     
     .user-email { 
