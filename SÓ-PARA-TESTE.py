@@ -67,10 +67,10 @@ st.set_page_config(
     page_title="ORCAS - Gestão Financeira",
     page_icon="🐋",
     layout="wide",
-    initial_sidebar_state="collapsed",  # Mantém o padrão recolhido no mobile
+    initial_sidebar_state="collapsed",
 )
 
-# --- INJEÇÃO PWA E NAVEGAÇÃO LIMPA ---
+# --- INJEÇÃO PWA E CONTROLE DA SIDEBAR NO MOBILE ---
 pwa_code = """
 <script>
     (function() {
@@ -110,6 +110,24 @@ pwa_code = """
             }));
             doc.getElementsByTagName('head')[0].appendChild(link);
         }
+
+        // Fecha a sidebar automaticamente ao clicar em uma opção do menu em dispositivos móveis
+        function escutarCliquesMenu() {
+            if (window.parent.innerWidth <= 768) {
+                var radioButtons = doc.querySelectorAll('[data-testid="stSidebar"] [role="radiogroup"] label');
+                radioButtons.forEach(function(btn) {
+                    btn.onclick = function() {
+                        setTimeout(function() {
+                            var closeBtn = doc.querySelector('[data-testid="stSidebar"] button[aria-label="Close"], [data-testid="stSidebarCollapsedControl"] button');
+                            if (closeBtn) {
+                                closeBtn.click();
+                            }
+                        }, 150);
+                    };
+                });
+            }
+        }
+        setTimeout(escutarCliquesMenu, 1000);
     })();
 </script>
 """
@@ -130,39 +148,6 @@ st.markdown(
     footer {visibility: hidden;}
     .stAppDeployButton {display:none !important;}
     [data-testid="stStatusWidget"] {display:none !important;}
-    
-    /* --- CORREÇÃO DEFINITIVA DA SIDEBAR (EXPANDIDA x RECOLHIDA) --- */
-    /* Aplica a largura mínima apenas quando a sidebar está ABERTA */
-    [data-testid="stSidebar"][aria-expanded="true"] {
-        min-width: 280px !important;
-        width: 280px !important;
-    }
-
-    /* Esconde completamente o conteúdo interno da sidebar quando ela está FECHADA */
-    [data-testid="stSidebar"][aria-expanded="false"] {
-        margin-left: -100% !important;
-    }
-
-    /* Botão flutuante para abrir/fechar a sidebar */
-    [data-testid="stSidebarCollapsedControl"] {
-        top: 15px !important; 
-        left: 15px !important;
-        background-color: #1E3A8A !important;
-        border-radius: 8px !important;
-        width: 40px !important;
-        height: 40px !important;
-        display: flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        z-index: 9999999 !important;
-        box-shadow: 2px 2px 8px rgba(0,0,0,0.3) !important;
-    }
-
-    [data-testid="stSidebarCollapsedControl"] button svg {
-        fill: white !important;
-        width: 22px !important;
-        height: 22px !important;
-    }
 
     [data-testid="stHeader"] {
         background-color: rgba(0,0,0,0) !important;
@@ -193,11 +178,11 @@ st.markdown(
     }
 
     .logo-sidebar { 
-        font-size: 2.2rem !important; 
+        font-size: 2rem !important; 
         font-weight: bold; 
         color: #1E3A8A; 
         font-family: 'Arial Black', sans-serif; 
-        margin-bottom: 20px; 
+        margin-bottom: 15px; 
         white-space: nowrap !important;
     }
     
