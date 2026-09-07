@@ -70,7 +70,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# --- INJEÇÃO PWA E CONTROLE DA SIDEBAR NO MOBILE ---
+# --- INJEÇÃO PWA E CONTROLE AUTOMÁTICO DA SIDEBAR (DESK E MOBILE) ---
 pwa_code = """
 <script>
     (function() {
@@ -111,23 +111,51 @@ pwa_code = """
             doc.getElementsByTagName('head')[0].appendChild(link);
         }
 
-        // Fecha a sidebar automaticamente ao clicar em uma opção do menu em dispositivos móveis
-        function escutarCliquesMenu() {
-            if (window.parent.innerWidth <= 768) {
-                var radioButtons = doc.querySelectorAll('[data-testid="stSidebar"] [role="radiogroup"] label');
-                radioButtons.forEach(function(btn) {
-                    btn.onclick = function() {
-                        setTimeout(function() {
-                            var closeBtn = doc.querySelector('[data-testid="stSidebar"] button[aria-label="Close"], [data-testid="stSidebarCollapsedControl"] button');
-                            if (closeBtn) {
-                                closeBtn.click();
-                            }
-                        }, 150);
-                    };
-                });
+        // Função genérica para acionar o fechamento da sidebar
+        function fecharSidebar() {
+            var closeBtn = doc.querySelector(
+                '[data-testid="stSidebar"] button[aria-label*="Close"]'
+            ) || doc.querySelector(
+                '[data-testid="stSidebar"] button[aria-label*="Fechar"]'
+            ) || doc.querySelector(
+                '[data-testid="stSidebarCollapseButton"] button'
+            ) || doc.querySelector(
+                '[data-testid="stSidebarCollapsedControl"] button'
+            );
+            
+            if (closeBtn) {
+                closeBtn.click();
             }
         }
-        setTimeout(escutarCliquesMenu, 1000);
+
+        // 1. Garante o recolhimento forçado na entrada inicial/carregamento
+        setTimeout(function() {
+            var sidebar = doc.querySelector('[data-testid="stSidebar"]');
+            if (sidebar && sidebar.getAttribute('aria-expanded') === 'true') {
+                fecharSidebar();
+            }
+        }, 300);
+
+        // 2. Escuta cliques nas opções do menu (Desk, Notebook e Mobile)
+        function escutarCliquesMenu() {
+            var radioOptions = doc.querySelectorAll('[data-testid="stSidebar"] [role="radiogroup"] label');
+            radioOptions.forEach(function(btn) {
+                if (!btn.dataset.hasCloseListener) {
+                    btn.dataset.hasCloseListener = "true";
+                    btn.addEventListener('click', function() {
+                        setTimeout(fecharSidebar, 200);
+                    });
+                }
+            });
+        }
+
+        // Monitora dinamicamente a inclusão de elementos no menu
+        var observer = new MutationObserver(function() {
+            escutarCliquesMenu();
+        });
+
+        observer.observe(doc.body, { childList: true, subtree: true });
+        setTimeout(escutarCliquesMenu, 500);
     })();
 </script>
 """
