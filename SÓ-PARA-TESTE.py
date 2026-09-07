@@ -67,16 +67,16 @@ st.set_page_config(
     page_title="ORCAS - Gestão Financeira",
     page_icon="🐋",
     layout="wide",
-    initial_sidebar_state="collapsed",  # Definido como 'collapsed' para já iniciar recuado[cite: 8]
+    initial_sidebar_state="collapsed",  # Mantém o padrão recolhido no mobile
 )
 
-# --- INJEÇÃO PWA E AUTO-FECHAMENTO DA SIDEBAR NO MOBILE ---
+# --- INJEÇÃO PWA E NAVEGAÇÃO LIMPA ---
 pwa_code = """
 <script>
     (function() {
         var doc = window.parent.document;
 
-        // 1. Trava o zoom em telas de celulares/tablets para navegação fluida como App Nativo[cite: 8]
+        // Trava o zoom em telas de celulares para navegação fluida
         if (!doc.querySelector('meta[name="viewport"]')) {
             var meta = doc.createElement('meta');
             meta.name = 'viewport';
@@ -84,7 +84,7 @@ pwa_code = """
             doc.getElementsByTagName('head')[0].appendChild(meta);
         }
 
-        // 2. Registra o Manifest do PWA para acionar "Adicionar à Tela Inicial"[cite: 8]
+        // Registra o Manifest do PWA
         if (!doc.querySelector('link[rel="manifest"]')) {
             var link = doc.createElement('link');
             link.rel = 'manifest';
@@ -110,34 +110,6 @@ pwa_code = """
             }));
             doc.getElementsByTagName('head')[0].appendChild(link);
         }
-
-        // 3. Captura o clique nos itens do menu antes da recarga do Streamlit para fechar no Mobile
-        function aplicarFechamentoAuto() {
-            if (window.parent.innerWidth <= 768) {
-                var sidebar = doc.querySelector('[data-testid="stSidebar"]');
-                if (sidebar && !sidebar.dataset.hasAutoCloseListener) {
-                    sidebar.dataset.hasAutoCloseListener = "true";
-                    
-                    // Escuta cliques dentro da sidebar no modo de captura do DOM
-                    sidebar.addEventListener('click', function(e) {
-                        var target = e.target;
-                        // Verifica se o clique ocorreu sobre uma opção de navegação ou botão
-                        if (target.closest('label') || target.closest('button') || target.closest('[role="radiogroup"]')) {
-                            setTimeout(function() {
-                                var btnFechar = doc.querySelector('button[aria-label="Close sidebar"]') || 
-                                                doc.querySelector('[data-testid="stSidebarCollapseButton"]');
-                                if (btnFechar) {
-                                    btnFechar.click();
-                                }
-                            }, 50);
-                        }
-                    }, true);
-                }
-            }
-        }
-
-        // Tenta aplicar a interceptação continuamente para resistir aos re-renders do Streamlit
-        setInterval(aplicarFechamentoAuto, 300);
     })();
 </script>
 """
@@ -151,21 +123,6 @@ def ir_para_o_topo():
     )
 
 
-def recolher_menu_via_clique():
-    components.html(
-        """
-        <script>
-            if (window.parent.innerWidth <= 768) {
-                var fechar = window.parent.document.querySelector('button[aria-label="Close sidebar"]') || 
-                             window.parent.document.querySelector('[data-testid="stSidebarCollapseButton"]');
-                if (fechar) { fechar.click(); }
-            }
-        </script>
-        """,
-        height=0,
-    )
-
-
 st.markdown(
     """
     <style>
@@ -174,17 +131,9 @@ st.markdown(
     .stAppDeployButton {display:none !important;}
     [data-testid="stStatusWidget"] {display:none !important;}
     
-    /* --- CONFIGURAÇÃO ESPECÍFICA PARA DISPOSITIVOS MÓVEIS (SMARTPHONES) --- */
-    @media (max-width: 768px) {
-        /* Força a sidebar a iniciar/permanecer fora da tela por padrão */
-        [data-testid="stSidebar"] {
-            transform: translateX(-100%) !important;
-            transition: transform 0.3s ease-in-out !important;
-        }
-        /* Quando aberta pelo usuário, sobrepõe a tela */
-        [data-testid="stSidebar"][aria-expanded="true"] {
-            transform: translateX(0%) !important;
-        }
+    /* --- REMOÇÃO DO DEFEITO DO MENU VERTICAL EMAGRECIDO --- */
+    [data-testid="stSidebar"] {
+        min-width: 260px !important;
     }
 
     [data-testid="stSidebarCollapsedControl"] {
