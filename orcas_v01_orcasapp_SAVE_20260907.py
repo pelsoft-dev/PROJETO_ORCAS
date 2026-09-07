@@ -128,34 +128,22 @@ pwa_code = """
             }
         }
 
-        // 1. Garante o recolhimento forçado na entrada inicial/carregamento imediato
-        function recolherInicial() {
+        // 1. Garante o recolhimento forçado na entrada inicial/carregamento
+        setTimeout(function() {
             var sidebar = doc.querySelector('[data-testid="stSidebar"]');
             if (sidebar && sidebar.getAttribute('aria-expanded') === 'true') {
                 fecharSidebar();
             }
-        }
+        }, 300);
 
-        // Tenta fechar imediatamente e repete em pequenos intervalos para garantir no start
-        recolherInicial();
-        var tentativas = 0;
-        var intervalEntrada = setInterval(function() {
-            recolherInicial();
-            tentativas++;
-            if (tentativas > 10) clearInterval(intervalEntrada);
-        }, 100);
-
-        // 2. Escuta cliques nas opções do menu (Fechamento condicional por tamanho de tela)
+        // 2. Escuta cliques nas opções do menu (Desk, Notebook e Mobile)
         function escutarCliquesMenu() {
             var radioOptions = doc.querySelectorAll('[data-testid="stSidebar"] [role="radiogroup"] label');
             radioOptions.forEach(function(btn) {
                 if (!btn.dataset.hasCloseListener) {
                     btn.dataset.hasCloseListener = "true";
                     btn.addEventListener('click', function() {
-                        // Fecha o menu ao clicar APENAS em dispositivos móveis (largura < 768px)
-                        if (window.parent.innerWidth < 768) {
-                            setTimeout(fecharSidebar, 150);
-                        }
+                        setTimeout(fecharSidebar, 200);
                     });
                 }
             });
@@ -167,7 +155,7 @@ pwa_code = """
         });
 
         observer.observe(doc.body, { childList: true, subtree: true });
-        setTimeout(escutarCliquesMenu, 300);
+        setTimeout(escutarCliquesMenu, 500);
     })();
 </script>
 """
