@@ -1,10 +1,9 @@
-import os
 import streamlit as st
 
 
 def renderizar_ajuda_gestao():
-    """Renderiza o vídeo de ajuda da tela de Gestão."""
-    caminho_video = "ajuda_gestao.mp4"  # Nome do vídeo na pasta do projeto
+    """Renderiza o vídeo de ajuda via link do YouTube."""
+    url_video = "https://www.youtube.com/watch?v=SEU_VIDEO_AQUI"
 
     st.markdown(
         """
@@ -13,9 +12,6 @@ def renderizar_ajuda_gestao():
         unsafe_allow_html=True,
     )
 
-    if os.path.exists(caminho_video):
-        st.video(caminho_video)
-    else:
-        st.error(f"Vídeo não encontrado: `{caminho_video}`")
+    st.video(url_video)
 
     st.markdown("</div>", unsafe_allow_html=True)
