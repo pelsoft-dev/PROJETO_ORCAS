@@ -89,15 +89,9 @@ def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db
                             df_filhos = df_mes[mask_filhos]
                             
                             v_parciais_total = df_filhos.get('parcial_real', pd.Series(0)).sum()
-                            v_plan_pai = x['valor_plan']
 
-                            # Se V.Plan > V.Real (soma parciais), soma V.Plan
-                            if v_plan_pai > v_parciais_total:
-                                total += v_plan_pai
-                            else:
-                                # Se V.Real >= V.Plan, soma apenas parciais sem cartão (cc_tipo == none/vazio)
-                                mask_sem_cartao = df_filhos.get('cc_tipo', pd.Series('')).fillna('').astype(str).str.strip().str.upper().isin(['', 'NONE'])
-                                total += df_filhos[mask_sem_cartao].get('parcial_real', pd.Series(0)).sum()
+                            # Para mês fechado: soma sempre o V.Real das parciais
+                            total += v_parciais_total
                         else:
                             if x.get('status') == 'Realizado':
                                 if str(x.get('cc_tipo', '')).strip().upper() in ['$CCP', 'CCP']:
