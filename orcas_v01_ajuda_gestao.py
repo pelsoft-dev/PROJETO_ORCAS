@@ -1,23 +1,25 @@
 import os
+import pypdfium2 as pdfium
 import streamlit as st
 
 
 def renderizar_ajuda_gestao():
-    """Oferece o PDF de ajuda para visualização/download nativo no Streamlit."""
+    """Renderiza todas as páginas do PDF como imagens dentro do aplicativo."""
     caminho_pdf = "orcas-ajuda-pdf.pdf"
 
     if os.path.exists(caminho_pdf):
-        with open(caminho_pdf, "rb") as f:
-            pdf_bytes = f.read()
+        # Abre o PDF e renderiza página por página
+        pdf = pdfium.PdfDocument(caminho_pdf)
 
-        st.info("Clique no botão abaixo para abrir ou baixar o manual de ajuda em PDF.")
-        st.download_button(
-            label="📄 Abrir / Baixar Manual de Ajuda (PDF)",
-            data=pdf_bytes,
-            file_name="orcas-ajuda-gestao.pdf",
-            mime="application/pdf",
-            use_container_width=True,
-            type="primary",
-        )
+        # Container com fundo azul para manter o estilo visual
+        with st.container():
+            for i, page in enumerate(pdf):
+                # Renderiza a página em imagem de alta resolução (scale=2)
+                image = page.render(scale=2).to_pil()
+                st.image(
+                    image,
+                    use_container_width=True,
+                    caption=f"Página {i + 1} de {len(pdf)}",
+                )
     else:
         st.error(f"Arquivo PDF não encontrado: `{caminho_pdf}`")

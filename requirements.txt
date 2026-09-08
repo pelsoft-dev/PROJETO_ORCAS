@@ -9,3 +9,4 @@ google-genai
 groq
 openpyxl
 reportlab
+pypdfium2
