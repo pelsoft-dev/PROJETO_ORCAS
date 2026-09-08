@@ -1,27 +1,23 @@
-import base64
 import os
 import streamlit as st
 
 
 def renderizar_ajuda_gestao():
-    """Renderiza o PDF de ajuda da tela de Gestão dentro de um container com rolagem."""
+    """Oferece o PDF de ajuda para visualização/download nativo no Streamlit."""
     caminho_pdf = "orcas-ajuda-pdf.pdf"
 
     if os.path.exists(caminho_pdf):
         with open(caminho_pdf, "rb") as f:
-            base64_pdf = base64.b64encode(f.read()).decode("utf-8")
+            pdf_bytes = f.read()
 
-        # Embutimento nativo HTML5 compatível com Streamlit Cloud
-        pdf_display = f"""
-            <div style="background-color: #007ba7; padding: 10px; border-radius: 8px; margin-bottom: 20px;">
-                <embed 
-                    src="data:application/pdf;base64,{base64_pdf}" 
-                    width="100%" 
-                    height="600px" 
-                    type="application/pdf">
-                </embed>
-            </div>
-        """
-        st.markdown(pdf_display, unsafe_allow_html=True)
+        st.info("Clique no botão abaixo para abrir ou baixar o manual de ajuda em PDF.")
+        st.download_button(
+            label="📄 Abrir / Baixar Manual de Ajuda (PDF)",
+            data=pdf_bytes,
+            file_name="orcas-ajuda-gestao.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+            type="primary",
+        )
     else:
         st.error(f"Arquivo PDF não encontrado: `{caminho_pdf}`")
