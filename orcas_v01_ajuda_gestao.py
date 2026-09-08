@@ -11,15 +11,15 @@ def renderizar_ajuda_gestao():
         with open(caminho_pdf, "rb") as f:
             base64_pdf = base64.b64encode(f.read()).decode("utf-8")
 
-        # Utiliza o leitor da Mozilla via CDN para renderizar Data URI
+        # Embutimento nativo HTML5 compatível com Streamlit Cloud
         pdf_display = f"""
             <div style="background-color: #007ba7; padding: 10px; border-radius: 8px; margin-bottom: 20px;">
-                <iframe 
-                    src="https://mozilla.github.io/pdf.js/web/viewer.html?file=data:application/pdf;base64,{base64_pdf}" 
+                <embed 
+                    src="data:application/pdf;base64,{base64_pdf}" 
                     width="100%" 
                     height="600px" 
-                    style="border: none; border-radius: 5px;">
-                </iframe>
+                    type="application/pdf">
+                </embed>
             </div>
         """
         st.markdown(pdf_display, unsafe_allow_html=True)
