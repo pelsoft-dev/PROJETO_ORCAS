@@ -6,7 +6,7 @@ import streamlit as st
 
 def renderizar_ajuda_gestao():
     """Renderiza todas as páginas do PDF como imagens sempre atualizadas."""
-    caminho_pdf = "orcas-ajuda-pdf.pdf"
+    caminho_pdf = "orcas-ajuda-gestao.pdf"
 
     if os.path.exists(caminho_pdf):
         # Lê os bytes brutos diretamente do disco para evitar cache do sistema
