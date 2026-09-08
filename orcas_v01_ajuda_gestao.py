@@ -1,20 +1,24 @@
+import io
 import os
 import pypdfium2 as pdfium
 import streamlit as st
 
 
 def renderizar_ajuda_gestao():
-    """Renderiza todas as páginas do PDF como imagens dentro do aplicativo."""
+    """Renderiza todas as páginas do PDF como imagens sempre atualizadas."""
     caminho_pdf = "orcas-ajuda-pdf.pdf"
 
     if os.path.exists(caminho_pdf):
-        # Abre o PDF e renderiza página por página
-        pdf = pdfium.PdfDocument(caminho_pdf)
+        # Lê os bytes brutos diretamente do disco para evitar cache do sistema
+        with open(caminho_pdf, "rb") as f:
+            pdf_bytes = f.read()
 
-        # Container com fundo azul para manter o estilo visual
+        # Carrega o PDF a partir do fluxo de memória atualizado
+        pdf = pdfium.PdfDocument(io.BytesIO(pdf_bytes))
+
+        # Container para exibição
         with st.container():
             for i, page in enumerate(pdf):
-                # Renderiza a página em imagem de alta resolução (scale=2)
                 image = page.render(scale=2).to_pil()
                 st.image(
                     image,
