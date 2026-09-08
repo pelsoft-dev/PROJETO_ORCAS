@@ -6,7 +6,7 @@ import streamlit as st
 def renderizar_ajuda_gestao():
     """Renderiza o PDF de ajuda da tela de Gestão dentro de um container com rolagem."""
     # caminho_pdf = "ajuda_gestao.pdf"  # Nome/caminho do seu PDF na pasta do projeto
-    caminho_pdf = "c:\PAULO2025\ORCAS-AJUDA-PDF.pdf"  # Nome/caminho do seu PDF na pasta do projeto
+    caminho_pdf = "c:\PAULO2025\orcas-ajuda-pdf.pdf"  # Nome/caminho do seu PDF na pasta do projeto
 
     if os.path.exists(caminho_pdf):
         with open(caminho_pdf, "rb") as f:
