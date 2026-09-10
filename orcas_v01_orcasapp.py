@@ -359,14 +359,14 @@ if "bypass_uid" in query_params and "bypass_val" in query_params:
             )
             if v_projeto_id:
                 try:
-                    supabase.table("config_projetos").update({
+                    supabase.table("config_projetos").upsert({
+                        "usuario_id": uid_retorno,
+                        "projeto_id": v_projeto_id,
                         "data_ini": dados_temp.get("data_ini"),
                         "data_fim": dados_temp.get("data_fim"),
                         "zap_ativo": dados_temp.get("zap_ativo"),
                         "email_ativo": dados_temp.get("email_ativo"),
-                    }).eq("projeto_id", v_projeto_id).eq(
-                        "usuario_id", uid_retorno
-                    ).execute()
+                    }).execute()
                 except Exception:
                     pass
 
@@ -465,6 +465,22 @@ if status_retorno and pref_id and not st.session_state.logado:
                 st.query_params.clear()
                 st.session_state.escolha = "⚙️ Gestão"
                 st.rerun()
+
+# --- VERIFICAÇÃO AUTOMÁTICA DE PENDÊNCIAS EM PAGAMENTOS_TEMP PARA USUÁRIO LOGADO ---
+elif st.session_state.get("logado") and st.session_state.get("CHAVE_MESTRA_UUID"):
+    uid_logado = st.session_state.get("CHAVE_MESTRA_UUID")
+    try:
+        check_pago = supabase.table("pagamentos_temp").select("*").eq("usuario_id", uid_logado).execute()
+        if check_pago.data:
+            usuario_auto = retornodomp.tratar_retorno(supabase, None, "approved")
+            if usuario_auto and isinstance(usuario_auto, dict):
+                st.session_state.projeto_ativo = usuario_auto.get("projeto_ativo")
+                st.session_state.vencimento = str(usuario_auto.get("vencimento", ""))
+                st.session_state.pagamento_realizado_sucesso = True
+                st.toast("🎉 Novo plano ativado e cadastrado com sucesso!")
+                st.rerun()
+    except Exception:
+        pass
 
 if not st.session_state.get("CHAVE_MESTRA_UUID"):
     st.session_state["CHAVE_MESTRA_UUID"] = ""

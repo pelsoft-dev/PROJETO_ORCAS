@@ -19,7 +19,7 @@ def tratar_retorno(supabase, pref_id, status_retorno):
         return None
 
     try:
-        # 🗹 ADAPTADO: Incluído 'ult_valor_mensal' na busca da tabela temporária
+        # Busca a transação temporária gravada na Gestão
         query_temp = supabase.table("pagamentos_temp").select(
             "usuario_id, valor, projeto_id, tipo_renovacao, data_ini, data_fim, zap_ativo, email_ativo, ult_valor_mensal"
         )
@@ -42,17 +42,30 @@ def tratar_retorno(supabase, pref_id, status_retorno):
         v_data_fim = dados_frescos.get("data_fim")
         v_zap_ativo = dados_frescos.get("zap_ativo")
         v_email_ativo = dados_frescos.get("email_ativo")
-        v_ult_valor_mensal = dados_frescos.get("ult_valor_mensal", 0.0) # <-- Captura o valor mensal calculado
+        v_ult_valor_mensal = dados_frescos.get("ult_valor_mensal", 0.0)
 
-        # Atualização da tabela config_projetos (Apenas propriedades do plano)
-        supabase.table("config_projetos").update({
+        # -----------------------------------------------------------------
+        # CORREÇÃO PRINCIPAL: Usar UPSERT para CRIAR o plano se for novo
+        # ou ATUALIZAR se já existir.
+        # -----------------------------------------------------------------
+        dados_plano_upsert = {
+            "usuario_id": uid_usuario,
+            "projeto_id": v_projeto_id,
             "data_ini": v_data_ini,
             "data_fim": v_data_fim,
-            "zap_ativo": v_zap_ativo,
-            "email_ativo": v_email_ativo
-        }).eq("projeto_id", v_projeto_id).eq("usuario_id", uid_usuario).execute()
+            "zap_ativo": 1 if v_zap_ativo else 0,
+            "email_ativo": 1 if v_email_ativo else 0
+        }
 
-        # Cálculo das datas comerciais
+        # Se o plano já existia, recupera o ID para manter consistência
+        res_p = supabase.table("config_projetos").select("id").eq("projeto_id", v_projeto_id).eq("usuario_id", uid_usuario).execute()
+        if res_p and hasattr(res_p, 'data') and res_p.data:
+            dados_plano_upsert["id"] = res_p.data[0]["id"]
+
+        # Grava efetivamente o plano no Supabase
+        supabase.table("config_projetos").upsert(dados_plano_upsert).execute()
+
+        # Cálculo das datas comerciais de renovação da assinatura do usuário
         meses_comprados = 12
         if v_tipo_renovacao and "6" in str(v_tipo_renovacao):
             meses_comprados = 6
@@ -63,25 +76,19 @@ def tratar_retorno(supabase, pref_id, status_retorno):
 
         nova_data_vencimento = (hoje_br + relativedelta(months=meses_comprados)).strftime("%Y-%m-%d")
 
-        # 🗹 ADAPTADO: Atualiza dados cadastrais incluindo o 'ult_valor_mensal' na tabela usuarios
+        # Atualiza o cadastro do usuário
         supabase.table("usuarios").update({
             "vencimento": nova_data_vencimento,
             "data_ult_assinat": hoje_string,
             "valor_pago": float(valor_pago) if valor_pago else 0.0,
-            "ult_valor_mensal": float(v_ult_valor_mensal) if v_ult_valor_mensal else 0.0  # <-- Gravando no local correto
+            "ult_valor_mensal": float(v_ult_valor_mensal) if v_ult_valor_mensal else 0.0,
+            "tipo_renovacao": v_tipo_renovacao
         }).eq("id", uid_usuario).execute()
 
-        # Atualiza tipo_renovacao
-        if uid_usuario and v_tipo_renovacao:
-            supabase.table("usuarios").update({
-                "tipo_renovacao": v_tipo_renovacao
-            }).eq("id", uid_usuario).execute()
+        # Limpa o registro temporário pois a operação foi concluída com sucesso
+        supabase.table("pagamentos_temp").delete().eq("usuario_id", str(uid_usuario).strip()).execute()
 
-        # 🔥 Limpeza da tabela temporária pós-sucesso na estratégia clássica
-        if uid_usuario:
-            supabase.table("pagamentos_temp").delete().eq("usuario_id", str(uid_usuario).strip()).execute()
-
-        # Retorno padrão de sessão
+        # Retorna os dados para login/redirecionamento no orcasapp
         res_user_final = supabase.table("usuarios").select("id, nome, email, vencimento").eq("id", uid_usuario).execute()
         if res_user_final.data:
             u = res_user_final.data[0]
@@ -91,7 +98,7 @@ def tratar_retorno(supabase, pref_id, status_retorno):
                 "email": u["email"],
                 "vencimento": u["vencimento"],
                 "zap_ativo": v_zap_ativo,
-                "projeto_active": v_projeto_id
+                "projeto_ativo": v_projeto_id
             }
         return None
             
