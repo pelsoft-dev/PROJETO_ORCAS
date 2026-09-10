@@ -1,350 +1,999 @@
-import streamlit as st
+import hashlib
+import os
+import random
+import smtplib
+import zoneinfo
+from datetime import datetime, timedelta
+from email.mime.text import MIMEText
+
+import numpy as np
 import pandas as pd
-from datetime import datetime
+import plotly.graph_objects as go
+import streamlit as st
+import streamlit.components.v1 as components
+from supabase import Client, create_client
 
-# Importando a ajuda do arquivo dedicado para Lançamentos
-from orcas_v01_ajuda_lancamentos import renderizar_ajuda_lancamentos
+# Importação ativada para o funcionamento do retorno automático
+import orcas_v01_retornodomp as retornodomp
+
+# --- 1. IMPORTAÇÃO DOS MÓDULOS EXTERNOS ---
+import orcas_v01_admin as adm
+import orcas_v01_conciliacao as conc
+import orcas_v01_dashboard as dash
+import orcas_v01_lancamentos as lanc
+import orcas_v01_pagamentos as pag
+import orcas_v01_porvoz as porvoz  # Módulo Inteligente de Voz (Groq + Gemini)
+import orcas_v01_projetar as proj
 
 
-def exibir_lancamentos(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, s_db, format_moeda, ir_para_o_topo):
+# --- FUNÇÃO DE ENVIO INTEGRADA (FLEXÍVEL PARA QUALQUER PROVEDOR) ---
+def disparar_email_codigo(destinatario, codigo):
+    try:
+        server_host = st.secrets["SMTP_SERVER"]
+        server_port = int(st.secrets.get("SMTP_PORT", 587))
+        user_email = st.secrets["SMTP_USER"]
+        pass_email = st.secrets["SMTP_PASS"]
+
+        msg = MIMEText(
+            f"Seu código de verificação ORCAS é: {codigo}. Validade: 10 minutos."
+        )
+        msg["Subject"] = f"Código de Verificação - {codigo}"
+        msg["From"] = f"ORCAS App <{user_email}>"
+        msg["To"] = destinatario
+
+        if server_port == 465:
+            server = smtplib.SMTP_SSL(server_host, server_port, timeout=10)
+        else:
+            server = smtplib.SMTP(server_host, server_port, timeout=10)
+            server.starttls()
+
+        server.login(user_email, pass_email)
+        server.sendmail(user_email, destinatario, msg.as_string())
+        server.quit()
+
+        return True
+    except Exception as e:
+        st.error(f"Erro ao disparar e-mail: {e}")
+        return False
+
+
+# --- 2. SEGURANÇA E CONEXÃO ---
+try:
+    import orcas_v01_security as security
+
+    supabase: Client = security.supabase
+except Exception as e:
+    st.error(f"Erro de conexão: Verifique o arquivo security.py. {e}")
+    st.stop()
+
+# --- 3. CONFIGURAÇÃO E ESTILO ---
+st.set_page_config(
+    page_title="ORCAS - Gestão Financeira",
+    page_icon="🐋",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
+
+# --- INJEÇÃO PWA E CONTROLE AUTOMÁTICO DA SIDEBAR (DESK E MOBILE) ---
+pwa_code = """
+<script>
+    (function() {
+        var doc = window.parent.document;
+
+        // Trava o zoom em telas de celulares para navegação fluida
+        if (!doc.querySelector('meta[name="viewport"]')) {
+            var meta = doc.createElement('meta');
+            meta.name = 'viewport';
+            meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
+            doc.getElementsByTagName('head')[0].appendChild(meta);
+        }
+
+        // Registra o Manifest do PWA
+        if (!doc.querySelector('link[rel="manifest"]')) {
+            var link = doc.createElement('link');
+            link.rel = 'manifest';
+            link.href = 'data:application/manifest+json;charset=utf-8,' + encodeURIComponent(JSON.stringify({
+                "name": "ORCAS Financeiro",
+                "short_name": "ORCAS",
+                "start_url": "/",
+                "display": "standalone",
+                "background_color": "#1E3A8A",
+                "theme_color": "#1E3A8A",
+                "icons": [
+                    {
+                        "src": "https://oqmeyhkyxuprubwqcwuj.supabase.co/storage/v1/object/public/public_assets/orca_icon_192.png",
+                        "sizes": "192x192",
+                        "type": "image/png"
+                    },
+                    {
+                        "src": "https://oqmeyhkyxuprubwqcwuj.supabase.co/storage/v1/object/public/public_assets/orca_icon_512.png",
+                        "sizes": "512x512",
+                        "type": "image/png"
+                    }
+                ]
+            }));
+            doc.getElementsByTagName('head')[0].appendChild(link);
+        }
+
+        // Função genérica para acionar o fechamento da sidebar
+        function fecharSidebar() {
+            var closeBtn = doc.querySelector(
+                '[data-testid="stSidebar"] button[aria-label*="Close"]'
+            ) || doc.querySelector(
+                '[data-testid="stSidebar"] button[aria-label*="Fechar"]'
+            ) || doc.querySelector(
+                '[data-testid="stSidebarCollapseButton"] button'
+            ) || doc.querySelector(
+                '[data-testid="stSidebarCollapsedControl"] button'
+            );
+            
+            if (closeBtn) {
+                closeBtn.click();
+            }
+        }
+
+        // 1. Garante o recolhimento forçado na entrada inicial/carregamento imediato
+        function recolherInicial() {
+            var sidebar = doc.querySelector('[data-testid="stSidebar"]');
+            if (sidebar && sidebar.getAttribute('aria-expanded') === 'true') {
+                fecharSidebar();
+            }
+        }
+
+        // Tenta fechar imediatamente e repete em pequenos intervalos para garantir no start
+        recolherInicial();
+        var tentativas = 0;
+        var intervalEntrada = setInterval(function() {
+            recolherInicial();
+            tentativas++;
+            if (tentativas > 10) clearInterval(intervalEntrada);
+        }, 100);
+
+        // 2. Escuta cliques nas opções do menu (Fechamento condicional por tamanho de tela)
+        function escutarCliquesMenu() {
+            var radioOptions = doc.querySelectorAll('[data-testid="stSidebar"] [role="radiogroup"] label');
+            radioOptions.forEach(function(btn) {
+                if (!btn.dataset.hasCloseListener) {
+                    btn.dataset.hasCloseListener = "true";
+                    btn.addEventListener('click', function() {
+                        // Fecha o menu ao clicar APENAS em dispositivos móveis (largura < 768px)
+                        if (window.parent.innerWidth < 768) {
+                            setTimeout(fecharSidebar, 150);
+                        }
+                    });
+                }
+            });
+        }
+
+        // Monitora dinamicamente a inclusão de elementos no menu
+        var observer = new MutationObserver(function() {
+            escutarCliquesMenu();
+        });
+
+        observer.observe(doc.body, { childList: true, subtree: true });
+        setTimeout(escutarCliquesMenu, 300);
+    })();
+</script>
+"""
+components.html(pwa_code, height=0, width=0)
+
+
+def ir_para_o_topo():
+    components.html(
+        """<script>window.parent.document.getElementById('topo-ancora').scrollIntoView();</script>""",
+        height=0,
+    )
+
+
+st.markdown(
     """
-    Sub-rotina da Tela Lançamentos.
-    Exibe LCLs mestre/avulsos na listagem sem duplicar saldos.
-    """
+    <style>
+    #MainMenu {visibility: hidden;} 
+    footer {visibility: hidden;}
+    .stAppDeployButton {display:none !important;}
+    [data-testid="stStatusWidget"] {display:none !important;}
 
-    if 'msg_sucesso' not in st.session_state: 
-        st.session_state.msg_sucesso = False
+    [data-testid="stHeader"] {
+        background-color: rgba(0,0,0,0) !important;
+    }
 
-    # --- CABEÇALHO ALINHADO COM BOTÃO DE AJUDA ---
-    col_titulo, col_ajuda = st.columns([4, 1])
+    [data-testid="stDecoration"],
+    .viewerBadge_container__1QSob,
+    .viewerBadge_link__1S137,
+    div[class*="stDecoration"] {
+        display: none !important;
+        visibility: hidden !important;
+    }
+
+    .block-container {
+        padding-top: 3.5rem !important;
+        margin-top: -1.0rem !important;
+    }
+
+    [data-testid="stTable"] td, [data-testid="stTable"] th,
+    [data-testid="stDataFrame"] td, [data-testid="stDataFrame"] th,
+    table td, table th {
+        white-space: nowrap !important;
+        word-break: keep-all !important;
+    }
     
-    with col_titulo:
-        st.markdown(f'<div class="titulo-tela" style="margin-top:0px;">Lançamentos: {st.session_state.projeto_ativo}</div>', unsafe_allow_html=True)
-        
-    with col_ajuda:
-        st.markdown("""
-            <style>
-            /* Estilo do botão AJUDA */
-            div.stButton > button[kind="primary"] {
-                background-color: #007ba7 !important;
-                color: white !important;
-                border: none !important;
-                height: 38px !important;
-                font-size: 14px !important;
-                font-weight: bold !important;
-            }
-            div.stButton > button[kind="primary"]:hover {
-                background-color: #005f81 !important;
-                color: white !important;
-            }
-            </style>
-        """, unsafe_allow_html=True)
-        
-        if st.button("AJUDA", type="primary", use_container_width=True):
-            st.session_state["exibir_ajuda_lancamentos"] = not st.session_state.get("exibir_ajuda_lancamentos", False)
-            st.rerun()
+    [data-testid="stTable"], [data-testid="stDataFrame"] {
+        overflow-x: auto !important;
+    }
 
-    if st.session_state.get("exibir_ajuda_lancamentos", False):
-        renderizar_ajuda_lancamentos()
+    .logo-sidebar { 
+        font-size: 2rem !important; 
+        font-weight: bold; 
+        color: #1E3A8A; 
+        font-family: 'Arial Black', sans-serif; 
+        margin-bottom: 15px; 
+        white-space: nowrap !important;
+    }
+    
+    .user-email { 
+        font-size: 0.85rem; 
+        color: #64748b; 
+        margin-bottom: 2px; 
+    }
+    
+    .venc-text { 
+        font-size: 0.8rem; 
+        color: #e11d48; 
+        font-weight: bold; 
+        margin-bottom: 10px; 
+    }
+    
+    .titulo-tela { 
+        font-size: 1.6rem; 
+        font-weight: bold; 
+        color: #1E3A8A; 
+        border-bottom: 2px solid #E5E7EB; 
+        margin-bottom: 15px; 
+        padding-bottom: 5px; 
+    }
+    
+    .project-tag-sidebar { 
+        color: #1E3A8A; 
+        font-weight: bold; 
+        font-size: 0.9rem; 
+        margin-bottom: 15px; 
+        padding: 8px; 
+        border-left: 5px solid #1E3A8A; 
+        background: #F3F4F6; 
+        border-radius: 4px; 
+    }
+    
+    .info-pagamento, .stAlert p { 
+        white-space: normal !important; 
+        word-wrap: break-word !important; 
+        display: block !important;
+    }
 
-    # --- GARANTIA CONTRA KEYERROR EM NOVOS PLANOS ---
-    if 'cc_tipo' not in df.columns: df['cc_tipo'] = ''
-    if 'permite_parcial' not in df.columns: df['permite_parcial'] = False
-    if 'parcial_real' not in df.columns: df['parcial_real'] = 0.0
-    if 'status' not in df.columns: df['status'] = 'Planejado'
-    if 'cc_descricao' not in df.columns: df['cc_descricao'] = ''
+    [data-testid="stSidebar"] [data-testid="stWidgetLabel"] p {
+        font-size: 1rem !important;
+        font-weight: 500 !important;
+        color: #31333F !important;
+    }
+    
+    [data-testid="stSidebar"] .stRadio div[role="radiogroup"] {
+        gap: 0.5rem !important;
+    }
+    </style>
+""",
+    unsafe_allow_html=True,
+)
 
-    if d_ini_db and d_fim_db:
-        meses_periodo = []
-        data_atual_loop = d_ini_db.replace(day=1)
-        while data_atual_loop <= d_fim_db:
-            meses_periodo.append(data_atual_loop.strftime('%Y-%m'))
-            if data_atual_loop.month == 12: 
-                data_atual_loop = data_atual_loop.replace(year=data_atual_loop.year + 1, month=1)
-            else: 
-                data_atual_loop = data_atual_loop.replace(month=data_atual_loop.month + 1)
-        
-        saldo_acumulado_mes = s_db
-        mes_hoje_str = datetime.now().strftime('%Y-%m')
-        
-        for mes_str in meses_periodo:
-            mask_mes = pd.to_datetime(df['data']).dt.strftime('%Y-%m') == mes_str
-            df_mes = df[mask_mes].copy()
-            
-            mes_fechado = mes_str < mes_hoje_str
-            
-            def calcular_total_tipo(df_tipo, e_fechado):
-                total = 0
-                
-                # IGNORA LCLs planejados para não somar 2x com a fatura mestre
-                s_cc = df_tipo.get('cc_tipo', pd.Series('', index=df_tipo.index)).fillna('').astype(str).str.strip().str.upper()
-                df_tipo_filtrado = df_tipo[s_cc != 'LCL']
-                
-                if e_fechado:
-                    itens_principais = df_tipo_filtrado[(df_tipo_filtrado['valor_plan'] > 0) | ((df_tipo_filtrado['valor_plan'] == 0) & (df_tipo_filtrado['valor_real'] > 0))]
-                    for _, x in itens_principais.iterrows():
-                        if x.get('permite_parcial', False):
-                            desc_pai = str(x['descricao']).strip().upper()
-                            mask_filhos = (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_pai) & (df_mes['valor_plan'] == 0)
-                            df_filhos = df_mes[mask_filhos]
-                            
-                            v_parciais_total = df_filhos.get('parcial_real', pd.Series(0)).sum()
 
-                            # Para mês fechado: soma sempre o V.Real das parciais
-                            total += v_parciais_total
-                        else:
-                            if x.get('status') == 'Realizado':
-                                if str(x.get('cc_tipo', '')).strip().upper() in ['$CCP', 'CCP']:
-                                    desc_cc = str(x['descricao']).strip().upper()
-                                    m_lcl = (df_mes.get('cc_tipo', pd.Series('')).fillna('').astype(str).str.strip().str.upper() == 'LCL')
-                                    m_desc = (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_cc) | (df_mes.get('cc_descricao', pd.Series('')).fillna('').astype(str).str.strip().str.upper() == desc_cc)
-                                    soma_lcls = df_mes[m_lcl & m_desc]['valor_real'].sum()
-                                    total += soma_lcls
-                                else:
-                                    total += x['valor_real']
-                else:
-                    itens_principais = df_tipo_filtrado[(df_tipo_filtrado['valor_plan'] > 0) | ((df_tipo_filtrado['valor_plan'] == 0) & (df_tipo_filtrado['valor_real'] > 0))]
-                    for _, x in itens_principais.iterrows():
-                        if x.get('permite_parcial', False):
-                            desc_pai = str(x['descricao']).strip().upper()
-                            mask_filhos = (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_pai) & (df_mes['valor_plan'] == 0)
-                            df_filhos = df_mes[mask_filhos]
-                            
-                            v_parciais_total = df_filhos.get('parcial_real', pd.Series(0)).sum()
-                            v_plan_pai = x['valor_plan']
+def format_moeda(v):
+    return f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-                            # Se V.Plan > V.Real (soma parciais), soma V.Plan
-                            if v_plan_pai > v_parciais_total:
-                                total += v_plan_pai
-                            else:
-                                # Se V.Real >= V.Plan, soma apenas parciais sem cartão (cc_tipo == none/vazio)
-                                mask_sem_cartao = df_filhos.get('cc_tipo', pd.Series('')).fillna('').astype(str).str.strip().str.upper().isin(['', 'NONE'])
-                                total += df_filhos[mask_sem_cartao].get('parcial_real', pd.Series(0)).sum()
-                        else:
-                            if str(x.get('cc_tipo', '')).strip().upper() in ['$CCP', 'CCP']:
-                                desc_cc = str(x['descricao']).strip().upper()
-                                m_lcl = (df_mes.get('cc_tipo', pd.Series('')).fillna('').astype(str).str.strip().str.upper() == 'LCL')
-                                m_desc = (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_cc) | (df_mes.get('cc_descricao', pd.Series('')).fillna('').astype(str).str.strip().str.upper() == desc_cc)
-                                soma_lcls_real = df_mes[m_lcl & m_desc]['valor_real'].sum()
-                                soma_lcls_plan = df_mes[m_lcl & m_desc]['valor_plan'].sum()
-                                val_cartao = soma_lcls_real if soma_lcls_real > 0 else (soma_lcls_plan if soma_lcls_plan > 0 else x['valor_plan'])
-                                total += val_cartao
-                            else:
-                                total += x['valor_real'] if x['valor_real'] > 0 else x['valor_plan']
-                return total
 
-            entradas_mes = calcular_total_tipo(df_mes[df_mes['tipo'] == 'Entrada'], mes_fechado)
-            saidas_mes = calcular_total_tipo(df_mes[df_mes['tipo'] == 'Saída'], mes_fechado)
-            saldo_final_mes = saldo_acumulado_mes + entradas_mes - saidas_mes
-            nome_mes_exibicao = datetime.strptime(mes_str, '%Y-%m').strftime('%m/%Y')
-            
-            with st.expander(f"📅 {nome_mes_exibicao} | Saldo Final: R$ {format_moeda(saldo_final_mes)}"):
-                col1, col2, col3, col4 = st.columns(4)
-                col1.metric("Saldo Inicial", f"R$ {format_moeda(saldo_acumulado_mes)}")
-                col2.metric("Entradas (+)", f"R$ {format_moeda(entradas_mes)}")
-                col3.metric("Saídas (-)", f"R$ {format_moeda(saidas_mes)}")
-                col4.metric("Saldo Final", f"R$ {format_moeda(saldo_final_mes)}")
-                st.divider()
+def parse_moeda(t):
+    try:
+        t = (
+            str(t)
+            .replace("R$", "")
+            .replace(" ", "")
+            .replace(".", "")
+            .replace(",", ".")
+        )
+        return float(t)
+    except:
+        return 0.0
 
-                if not df_mes.empty:
-                    # --- CSS REVISADO COM CLASSE EXCLUSIVA det-linha ---
-                    st.markdown("""
-                        <style>
-                        .tab-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin-bottom: 2px; }
-                        .tab-body { width: fit-content; min-width: 580px; display: flex; flex-direction: column; font-family: sans-serif; }
-                        .tab-row { display: flex; flex-direction: row; align-items: center; padding: 6px 0; border-bottom: 1px solid #eee; }
-                        .tab-hdr { font-weight: bold; background-color: #f8f9fa; border-top: 1px solid #ddd; }
-                        .c-dt { width: 85px; font-size: 13px; flex-shrink: 0; }
-                        .c-ds { width: 220px; font-size: 13px; flex-shrink: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 5px; }
-                        .c-es { width: 35px; font-size: 13px; flex-shrink: 0; text-align: center; }
-                        .c-vl { width: 90px; font-size: 13px; flex-shrink: 0; text-align: right; }
-                        .c-st { width: 55px; font-size: 12px; flex-shrink: 0; text-align: center; font-weight: bold; margin-left: 5px; }
-                        
-                        /* Margem de 38px à direita do Status */
-                        .c-act { width: 40px; margin-left: 38px; flex-shrink: 0; display: flex; align-items: center; justify-content: flex-start; }
 
-                        .linha-alerta-saida { color: #FF0000 !important; font-weight: bold; }
-                        .linha-alerta-entrada { color: #0000FF !important; font-weight: bold; }
+# ==============================================================================
+# RETORNO DO MERCADO PAGO E LOGIN AUTOMÁTICO
+# ==============================================================================
+status_retorno = None
+pref_id = None
 
-                        /* Oculta seta nativa apenas das nossas linhas */
-                        details.det-linha > summary {
-                            list-style: none !important;
-                            outline: none !important;
-                            cursor: pointer;
+if "logado" not in st.session_state:
+    st.session_state.logado = False
+
+query_params = st.query_params
+
+if "bypass_uid" in query_params and "bypass_val" in query_params:
+    uid_retorno = str(query_params["bypass_uid"]).strip()
+    valor_retorno = float(query_params["bypass_val"])
+    plano_retorno = query_params.get("bypass_plano", "")
+    venc_retorno_str = query_params.get("bypass_venc", "")
+
+    try:
+        req_temp = (
+            supabase.table("pagamentos_temp")
+            .select("*")
+            .eq("usuario_id", uid_retorno)
+            .execute()
+        )
+
+        if req_temp.data:
+            dados_temp = req_temp.data[0]
+            fuso_br = zoneinfo.ZoneInfo("America/Sao_Paulo")
+            hoje_br_string = datetime.now(fuso_br).strftime("%Y-%m-%d")
+
+            v_tipo_renovacao = dados_temp.get("tipo_renovacao")
+
+            if not venc_retorno_str:
+                venc_retorno_str = (
+                    datetime.now(fuso_br).date() + timedelta(days=30)
+                ).strftime("%Y-%m-%d")
+
+            try:
+                supabase.table("usuarios").update({
+                    "data_ult_assinat": hoje_br_string,
+                    "valor_pago": valor_retorno,
+                    "vencimento": venc_retorno_str,
+                    "tipo_renovacao": v_tipo_renovacao,
+                }).eq("id", uid_retorno).execute()
+            except Exception as erro_banco:
+                st.error(
+                    "Erro ao consolidar dados cadastrais da assinatura:"
+                    f" {erro_banco}"
+                )
+
+            v_projeto_id = (
+                plano_retorno
+                if plano_retorno
+                else dados_temp.get("projeto_id")
+            )
+            if v_projeto_id:
+                try:
+                    supabase.table("config_projetos").update({
+                        "data_ini": dados_temp.get("data_ini"),
+                        "data_fim": dados_temp.get("data_fim"),
+                        "zap_ativo": dados_temp.get("zap_ativo"),
+                        "email_ativo": dados_temp.get("email_ativo"),
+                    }).eq("projeto_id", v_projeto_id).eq(
+                        "usuario_id", uid_retorno
+                    ).execute()
+                except Exception:
+                    pass
+
+            req_user = (
+                supabase.table("usuarios")
+                .select("*")
+                .eq("id", uid_retorno)
+                .execute()
+            )
+            if req_user.data:
+                u_dados = req_user.data[0]
+
+                st.session_state.logado = True
+                st.session_state.CHAVE_MESTRA_UUID = str(uid_retorno)
+                st.session_state.usuario = u_dados.get(
+                    "email", "Usuário Confirmado"
+                )
+                st.session_state.usuario_email = u_dados.get("email", "")
+                st.session_state.vencimento = venc_retorno_str
+                st.session_state.projeto_ativo = v_projeto_id
+                st.session_state.zap_ativo = dados_temp.get("zap_ativo", False)
+                st.session_state.email_ativo = dados_temp.get("email_ativo", 1)
+                st.session_state.escolha = "⚙️ Gestão"
+
+                try:
+                    supabase.table("pagamentos_temp").delete().eq(
+                        "usuario_id", uid_retorno
+                    ).execute()
+                except Exception:
+                    pass
+
+                components.html(
+                    """
+                    <script>
+                        localStorage.setItem('orcas_payment_success', 'true');
+                        if (window.opener) {
+                            window.close();
                         }
-                        details.det-linha > summary::-webkit-details-marker,
-                        details.det-linha > summary::marker {
-                            display: none !important;
-                        }
+                    </script>
+                """,
+                    height=0,
+                )
 
-                        /* Estilo da caixa do botão */
-                        .btn-exp-native {
-                            background-color: transparent !important;
-                            color: #000000 !important;
-                            border: 1.5px solid #222222 !important;
-                            border-radius: 6px !important;
-                            font-size: 11px !important;
-                            font-weight: bold !important;
-                            padding: 1px 5px !important;
-                            height: 22px !important;
-                            min-width: 28px !important;
-                            display: inline-flex !important;
-                            align-items: center !important;
-                            justify-content: center !important;
-                            user-select: none !important;
-                        }
-                        .btn-exp-native:hover {
-                            background-color: #e5e7eb !important;
-                            border-color: #000000 !important;
-                        }
+                st.query_params.clear()
+                st.rerun()
+        else:
+            st.warning(
+                "⚠️ Nota: O registro temporário de pagamento já foi"
+                " processado ou expirou."
+            )
+            st.query_params.clear()
 
-                        /* 1. ESTADO FECHADO (PADRÃO): Mostra >> e esconde ^^ */
-                        details.det-linha > summary .lbl-closed { display: inline !important; }
-                        details.det-linha > summary .lbl-open { display: none !important; }
+    except Exception as erro_bypass:
+        st.error(
+            "Erro interno ao processar validação automática:"
+            f" {erro_bypass}"
+        )
 
-                        /* 2. ESTADO ABERTO DA PRÓPRIA LINHA: Esconde >> e mostra ^^ */
-                        details.det-linha[open] > summary .lbl-closed { display: none !important; }
-                        details.det-linha[open] > summary .lbl-open { display: inline !important; }
+elif query_params and len(query_params) > 0:
+    status_retorno = query_params.get("status") or query_params.get(
+        "collection_status"
+    )
+    pref_id = query_params.get("preference_id") or query_params.get(
+        "collection_id"
+    )
 
-                        /* Outros botões padrão do Streamlit */
-                        div.stButton > button:not([kind="primary"]) {
-                            background-color: #1E3A8A !important;
-                            color: #FFFFFF !important;
-                            border: none !important;
-                            border-radius: 4px !important;
-                            font-size: 11px !important;
-                            padding: 2px 6px !important;
-                            height: 28px !important;
-                        }
-                        </style>
-                    """, unsafe_allow_html=True)
+if status_retorno and pref_id and not st.session_state.logado:
+    if status_retorno in ["approved", "authorized", "pending"]:
+        with st.spinner(
+            "🚀 Processando seu pagamento e aplicando as alterações do seu"
+            " plano..."
+        ):
+            usuario_auto = retornodomp.tratar_retorno(
+                supabase, pref_id, status_retorno
+            )
+            if usuario_auto and isinstance(usuario_auto, dict):
+                st.session_state.logado = True
+                st.session_state.CHAVE_MESTRA_UUID = str(
+                    usuario_auto.get("id", "")
+                )
+                st.session_state.usuario = usuario_auto.get("email", "")
+                st.session_state.usuario_email = usuario_auto.get("email", "")
+                st.session_state.vencimento = str(
+                    usuario_auto.get("vencimento", "")
+                )
+                st.session_state.projeto_ativo = usuario_auto.get(
+                    "projeto_ativo"
+                )
+                st.session_state.zap_ativo = usuario_auto.get(
+                    "zap_ativo", False
+                )
+                st.session_state.email_ativo = usuario_auto.get(
+                    "email_ativo", 1
+                )
+                st.session_state.pagamento_realizado_sucesso = True
+                st.query_params.clear()
+                st.session_state.escolha = "⚙️ Gestão"
+                st.rerun()
 
-                    s_cc_m = df_mes.get('cc_tipo', pd.Series('', index=df_mes.index)).fillna('').astype(str).str.strip().str.upper()
-                    eh_ccp_mask = s_cc_m.isin(['$CCP', 'CCP'])
+if not st.session_state.get("CHAVE_MESTRA_UUID"):
+    st.session_state["CHAVE_MESTRA_UUID"] = ""
 
-                    # Identifica os nomes/descrições de itens que aceitam parciais (pais)
-                    desc_pais_parciais = set(
-                        df_mes[df_mes.get('permite_parcial', False) == True]['descricao']
-                        .fillna('').astype(str).str.strip().str.upper()
+# --- 4. LOGIN ---
+if "logado" not in st.session_state:
+    st.session_state.logado = False
+if "etapa_auth" not in st.session_state:
+    st.session_state.etapa_auth = "login"
+
+if not st.session_state.logado:
+    st.markdown(
+        "<h1 style='text-align: center; margin-top: 50px;'>🐋 ORCAS</h1>",
+        unsafe_allow_html=True,
+    )
+    c1, c2, c3 = st.columns([1, 2, 1])
+
+    with c2:
+        if st.session_state.etapa_auth == "login":
+            aba = st.tabs(["Acessar Conta", "Criar Nova Conta"])
+
+            with aba[0]:
+                em = st.text_input("E-mail Cadastrado")
+                se = st.text_input("Senha de Acesso", type="password")
+                col_b1, col_b2 = st.columns(2)
+                if col_b1.button("Entrar no Sistema"):
+                    senha_hash = hashlib.sha256(str.encode(se)).hexdigest()
+                    res = (
+                        supabase.table("usuarios")
+                        .select("id, nome, email, celular, vencimento, zap_ativo")
+                        .eq("email", em)
+                        .eq("senha", senha_hash)
+                        .execute()
                     )
+                    if res.data:
+                        user_data = res.data[0]
+                        st.session_state.logado = True
+                        st.session_state.CHAVE_MESTRA_UUID = str(
+                            user_data["id"]
+                        )
+                        st.session_state.usuario = em
+                        st.session_state.vencimento = str(
+                            user_data["vencimento"]
+                        )
+                        st.session_state.zap_ativo = user_data.get(
+                            "zap_ativo", 0
+                        )
+                        st.session_state.projeto_ativo = None
+                        st.rerun()
+                    else:
+                        st.error("E-mail ou senha incorretos.")
 
-                    # Um item só é "filho de parcial" se sua descrição bater com um pai e seu valor_plan for 0 com parcial_real > 0
-                    is_filho_parcial = (
-                        df_mes['descricao'].fillna('').astype(str).str.strip().str.upper().isin(desc_pais_parciais) &
-                        (df_mes['valor_plan'] == 0) &
-                        (df_mes.get('parcial_real', pd.Series(0, index=df_mes.index)).fillna(0) > 0)
-                    )
+                if col_b2.button("Esqueci minha Senha"):
+                    st.session_state.etapa_auth = "esqueci_senha"
+                    st.rerun()
 
-                    # 1. Deve possuir algum valor (planejado ou realizado) OU ser cartão mestre
-                    v_parcial_series = df_mes.get('parcial_real', pd.Series(0, index=df_mes.index)).fillna(0)
-                    mask_tem_valor = (df_mes['valor_plan'] > 0) | (df_mes['valor_real'] > 0) | (v_parcial_series > 0) | eh_ccp_mask
+            with aba[1]:
+                # Inicialização de variáveis de sessão para evitar perda de estado
+                if "input_new_nome" not in st.session_state:
+                    st.session_state.input_new_nome = ""
+                if "input_new_email" not in st.session_state:
+                    st.session_state.input_new_email = ""
+                if "input_new_celular" not in st.session_state:
+                    st.session_state.input_new_celular = ""
 
-                    # 2. Esconde LCLs planejados da lista principal
-                    mask_nao_lcl = (s_cc_m != 'LCL') | ((s_cc_m == 'LCL') & ((df_mes['valor_real'] > 0) | (v_parcial_series > 0)))
+                new_nome = st.text_input("Nome Completo", key="input_new_nome")
+                new_email = st.text_input("E-mail", key="input_new_email")
+                new_celular = st.text_input("Celular (com DDD)", key="input_new_celular")
 
-                    # 3. Esconde exclusivamente as parciais filhas da lista principal
-                    df_exibir = df_mes[mask_tem_valor & mask_nao_lcl & (~is_filho_parcial)].sort_values('data')
-                    
-                    # Cabeçalho da tabela
-                    h_hdr = '<div class="tab-scroll"><div class="tab-body">'
-                    h_hdr += '<div class="tab-row tab-hdr"><div class="c-dt">Data</div><div class="c-ds">Descrição</div><div class="c-es">E/S</div><div class="c-vl">V.Plan</div><div class="c-vl">V.Real</div><div class="c-st">Status</div><div class="c-act"></div></div>'
+                col_env1, col_env2 = st.columns(2)
 
-                    for idx, row in df_exibir.iterrows():
-                        desc_row_upper = str(row['descricao']).strip().upper()
-                        
-                        v_ac = df_mes[
-                            df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_row_upper
-                        ].get('parcial_real', pd.Series(0)).sum()
-                        
-                        v_plan = row['valor_plan']
-                        v_re = v_ac if v_ac > 0 else row['valor_real']
-                        eh_cartao_ccp = str(row.get('cc_tipo', '')).strip().upper() in ['$CCP', 'CCP']
+                if col_env1.button("Enviar Código para Celular"):
+                    if new_email and new_celular:
+                        codigo = str(random.randint(100000, 999999))
+                        st.session_state.codigo_verificacao = codigo
+                        st.session_state.codigo_timestamp = datetime.now()
+                        st.session_state.temp_user_data = {
+                            "nome": new_nome,
+                            "email": new_email,
+                            "celular": new_celular,
+                        }
+                        st.info(f"Código enviado para o celular {new_celular}")
+                    else:
+                        st.error(
+                            "Preencha E-mail e Celular para receber o código."
+                        )
 
-                        # Busca LCLs vinculadas ao cartão mestre (por descricao ou cc_descricao)
-                        df_lcls_cartao = pd.DataFrame()
-                        if eh_cartao_ccp:
-                            mask_lcl = (df_mes.get('cc_tipo', pd.Series('')).fillna('').astype(str).str.strip().str.upper() == 'LCL')
-                            mask_desc_dir = (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_row_upper)
-                            mask_desc_cc = (df_mes.get('cc_descricao', pd.Series('')).fillna('').astype(str).str.strip().str.upper() == desc_row_upper)
-                            df_lcls_cartao = df_mes[mask_lcl & (mask_desc_dir | mask_desc_cc)]
-                            
-                            if not df_lcls_cartao.empty:
-                                v_plan = df_lcls_cartao['valor_plan'].sum()
-                                v_re = df_lcls_cartao['valor_real'].sum()
+                if col_env2.button("Enviar Código para E-mail"):
+                    if new_email:
+                        codigo = str(random.randint(100000, 999999))
+                        st.session_state.codigo_verificacao = codigo
+                        st.session_state.codigo_timestamp = datetime.now()
+                        st.session_state.temp_user_data = {
+                            "nome": new_nome,
+                            "email": new_email,
+                            "celular": new_celular,
+                        }
+                        if disparar_email_codigo(new_email, codigo):
+                            st.info(
+                                f"Código enviado com sucesso para o e-mail {new_email}"
+                            )
+                    else:
+                        st.error(
+                            "Preencha o campo E-mail para receber o código."
+                        )
 
-                        dt_e = pd.to_datetime(row['data']).strftime('%d/%m/%Y')
-                        st_e = 'PLAN' if row.get('status') == 'Planejado' else 'REAL'
-                        
-                        classe_cor = ""
-                        if v_re > v_plan:
-                            if row['tipo'] == 'Saída':
-                                classe_cor = " linha-alerta-saida"
-                            elif row['tipo'] == 'Entrada':
-                                classe_cor = " linha-alerta-entrada"
-                        
-                        # Identifica lançamentos de baixa parcial (filhos)
-                        filhos_parciais = df_mes[
-                            (df_mes['descricao'].fillna('').astype(str).str.strip().str.upper() == desc_row_upper) & 
-                            (df_mes['valor_plan'] == 0) & 
-                            (df_mes.get('parcial_real', pd.Series(0)) > 0)
-                        ]
+                cod_input = st.text_input(
+                    "Digite o Código recebido no Celular ou no E-mail abaixo e"
+                    " clique em [Validar Código]",
+                    key="new_acc_code",
+                )
 
-                        tem_subitens = (eh_cartao_ccp and not df_lcls_cartao.empty) or (not filhos_parciais.empty)
-
-                        # Montagem do bloco de linha
-                        if tem_subitens:
-                            h_hdr += f'<details class="det-linha"><summary>'
-                            h_hdr += f'<div class="tab-row{classe_cor}">'
-                            h_hdr += f'<div class="c-dt">{dt_e}</div><div class="c-ds">{row["descricao"]}</div><div class="c-es">{row["tipo"][0]}</div>'
-                            h_hdr += f'<div class="c-vl">{format_moeda(v_plan)}</div><div class="c-vl">{format_moeda(v_re)}</div><div class="c-st">{st_e}</div>'
-                            h_hdr += f'<div class="c-act"><span class="btn-exp-native"><span class="lbl-closed">&gt;&gt;</span><span class="lbl-open">^^</span></span></div>'
-                            h_hdr += '</div></summary>'
-
-                            # Subitens exibidos quando aberto
-                            # 1. Compras no Cartão de Crédito
-                            if eh_cartao_ccp and not df_lcls_cartao.empty:
-                                for _, lcl in df_lcls_cartao.iterrows():
-                                    desc_cc_val = str(lcl.get('cc_descricao', '')).strip()
-                                    desc_lcl = desc_cc_val if desc_cc_val and desc_cc_val.upper() != desc_row_upper else lcl['descricao']
-                                    
-                                    dt_compra = lcl.get('cc_data_compra') if 'cc_data_compra' in lcl and pd.notna(lcl['cc_data_compra']) else lcl['data']
-                                    dt_compra_str = pd.to_datetime(dt_compra).strftime('%d/%m/%Y')
-                                    
-                                    h_hdr += f'<div class="tab-row{classe_cor}" style="font-style: italic; opacity: 0.85; background-color: #f1f5f9;">'
-                                    h_hdr += f'<div class="c-dt"></div><div class="c-ds" style="padding-left:15px;">> {desc_lcl} ({dt_compra_str})</div><div class="c-es">S</div>'
-                                    h_hdr += f'<div class="c-vl">{format_moeda(lcl["valor_plan"])}</div><div class="c-vl">{format_moeda(lcl["valor_real"])}</div><div class="c-st">PLAN</div><div class="c-act"></div>'
-                                    h_hdr += f'</div>'
-                            
-                            # 2. Parciais
-                            if not filhos_parciais.empty:
-                                for _, f in filhos_parciais.iterrows():
-                                    cc_desc_f = str(f.get('cc_descricao', '')).strip()
-                                    if cc_desc_f:
-                                        desc_subitem = cc_desc_f
-                                    else:
-                                        dt_f = pd.to_datetime(f['parcial_data']).strftime('%d/%m/%Y')
-                                        desc_subitem = f"Parcial: {dt_f}"
-
-                                    h_hdr += f'<div class="tab-row{classe_cor}" style="font-style: italic; opacity: 0.85; background-color: #f1f5f9;">'
-                                    h_hdr += f'<div class="c-dt"></div><div class="c-ds" style="padding-left:15px;">{desc_subitem}</div><div class="c-es">{f["tipo"][0]}</div>'
-                                    h_hdr += f'<div class="c-vl">---</div><div class="c-vl">{format_moeda(f["parcial_real"])}</div><div class="c-st">REAL</div><div class="c-act"></div>'
-                                    h_hdr += f'</div>'
-
-                            h_hdr += '</details>'
+                if st.button("Validar Código"):
+                    if "codigo_timestamp" in st.session_state:
+                        decorrido = (
+                            datetime.now() - st.session_state.codigo_timestamp
+                        ).total_seconds() / 60
+                        if decorrido > 10:
+                            st.error(
+                                "O código expirou (validade de 10 minutos)."
+                                " Solicite um novo."
+                            )
+                        elif cod_input == st.session_state.get(
+                            "codigo_verificacao"
+                        ):
+                            st.session_state.etapa_auth = "definir_senha"
+                            st.rerun()
                         else:
-                            # Linha normal sem subitens
-                            h_hdr += f'<div class="tab-row{classe_cor}">'
-                            h_hdr += f'<div class="c-dt">{dt_e}</div><div class="c-ds">{row["descricao"]}</div><div class="c-es">{row["tipo"][0]}</div>'
-                            h_hdr += f'<div class="c-vl">{format_moeda(v_plan)}</div><div class="c-vl">{format_moeda(v_re)}</div><div class="c-st">{st_e}</div>'
-                            h_hdr += f'<div class="c-act"></div>'
-                            h_hdr += '</div>'
+                            st.error("Código inválido.")
+                    else:
+                        st.error("Solicite um código antes de validar.")
 
-                    h_hdr += '</div></div>'
-                    st.markdown(h_hdr, unsafe_allow_html=True)
+                if st.button("Voltar", key="btn_voltar_new"):
+                    st.session_state.etapa_auth = "login"
+                    st.rerun()
+
+        elif st.session_state.etapa_auth == "esqueci_senha":
+            st.subheader("Verificação de Segurança")
+            conta_id = st.text_input(
+                "Informe a identificação da conta", key="usr_identity_check"
+            )
+
+            col_rec1, col_rec2 = st.columns(2)
+            if col_rec1.button("Enviar Código para Celular"):
+                if conta_id:
+                    res = (
+                        supabase.table("usuarios")
+                        .select("celular")
+                        .eq("email", conta_id)
+                        .execute()
+                    )
+                    if res.data:
+                        codigo = str(random.randint(100000, 999999))
+                        st.session_state.codigo_verificacao = codigo
+                        st.session_state.codigo_timestamp = datetime.now()
+                        st.session_state.temp_email = conta_id
+                        st.info("Código enviado para o celular cadastrado.")
+                    else:
+                        st.error("Conta não localizada.")
                 else:
-                    st.write("ℹ️ Nenhum lançamento para este mês.")
-            
-            saldo_acumulado_mes = saldo_final_mes
+                    st.warning("Informe o e-mail primeiro.")
 
-    if st.button("Voltar ao Topo", key="btn_topo_lanc"): 
-        ir_para_o_topo()
+            if col_rec2.button("Enviar Código para E-mail"):
+                if conta_id:
+                    res = (
+                        supabase.table("usuarios")
+                        .select("email")
+                        .eq("email", conta_id)
+                        .execute()
+                    )
+                    if res.data:
+                        codigo = str(random.randint(100000, 999999))
+                        st.session_state.codigo_verificacao = codigo
+                        st.session_state.codigo_timestamp = datetime.now()
+                        st.session_state.temp_email = conta_id
+                        if disparar_email_codigo(conta_id, codigo):
+                            st.info("Código enviado para o e-mail cadastrado.")
+                    else:
+                        st.error("Conta não localizada.")
+                else:
+                    st.warning("Informe o e-mail primeiro.")
+
+            st.write("---")
+
+            input_val = st.text_input(
+                "Digite a sequência numérica recebida",
+                value="",
+                placeholder="Ex: 123456",
+                key="field_code_validation_secure",
+            )
+
+            if st.button("Validar Código", use_container_width=True):
+                if "codigo_timestamp" in st.session_state:
+                    decorrido = (
+                        datetime.now() - st.session_state.codigo_timestamp
+                    ).total_seconds() / 60
+                    if decorrido > 10:
+                        st.error("O código expirou. Solicite um novo.")
+                    elif input_val == st.session_state.get(
+                        "codigo_verificacao"
+                    ):
+                        st.session_state.temp_email = conta_id
+                        st.session_state.etapa_auth = "definir_senha"
+                        st.rerun()
+                    else:
+                        st.error("Sequência numérica incorreta.")
+                else:
+                    st.error("Gere um código antes de validar.")
+
+            if st.button("Voltar", key="btn_voltar_forgot_final"):
+                st.session_state.etapa_auth = "login"
+                st.rerun()
+
+        elif st.session_state.etapa_auth == "definir_senha":
+            st.subheader("Definir Nova Senha")
+            nova_se = st.text_input("Nova Senha", type="password")
+            conf_se = st.text_input("Confirme a Nova Senha", type="password")
+
+            if st.button("Finalizar e Entrar"):
+                if nova_se == conf_se and len(nova_se) > 0:
+                    senha_hash = hashlib.sha256(str.encode(nova_se)).hexdigest()
+
+                    if "temp_user_data" in st.session_state:
+                        d = st.session_state.temp_user_data
+                        venc_inicial = (
+                            (datetime.now() + timedelta(days=7))
+                            .date()
+                            .strftime("%Y-%m-%d")
+                        )
+
+                        res = (
+                            supabase.table("usuarios")
+                            .insert({
+                                "nome": d["nome"],
+                                "email": d["email"],
+                                "celular": d["celular"],
+                                "senha": senha_hash,
+                                "vencimento": venc_inicial,
+                            })
+                            .execute()
+                        )
+
+                        user_id = res.data[0]["id"]
+                        user_email = d["email"]
+                        user_venc = venc_inicial
+                    else:
+                        user_email = st.session_state.temp_email
+                        res = (
+                            supabase.table("usuarios")
+                            .update({"senha": senha_hash})
+                            .eq("email", user_email)
+                            .execute()
+                        )
+                        user_id = res.data[0]["id"]
+                        user_venc = res.data[0]["vencimento"]
+
+                    st.session_state.logado = True
+                    st.session_state.CHAVE_MESTRA_UUID = str(user_id)
+                    st.session_state.usuario = user_email
+                    st.session_state.vencimento = str(user_venc)
+                    st.session_state.projeto_ativo = None
+                    st.rerun()
+                else:
+                    st.error("As senhas não coincidem ou estão vazias.")
+    st.stop()
+
+# --- 5. ESTADO E DADOS ---
+
+if not st.session_state.get("logado"):
+    st.warning(
+        "⚠️ Sessão encerrada ou inválida. Por favor, faça login para acessar o"
+        " sistema."
+    )
+    st.stop()
+
+ID_USUARIO_LOGADO = str(st.session_state.get("CHAVE_MESTRA_UUID", ""))
+vencimento_str = st.session_state.get("vencimento", "")
+
+if not vencimento_str or vencimento_str.strip() == "":
+    venc_dt_objeto = datetime.now().date()
+else:
+    try:
+        venc_dt_objeto = datetime.strptime(vencimento_str, "%Y-%m-%d").date()
+    except Exception:
+        venc_dt_objeto = datetime.now().date()
+
+if ID_USUARIO_LOGADO:
+    try:
+        security.verificar_bloqueio_v01(
+            ID_USUARIO_LOGADO, (venc_dt_objeto - datetime.now().date()).days
+        )
+    except Exception:
+        pass
+
+try:
+    projs_req = (
+        supabase.table("config_projetos")
+        .select("projeto_id")
+        .eq("usuario_id", ID_USUARIO_LOGADO)
+        .execute()
+    )
+    projs = [r["projeto_id"] for r in projs_req.data] if projs_req.data else []
+except Exception:
+    projs = []
+
+if "projeto_ativo" not in st.session_state:
+    st.session_state.projeto_ativo = None
+
+if "escolha" not in st.session_state:
+    st.session_state.escolha = (
+        "🏠 Dashboard" if st.session_state.projeto_ativo else "⚙️ Gestão"
+    )
+
+s_db, d_ini_db, d_fim_db = 0.0, None, None
+if st.session_state.projeto_ativo and ID_USUARIO_LOGADO:
+    try:
+        cfg_req = (
+            supabase.table("config_projetos")
+            .select("*")
+            .eq("projeto_id", st.session_state.projeto_ativo)
+            .eq("usuario_id", ID_USUARIO_LOGADO)
+            .execute()
+        )
+        if cfg_req.data:
+            cfg = cfg_req.data[0]
+            s_db = cfg.get("saldo_inicial", 0.0)
+            if cfg.get("data_ini"):
+                d_ini_db = datetime.strptime(cfg["data_ini"], "%Y-%m-%d").date()
+            if cfg.get("data_fim"):
+                d_fim_db = datetime.strptime(cfg["data_fim"], "%Y-%m-%d").date()
+    except Exception:
+        pass
+
+# --- 6. NAVEGAÇÃO NA SIDEBAR ---
+with st.sidebar:
+    st.markdown(
+        '<div class="logo-sidebar">🐋 ORCAS</div>', unsafe_allow_html=True
+    )
+
+    usuario_exibir = st.session_state.get("usuario", "Usuário Logado")
+    st.markdown(
+        f'<div class="user-email">👤 {usuario_exibir}</div>',
+        unsafe_allow_html=True,
+    )
+
+    hoje_atual = datetime.now().date()
+    dias_para_vencer = (venc_dt_objeto - hoje_atual).days
+
+    if dias_para_vencer < 0:
+        texto_venc = f"⚠️ EXPIRADO EM: {venc_dt_objeto.strftime('%d/%m/%Y')}"
+        cor_venc = "#FF0000"
+        bloqueado = True
+    elif dias_para_vencer <= 3:
+        texto_venc = (
+            f"⏳ EXPIRA EM: {venc_dt_objeto.strftime('%d/%m/%Y')}"
+            f" ({dias_para_vencer}d)"
+        )
+        cor_venc = "#FFA500"
+        bloqueado = False
+    else:
+        texto_venc = f"📅 EXPIRA EM: {venc_dt_objeto.strftime('%d/%m/%Y')}"
+        cor_venc = "#333333"
+        bloqueado = False
+
+    st.markdown(
+        f'<div style="color:{cor_venc}; font-weight:bold; font-size:13px;'
+        f' padding:5px 0;">{texto_venc}</div>',
+        unsafe_allow_html=True,
+    )
+
+    if st.session_state.projeto_ativo:
+        st.markdown(
+            '<div class="project-tag-sidebar">Plano Ativo:'
+            f" {st.session_state.projeto_ativo}</div>",
+            unsafe_allow_html=True,
+        )
+
+    st.divider()
+
+    if bloqueado:
+        menu_opcoes = ["⚙️ Gestão"]
+        if st.session_state.escolha == "💳 Pagamentos":
+            menu_opcoes.append("💳 Pagamentos")
+        else:
+            st.session_state.escolha = "⚙️ Gestão"
+        st.warning("Assinatura Expirada! Acesse a Gestão para renovar.")
+    else:
+        menu_opcoes = [
+            "🏠 Dashboard",
+            "📝 Lançamentos",
+            "🗓️ Projetar",
+            "✅ Conciliação",
+            "⚙️ Gestão",
+            "📊 Admin",
+        ]
+        if st.session_state.escolha == "💳 Pagamentos":
+            menu_opcoes.append("💳 Pagamentos")
+
+    if st.session_state.escolha in menu_opcoes:
+        idx_selecionado = menu_opcoes.index(st.session_state.escolha)
+    else:
+        idx_selecionado = menu_opcoes.index("⚙️ Gestão")
+
+    escolha_sidebar = st.radio(
+        "Menu de Navegação", menu_opcoes, index=idx_selecionado
+    )
+
+    if escolha_sidebar != st.session_state.escolha:
+        st.session_state.escolha = escolha_sidebar
+        st.rerun()
+
+    st.divider()
+
+    # --- BOTÃO "FALAR COM ORCAS" ---
+    if st.sidebar.button("🎙️ Falar com ORCAS", use_container_width=True, type="primary"):
+        st.session_state.abrir_modal_orcas = True
+
+    if st.session_state.get("abrir_modal_orcas", False):
+        plano_atual = st.session_state.get("projeto_ativo")
+        porvoz.exibir_modal_voz_orcas(
+            supabase, ID_USUARIO_LOGADO, plano_atual
+        )
+
+    if st.button("Sair do Sistema", use_container_width=True):
+        st.session_state.clear()
+        st.rerun()
+
+# --- 7. CARREGAMENTO DOS DADOS ---
+try:
+    res_l = (
+        supabase.table("lancamentos")
+        .select("*")
+        .eq("projeto_id", st.session_state.projeto_ativo)
+        .eq("usuario_id", ID_USUARIO_LOGADO)
+        .order("data")
+        .execute()
+    )
+    df = pd.DataFrame(res_l.data)
+    if not df.empty:
+        df.columns = [c.lower() for c in df.columns]
+    else:
+        df = pd.DataFrame(
+            columns=[
+                "id",
+                "data",
+                "descricao",
+                "tipo",
+                "valor_plan",
+                "valor_real",
+                "status",
+                "projeto_id",
+                "usuario_id",
+            ]
+        )
+except Exception:
+    df = pd.DataFrame(
+        columns=[
+            "id",
+            "data",
+            "descricao",
+            "tipo",
+            "valor_plan",
+            "valor_real",
+            "status",
+            "projeto_id",
+            "usuario_id",
+        ]
+    )
+
+# --- 8. ROTEAMENTO ---
+st.markdown("<div id='topo-ancora'></div>", unsafe_allow_html=True)
+
+if st.session_state.escolha == "🏠 Dashboard" and not bloqueado:
+    dash.exibir_dashboard(df, supabase, ID_USUARIO_LOGADO, s_db)
+elif st.session_state.escolha == "📝 Lançamentos" and not bloqueado:
+    lanc.exibir_lancamentos(
+        df,
+        supabase,
+        ID_USUARIO_LOGADO,
+        d_ini_db,
+        d_fim_db,
+        s_db,
+        format_moeda,
+        ir_para_o_topo,
+    )
+elif st.session_state.escolha == "🗓️ Projetar" and not bloqueado:
+    proj.exibir_projetar(df, supabase, ID_USUARIO_LOGADO, d_ini_db, d_fim_db, parse_moeda)
+elif st.session_state.escolha == "✅ Conciliação" and not bloqueado:
+    conc.exibir_conciliacao(
+        df, supabase, ID_USUARIO_LOGADO, format_moeda, parse_moeda
+    )
+elif st.session_state.escolha == "⚙️ Gestão":
+    import orcas_v01_gestao as gestao
+
+    gestao.exibir_gestao(
+        supabase,
+        ID_USUARIO_LOGADO,
+        projs,
+        d_ini_db,
+        d_fim_db,
+        s_db,
+        format_moeda,
+        parse_moeda,
+        security,
+    )
+elif st.session_state.escolha == "📊 Admin" and not bloqueado:
+    adm.exibir_admin(df, supabase, ID_USUARIO_LOGADO, ir_para_o_topo)
+elif st.session_state.escolha == "💳 Pagamentos":
+    import orcas_v01_pagamentos as pag
+
+    pag.exibir_pagamentos(supabase, ID_USUARIO_LOGADO)
+else:
+    import orcas_v01_gestao as gestao
+
+    gestao.exibir_gestao(
+        supabase,
+        ID_USUARIO_LOGADO,
+        projs,
+        d_ini_db,
+        d_fim_db,
+        s_db,
+        format_moeda,
+        parse_moeda,
+        security,
+    )
+
+# --- RODAPÉ ---
+st.divider()
+usuario_rodape = st.session_state.get(
+    "usuario_email", st.session_state.get("usuario", "Usuário")
+)
+st.caption(f"🐋 ORCAS App • Logado como: {usuario_rodape}")

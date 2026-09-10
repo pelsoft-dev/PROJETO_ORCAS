@@ -26,11 +26,11 @@ import orcas_v01_porvoz as porvoz  # Módulo Inteligente de Voz (Groq + Gemini)
 import orcas_v01_projetar as proj
 
 
-# --- FUNÇÃO DE ENVIO INTEGRADA ---
+# --- FUNÇÃO DE ENVIO INTEGRADA (FLEXÍVEL PARA QUALQUER PROVEDOR) ---
 def disparar_email_codigo(destinatario, codigo):
     try:
         server_host = st.secrets["SMTP_SERVER"]
-        server_port = int(st.secrets["SMTP_PORT"])
+        server_port = int(st.secrets.get("SMTP_PORT", 587))
         user_email = st.secrets["SMTP_USER"]
         pass_email = st.secrets["SMTP_PASS"]
 
@@ -41,8 +41,12 @@ def disparar_email_codigo(destinatario, codigo):
         msg["From"] = f"ORCAS App <{user_email}>"
         msg["To"] = destinatario
 
-        server = smtplib.SMTP(server_host, server_port)
-        server.starttls()
+        if server_port == 465:
+            server = smtplib.SMTP_SSL(server_host, server_port, timeout=10)
+        else:
+            server = smtplib.SMTP(server_host, server_port, timeout=10)
+            server.starttls()
+
         server.login(user_email, pass_email)
         server.sendmail(user_email, destinatario, msg.as_string())
         server.quit()
@@ -518,9 +522,17 @@ if not st.session_state.logado:
                     st.rerun()
 
             with aba[1]:
-                new_nome = st.text_input("Nome Completo")
-                new_email = st.text_input("E-mail")
-                new_celular = st.text_input("Celular (com DDD)")
+                # Inicialização de variáveis de sessão para evitar perda de estado
+                if "input_new_nome" not in st.session_state:
+                    st.session_state.input_new_nome = ""
+                if "input_new_email" not in st.session_state:
+                    st.session_state.input_new_email = ""
+                if "input_new_celular" not in st.session_state:
+                    st.session_state.input_new_celular = ""
+
+                new_nome = st.text_input("Nome Completo", key="input_new_nome")
+                new_email = st.text_input("E-mail", key="input_new_email")
+                new_celular = st.text_input("Celular (com DDD)", key="input_new_celular")
 
                 col_env1, col_env2 = st.columns(2)
 
@@ -543,16 +555,16 @@ if not st.session_state.logado:
                 if col_env2.button("Enviar Código para E-mail"):
                     if new_email:
                         codigo = str(random.randint(100000, 999999))
+                        st.session_state.codigo_verificacao = codigo
+                        st.session_state.codigo_timestamp = datetime.now()
+                        st.session_state.temp_user_data = {
+                            "nome": new_nome,
+                            "email": new_email,
+                            "celular": new_celular,
+                        }
                         if disparar_email_codigo(new_email, codigo):
-                            st.session_state.codigo_verificacao = codigo
-                            st.session_state.codigo_timestamp = datetime.now()
-                            st.session_state.temp_user_data = {
-                                "nome": new_nome,
-                                "email": new_email,
-                                "celular": new_celular,
-                            }
                             st.info(
-                                f"Código enviado para o e-mail {new_email}"
+                                f"Código enviado com sucesso para o e-mail {new_email}"
                             )
                     else:
                         st.error(
@@ -625,10 +637,10 @@ if not st.session_state.logado:
                     )
                     if res.data:
                         codigo = str(random.randint(100000, 999999))
+                        st.session_state.codigo_verificacao = codigo
+                        st.session_state.codigo_timestamp = datetime.now()
+                        st.session_state.temp_email = conta_id
                         if disparar_email_codigo(conta_id, codigo):
-                            st.session_state.codigo_verificacao = codigo
-                            st.session_state.codigo_timestamp = datetime.now()
-                            st.session_state.temp_email = conta_id
                             st.info("Código enviado para o e-mail cadastrado.")
                     else:
                         st.error("Conta não localizada.")
