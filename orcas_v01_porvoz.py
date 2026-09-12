@@ -56,6 +56,47 @@ def normalizar_valor_moeda(valor_str):
     return 0.0
 
 
+def obter_datas_limite_projeto(supabase, projeto_id):
+  """Busca as datas de início e fim oficiais do projeto no Supabase."""
+  hoje_br = obter_hoje_brasil()
+  dt_inicio_def = hoje_br.replace(day=1)
+  dt_fim_def = hoje_br.replace(year=hoje_br.year + 1)
+
+  if not projeto_id:
+    return dt_inicio_def, dt_fim_def
+
+  try:
+    res = (
+        supabase.table("projetos")
+        .select("data_inicio, data_fim")
+        .eq("nome", str(projeto_id))
+        .execute()
+    )
+
+    if not res.data:
+      res = (
+          supabase.table("projetos")
+          .select("data_inicio, data_fim")
+          .eq("id", str(projeto_id))
+          .execute()
+      )
+
+    if res and res.data:
+      dados = res.data[0]
+      d_ini = dados.get("data_inicio")
+      d_fim = dados.get("data_fim")
+
+      if d_ini:
+        dt_inicio_def = datetime.strptime(str(d_ini)[:10], "%Y-%m-%d").date()
+      if d_fim:
+        dt_fim_def = datetime.strptime(str(d_fim)[:10], "%Y-%m-%d").date()
+
+  except Exception as e:
+    print(f"Aviso ao buscar limite do projeto: {e}")
+
+  return dt_inicio_def, dt_fim_def
+
+
 def processar_texto_groq(
     client_groq, texto_transcrito, planos_disponiveis, plano_ativo
 ):
@@ -483,17 +524,17 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
         idx_fds = lista_fds.index(fds_val) if fds_val in lista_fds else 0
         fds = col_rec3.selectbox("Fim de Semana", lista_fds, index=idx_fds)
 
+        dt_inicio_plano, dt_fim_plano = obter_datas_limite_projeto(
+            supabase, plano_ativo
+        )
+
         col_dt1, col_dt2, col_noc = st.columns(3)
-        hoje_br = obter_hoje_brasil()
-        inicio_padrao = hoje_br.replace(day=1)
 
         dt_inicio = col_dt1.date_input(
-            "Início", value=inicio_padrao, format="DD/MM/YYYY"
+            "Início", value=dt_inicio_plano, format="DD/MM/YYYY"
         )
         dt_fim = col_dt2.date_input(
-            "Até",
-            value=hoje_br.replace(year=hoje_br.year + 1),
-            format="DD/MM/YYYY",
+            "Até", value=dt_fim_plano, format="DD/MM/YYYY"
         )
         n_ocorrencias = col_noc.number_input(
             "Nº Ocorrências (0 = usar Data Até)",
