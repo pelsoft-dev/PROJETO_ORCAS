@@ -2,7 +2,7 @@ import json
 import re
 import time
 import zoneinfo
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from groq import Groq
 import pandas as pd
 import streamlit as st
@@ -20,8 +20,7 @@ LIMITES_USO = {"PADRÃO": 30, "INTERMEDIÁRIO": 100, "ILIMITADO": 999999}
 
 
 def obter_hoje_brasil():
-  fuso_br = timezone(timedelta(hours=-3))
-  return datetime.now(fuso_br).date()
+  return datetime.now(zoneinfo.ZoneInfo("America/Sao_Paulo")).date()
 
 
 def formatar_moeda_br(valor):
@@ -58,16 +57,16 @@ def normalizar_valor_moeda(valor_str):
 
 
 def obter_datas_limite_projeto(supabase, projeto_id):
-  """Busca as datas oficiais do projeto no Supabase usando a mesma regra e fallback do módulo Projetar."""
+  """Busca as datas de início e fim oficiais do projeto no Supabase (mesma fonte do Projetar)."""
   hoje_br = obter_hoje_brasil()
   dt_inicio_def = hoje_br.replace(day=1)
-  dt_fim_def = hoje_br
+  dt_fim_def = hoje_br.replace(year=hoje_br.year + 1)
 
   if not projeto_id:
     return dt_inicio_def, dt_fim_def
 
   try:
-    # Busca tanto por ID (UUID/String) quanto por Nome do projeto
+    # Tenta buscar por nome do projeto
     res = (
         supabase.table("projetos")
         .select("data_inicio, data_fim")
@@ -75,7 +74,8 @@ def obter_datas_limite_projeto(supabase, projeto_id):
         .execute()
     )
 
-    if not res or not res.data:
+    # Caso não encontre por nome, tenta por id
+    if not res.data:
       res = (
           supabase.table("projetos")
           .select("data_inicio, data_fim")
@@ -94,20 +94,9 @@ def obter_datas_limite_projeto(supabase, projeto_id):
         dt_fim_def = datetime.strptime(str(d_fim)[:10], "%Y-%m-%d").date()
 
   except Exception as e:
-    print(f"Aviso ao buscar limite do projeto no PorVoz: {e}")
+    print(f"Aviso ao buscar limite do projeto: {e}")
 
-  # Ajusta data de início inicial idêntica à do módulo Projetar
-  val_i_p = hoje_br.replace(day=1)
-  if dt_inicio_def and val_i_p < dt_inicio_def:
-    val_i_p = dt_inicio_def
-  elif dt_fim_def and val_i_p > dt_fim_def:
-    val_i_p = dt_fim_def
-
-  val_f_p = dt_fim_def if dt_fim_def else hoje_br
-  if dt_inicio_def and val_f_p < dt_inicio_def:
-    val_f_p = dt_inicio_def
-
-  return val_i_p, val_f_p, dt_inicio_def, dt_fim_def
+  return dt_inicio_def, dt_fim_def
 
 
 def processar_texto_groq(
@@ -447,6 +436,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
     else:
       idx_cartao = 0
 
+    # CONTROLE DE AÇÃO FORA DO FORMULÁRIO PARA ATUALIZAR A INTERFACE EM TEMPO REAL
     opcoes_acao = ["PROJETAR", "REALIZAR", "PARCIAL", "ALTERAR", "EXCLUIR"]
     intencao_sugerida = dados.get("intencao", "PROJETAR")
     idx_intencao = (
@@ -462,9 +452,9 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
         key="sb_intencao_confirmacao",
     )
 
-    # Busca unificada das datas e limites do plano ativo
-    dt_inicio_plano, dt_fim_plano, min_db, max_db = (
-        obter_datas_limite_projeto(supabase, plano_ativo)
+    # Busca das datas do plano ativo diretamente do Supabase
+    dt_inicio_plano, dt_fim_plano = obter_datas_limite_projeto(
+        supabase, plano_ativo
     )
 
     with st.form("form_confirmacao_voz"):
@@ -544,18 +534,10 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
         col_dt1, col_dt2, col_noc = st.columns(3)
 
         dt_inicio = col_dt1.date_input(
-            "Início",
-            value=dt_inicio_plano,
-            min_value=min_db,
-            max_value=max_db,
-            format="DD/MM/YYYY",
+            "Início", value=dt_inicio_plano, format="DD/MM/YYYY"
         )
         dt_fim = col_dt2.date_input(
-            "Até",
-            value=dt_fim_plano,
-            min_value=min_db,
-            max_value=max_db,
-            format="DD/MM/YYYY",
+            "Até", value=dt_fim_plano, format="DD/MM/YYYY"
         )
         n_ocorrencias = col_noc.number_input(
             "Nº Ocorrências (0 = usar Data Até)",

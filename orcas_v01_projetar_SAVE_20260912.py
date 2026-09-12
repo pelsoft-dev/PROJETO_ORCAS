@@ -40,7 +40,7 @@ def executar_inclusao_projetar(
     d_m_final = "1"
 
   curr = dt_inicio
-  if permitir_parcial and curr:
+  if permitir_parcial:
     curr = curr.replace(day=1)
 
   v_calc = float(valor_float or 0.0)
@@ -79,13 +79,9 @@ def executar_inclusao_projetar(
       num_atual = int(comp_base)
       zeros = len(comp_base)
 
-  limite_loop = (
-      dt_fim
-      if n_ocorrencias == 0
-      else (dt_inicio + timedelta(days=3650) if dt_inicio else dt_fim)
-  )
+  limite_loop = dt_fim if n_ocorrencias == 0 else dt_inicio + timedelta(days=3650)
 
-  while curr and limite_loop and curr <= limite_loop:
+  while curr <= limite_loop:
     match_dm = False
 
     if "/" in str(d_m_final):
