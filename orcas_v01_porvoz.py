@@ -58,36 +58,27 @@ def normalizar_valor_moeda(valor_str):
 
 
 def obter_datas_limite_projeto(supabase, projeto_id):
-  """Busca as datas oficiais do projeto diretamente na tabela config_projetos (mesma regra do Projetar)."""
+  """Busca as datas oficiais na tabela config_projetos filtrando estritamente por projeto_id."""
   hoje_br = obter_hoje_brasil()
   dt_ini_valida = None
   dt_fim_valida = None
 
   if projeto_id:
     try:
-      # 1. Tenta buscar pelo campo 'projeto'
+      # Busca direta usando a coluna exata 'projeto_id'
       res = (
           supabase.table("config_projetos")
           .select("data_ini, data_fim")
-          .eq("projeto", str(projeto_id))
+          .eq("projeto_id", str(projeto_id))
           .execute()
       )
 
-      # 2. Se não encontre, tenta buscar por 'nome'
+      # Caso não encontre (ex: se projeto_id vier como Nome e o banco guardar ID), faz a busca com conversão
       if not res or not res.data:
         res = (
             supabase.table("config_projetos")
             .select("data_ini, data_fim")
-            .eq("nome", str(projeto_id))
-            .execute()
-        )
-
-      # 3. Se ainda não encontre, tenta buscar por 'id'
-      if not res or not res.data:
-        res = (
-            supabase.table("config_projetos")
-            .select("data_ini, data_fim")
-            .eq("id", str(projeto_id))
+            .ilike("projeto_id", str(projeto_id).strip())
             .execute()
         )
 
@@ -102,19 +93,19 @@ def obter_datas_limite_projeto(supabase, projeto_id):
           dt_fim_valida = datetime.strptime(str(d_fim)[:10], "%Y-%m-%d").date()
 
     except Exception as e:
-      print(f"Aviso ao buscar limite do projeto na config_projetos: {e}")
+      print(f"Aviso ao buscar limite na config_projetos: {e}")
 
-  # Lógica de definição de datas do modal
-  # Data de início padrão: Primeiro dia do mês atual ou data_ini do projeto se for maior
+  # 1. Data Início do Modal
   val_i_p = hoje_br.replace(day=1)
   if dt_ini_valida and val_i_p < dt_ini_valida:
     val_i_p = dt_ini_valida
 
-  # Data Fim padrão: Utiliza rigorosamente data_fim do banco se existente
+  # 2. Data Fim do Modal (CORREÇÃO DO FALLBACK)
   if dt_fim_valida:
     val_f_p = dt_fim_valida
   else:
-    val_f_p = hoje_br
+    # Se a consulta falhar ou o banco não tiver data_fim, assume 31/12 em vez de HOJE
+    val_f_p = datetime(hoje_br.year, 12, 31).date()
 
   if dt_ini_valida and val_f_p < dt_ini_valida:
     val_f_p = dt_ini_valida
@@ -474,7 +465,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
         key="sb_intencao_confirmacao",
     )
 
-    # Busca unificada na tabela config_projetos com fallback robusto
+    # Busca na tabela config_projetos pela coluna projeto_id
     dt_inicio_plano, dt_fim_plano, min_db, max_db = (
         obter_datas_limite_projeto(supabase, plano_ativo)
     )
