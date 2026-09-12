@@ -57,7 +57,7 @@ def normalizar_valor_moeda(valor_str):
 
 
 def obter_datas_limite_projeto(supabase, projeto_id):
-  """Busca as datas de início e fim oficiais do projeto no Supabase."""
+  """Busca as datas de início e fim oficiais do projeto no Supabase (mesma fonte do Projetar)."""
   hoje_br = obter_hoje_brasil()
   dt_inicio_def = hoje_br.replace(day=1)
   dt_fim_def = hoje_br.replace(year=hoje_br.year + 1)
@@ -66,6 +66,7 @@ def obter_datas_limite_projeto(supabase, projeto_id):
     return dt_inicio_def, dt_fim_def
 
   try:
+    # Tenta buscar por nome do projeto
     res = (
         supabase.table("projetos")
         .select("data_inicio, data_fim")
@@ -73,6 +74,7 @@ def obter_datas_limite_projeto(supabase, projeto_id):
         .execute()
     )
 
+    # Caso não encontre por nome, tenta por id
     if not res.data:
       res = (
           supabase.table("projetos")
@@ -450,6 +452,11 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
         key="sb_intencao_confirmacao",
     )
 
+    # Busca das datas do plano ativo diretamente do Supabase
+    dt_inicio_plano, dt_fim_plano = obter_datas_limite_projeto(
+        supabase, plano_ativo
+    )
+
     with st.form("form_confirmacao_voz"):
       c1, c2 = st.columns(2)
       with c1:
@@ -523,10 +530,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
         fds_val = dados.get("regra_fds") or "Manter"
         idx_fds = lista_fds.index(fds_val) if fds_val in lista_fds else 0
         fds = col_rec3.selectbox("Fim de Semana", lista_fds, index=idx_fds)
-
-        dt_inicio_plano, dt_fim_plano = obter_datas_limite_projeto(
-            supabase, plano_ativo
-        )
 
         col_dt1, col_dt2, col_noc = st.columns(3)
 
