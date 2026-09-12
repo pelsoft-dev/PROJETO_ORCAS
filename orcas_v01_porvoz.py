@@ -1,8 +1,8 @@
 import json
 import re
 import time
-
 from datetime import datetime, timedelta, timezone
+
 from groq import Groq
 import pandas as pd
 import streamlit as st
@@ -65,7 +65,7 @@ def obter_datas_limite_projeto(supabase, projeto_id):
 
   if projeto_id:
     try:
-      # Consulta a tabela oficial config_projetos (usando nome do projeto)
+      # 1. Tenta buscar pelo campo 'projeto'
       res = (
           supabase.table("config_projetos")
           .select("data_ini, data_fim")
@@ -73,7 +73,16 @@ def obter_datas_limite_projeto(supabase, projeto_id):
           .execute()
       )
 
-      # Caso não encontre por nome, busca por ID ou campo projeto_id
+      # 2. Se não encontre, tenta buscar por 'nome'
+      if not res or not res.data:
+        res = (
+            supabase.table("config_projetos")
+            .select("data_ini, data_fim")
+            .eq("nome", str(projeto_id))
+            .execute()
+        )
+
+      # 3. Se ainda não encontre, tenta buscar por 'id'
       if not res or not res.data:
         res = (
             supabase.table("config_projetos")
@@ -95,14 +104,18 @@ def obter_datas_limite_projeto(supabase, projeto_id):
     except Exception as e:
       print(f"Aviso ao buscar limite do projeto na config_projetos: {e}")
 
-  # Lógica idêntica de fallback e cálculo de padrão do programa Projetar
+  # Lógica de definição de datas do modal
+  # Data de início padrão: Primeiro dia do mês atual ou data_ini do projeto se for maior
   val_i_p = hoje_br.replace(day=1)
   if dt_ini_valida and val_i_p < dt_ini_valida:
     val_i_p = dt_ini_valida
-  elif dt_fim_valida and val_i_p > dt_fim_valida:
-    val_i_p = dt_fim_valida
 
-  val_f_p = dt_fim_valida if dt_fim_valida else hoje_br
+  # Data Fim padrão: Utiliza rigorosamente data_fim do banco se existente
+  if dt_fim_valida:
+    val_f_p = dt_fim_valida
+  else:
+    val_f_p = hoje_br
+
   if dt_ini_valida and val_f_p < dt_ini_valida:
     val_f_p = dt_ini_valida
 
@@ -461,7 +474,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
         key="sb_intencao_confirmacao",
     )
 
-    # Busca unificada na tabela config_projetos
+    # Busca unificada na tabela config_projetos com fallback robusto
     dt_inicio_plano, dt_fim_plano, min_db, max_db = (
         obter_datas_limite_projeto(supabase, plano_ativo)
     )
