@@ -58,14 +58,13 @@ def normalizar_valor_moeda(valor_str):
 
 
 def obter_datas_limite_projeto(supabase, projeto_id):
-  """Busca as datas oficiais na tabela config_projetos filtrando estritamente por projeto_id."""
+  """Busca as datas oficiais na tabela config_projetos filtrando por projeto_id."""
   hoje_br = obter_hoje_brasil()
   dt_ini_valida = None
   dt_fim_valida = None
 
   if projeto_id:
     try:
-      # Busca direta usando a coluna exata 'projeto_id'
       res = (
           supabase.table("config_projetos")
           .select("data_ini, data_fim")
@@ -73,7 +72,6 @@ def obter_datas_limite_projeto(supabase, projeto_id):
           .execute()
       )
 
-      # Caso não encontre (ex: se projeto_id vier como Nome e o banco guardar ID), faz a busca com conversão
       if not res or not res.data:
         res = (
             supabase.table("config_projetos")
@@ -95,16 +93,13 @@ def obter_datas_limite_projeto(supabase, projeto_id):
     except Exception as e:
       print(f"Aviso ao buscar limite na config_projetos: {e}")
 
-  # 1. Data Início do Modal
   val_i_p = hoje_br.replace(day=1)
   if dt_ini_valida and val_i_p < dt_ini_valida:
     val_i_p = dt_ini_valida
 
-  # 2. Data Fim do Modal (CORREÇÃO DO FALLBACK)
   if dt_fim_valida:
     val_f_p = dt_fim_valida
   else:
-    # Se a consulta falhar ou o banco não tiver data_fim, assume 31/12 em vez de HOJE
     val_f_p = datetime(hoje_br.year, 12, 31).date()
 
   if dt_ini_valida and val_f_p < dt_ini_valida:
@@ -127,34 +122,44 @@ def processar_texto_groq(
 
   user_prompt = f"""
     Texto Transcrito: "{texto_transcrito}"
-    Data Atual: {hoje.strftime('%Y-%m-%d')}
+    Data Atual Hoje: {hoje.strftime('%Y-%m-%d')}
     Projeto Ativo: "{plano_ativo}"
 
     Regras de extração:
-    1. "descricao": Nome limpo do item (ex: "Mercado", "Curso de Inglês"). Remova verbos ("comprei", "agende"), marcas não essenciais e artigos.
-    2. "complemento": Texto de complemento ou numeração de parcela citado (ex: "01 de 12", "Turma A"). Se não citado, null.
-    3. "valor": Valor numérico total em float. Ex: "444,00" -> 444.00.
-    4. "cartao": Extraia EXATAMENTE o nome do cartão de crédito citado (ex: "MASTER", "Nubank"). Se não citado, null.
-    5. "parcelas": Quantidade de parcelas como inteiro. Considerar "3x", "3 vezes" e "3 meses" como 3. Padrão: 1.
-    6. "intencao": "PROJETAR" se a frase contiver termos como "planeje", "projete", "mensalmente", "todo mês", "todos os dias", "agende" ou referências a períodos recorrentes. Caso contrário, "REALIZAR".
+    1. "descricao": Nome limpo do item (ex: "Mercado", "Dívida edinho", "Musculação"). Remova verbos de comando ("planeje", "projete", "pague"), artigos e conectivos.
+    2. "complemento": Texto de complemento ou parcelas se explicitado. Se não, null.
+    3. "valor": Valor numérico total em float. Ex: "5 mil reais" -> 5000.00, "357,00" -> 357.00.
+    4. "cartao": Nome do cartão de crédito se citado (ex: "MASTER"). Se não, null.
+    5. "parcelas": Quantidade de parcelas se houver parcelamento explícito. Padrão: 1.
+    6. "intencao": "PROJETAR" para planejamento/agendamento de datas futuras/recorrentes. Se for realização imediata/passada, "REALIZAR".
     7. "tipo": "Saída" para compras/gastos e "Entrada" para receitas.
-    8. "dia_mes": Se for agendamento em dia do mês (ex: "dia 5", "todos os dias 5"), informe apenas o número como string (ex: "5"). Se for para todos os meses do plano sem dia fixo, deixe null.
-    9. "dia_semana": Se citar dia da semana ("Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"). Se não, null.
-    10. "regra_fds": Se citar final de semana: "Posterga", "Antecipa" ou "Manter" (padrão).
-    11. "is_cartao": true se citar cartão de crédito para a projeção, caso contrário false.
-    12. "dia_corte": Dia do mês em inteiro para o corte da fatura do cartão (padrão: 31).
-    13. "permite_parcial": true se citar lançamento/realização parcial, caso contrário false.
+    8. "dia_mes": O dia do mês numérico ou formato DD/MM se for uma data específica. Se for pontual ex "15 de dezembro de 2026", pode colocar "15" ou "15/12".
+    9. "data_inicio": Data em formato YYYY-MM-DD para o início do agendamento.
+       - Se for uma data ÚNICA/PONTUAL (ex: "para o dia 15 de dezembro de 2026"), data_inicio DEVE SER "2026-12-15".
+       - Se for um período (ex: "entre setembro de 2026 até abril de 2027"), data_inicio DEVE SER o primeiro dia desse mês de início: "2026-09-01".
+       - Se não for citada data específica, passe null.
+    10. "data_fim": Data em formato YYYY-MM-DD para o fim do agendamento.
+       - Se for uma data ÚNICA/PONTUAL (ex: "para o dia 15 de dezembro de 2026"), data_fim DEVE SER IGUAL À DATA INÍCIO: "2026-12-15".
+       - Se for um período (ex: "entre setembro de 2026 até abril de 2027"), data_fim DEVE SER o último dia desse mês final: "2027-04-30".
+       - Se não for citada data final específica, passe null.
+    11. "dia_semana": Se citar dia da semana ("Segunda", etc). Se não, null.
+    12. "regra_fds": "Posterga", "Antecipa" ou "Manter" (padrão).
+    13. "is_cartao": true se citar cartão de crédito para a projeção, caso contrário false.
+    14. "dia_corte": Dia do mês em inteiro (padrão: 31).
+    15. "permite_parcial": true ou false.
 
     Retorne exatamente esta estrutura JSON:
     {{
-      "descricao": "Salário",
+      "descricao": "Dívida edinho",
       "complemento": null,
-      "valor": 3548.00,
+      "valor": 5000.00,
       "cartao": null,
       "parcelas": 1,
       "intencao": "PROJETAR",
-      "tipo": "Entrada",
-      "dia_mes": "5",
+      "tipo": "Saída",
+      "dia_mes": "15",
+      "data_inicio": "2026-12-15",
+      "data_fim": "2026-12-15",
       "dia_semana": null,
       "regra_fds": "Manter",
       "is_cartao": false,
@@ -204,6 +209,8 @@ def processar_texto_groq(
         "cartao": None,
         "parcelas": 1,
         "dia_mes": "",
+        "data_inicio": None,
+        "data_fim": None,
         "dia_semana": "",
         "regra_fds": "Manter",
         "is_cartao": False,
@@ -252,6 +259,8 @@ def processar_texto_groq(
         "cartao": cartao_extraido,
         "parcelas": int(dados_parsed.get("parcelas") or 1),
         "dia_mes": str(dados_parsed.get("dia_mes") or ""),
+        "data_inicio": dados_parsed.get("data_inicio"),
+        "data_fim": dados_parsed.get("data_fim"),
         "dia_semana": str(dados_parsed.get("dia_semana") or ""),
         "regra_fds": str(dados_parsed.get("regra_fds") or "Manter"),
         "is_cartao": bool(dados_parsed.get("is_cartao", False)),
@@ -273,6 +282,8 @@ def processar_texto_groq(
         "cartao": None,
         "parcelas": 1,
         "dia_mes": "",
+        "data_inicio": None,
+        "data_fim": None,
         "dia_semana": "",
         "regra_fds": "Manter",
         "is_cartao": False,
@@ -342,7 +353,6 @@ def buscar_lancamento_no_banco(supabase, usuario_id, projeto_id, descricao):
 
 
 def fechar_modal_voz():
-  """Reseta completamente os controles do modal garantindo o fechamento imediato."""
   st.session_state.abrir_modal_orcas = False
   st.session_state.exibir_modal_voz = False
   st.session_state.etapa_voz = "gravacao"
@@ -465,10 +475,30 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
         key="sb_intencao_confirmacao",
     )
 
-    # Busca na tabela config_projetos pela coluna projeto_id
-    dt_inicio_plano, dt_fim_plano, min_db, max_db = (
+    # Limites gerais do plano vindos do banco
+    dt_inicio_plano_db, dt_fim_plano_db, min_db, max_db = (
         obter_datas_limite_projeto(supabase, plano_ativo)
     )
+
+    # DEFINIÇÃO DINÂMICA DAS DATAS DO FORMULÁRIO (SUGESTÃO DA IA VS LIMITES DO BANCO)
+    val_dt_inicio = dt_inicio_plano_db
+    val_dt_fim = dt_fim_plano_db
+
+    if dados.get("data_inicio"):
+      try:
+        val_dt_inicio = datetime.strptime(
+            dados.get("data_inicio"), "%Y-%m-%d"
+        ).date()
+      except Exception:
+        pass
+
+    if dados.get("data_fim"):
+      try:
+        val_dt_fim = datetime.strptime(
+            dados.get("data_fim"), "%Y-%m-%d"
+        ).date()
+      except Exception:
+        pass
 
     with st.form("form_confirmacao_voz"):
       c1, c2 = st.columns(2)
@@ -548,14 +578,14 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
 
         dt_inicio = col_dt1.date_input(
             "Início",
-            value=dt_inicio_plano,
+            value=val_dt_inicio,
             min_value=min_db,
             max_value=max_db,
             format="DD/MM/YYYY",
         )
         dt_fim = col_dt2.date_input(
             "Até",
-            value=dt_fim_plano,
+            value=val_dt_fim,
             min_value=min_db,
             max_value=max_db,
             format="DD/MM/YYYY",
