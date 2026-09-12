@@ -79,9 +79,9 @@ def processar_texto_groq(
     3. "valor": Valor numérico total em float. Ex: "444,00" -> 444.00.
     4. "cartao": Extraia EXATAMENTE o nome do cartão de crédito citado (ex: "MASTER", "Nubank"). Se não citado, null.
     5. "parcelas": Quantidade de parcelas como inteiro. Considerar "3x", "3 vezes" e "3 meses" como 3. Padrão: 1.
-    6. "intencao": "PROJETAR" se for lançamento futuro/recorrente/agendado (ex: "planeje", "projete", "mensalmente", "todo dia X"). Caso contrário, "REALIZAR".
+    6. "intencao": "PROJETAR" se a frase contiver termos como "planeje", "projete", "mensalmente", "todo mês", "todos os dias", "agende" ou referências a períodos recorrentes. Caso contrário, "REALIZAR".
     7. "tipo": "Saída" para compras/gastos e "Entrada" para receitas.
-    8. "dia_mes": Se for agendamento futuro em dia do mês, informe o número como string (ex: "25"). Se não houver, null.
+    8. "dia_mes": Se for agendamento em dia do mês (ex: "dia 5", "todos os dias 5"), informe apenas o número como string (ex: "5"). Se for para todos os meses do plano sem dia fixo, deixe null.
     9. "dia_semana": Se citar dia da semana ("Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"). Se não, null.
     10. "regra_fds": Se citar final de semana: "Posterga", "Antecipa" ou "Manter" (padrão).
     11. "is_cartao": true se citar cartão de crédito para a projeção, caso contrário false.
@@ -90,16 +90,16 @@ def processar_texto_groq(
 
     Retorne exatamente esta estrutura JSON:
     {{
-      "descricao": "Curso de Inglês",
-      "complemento": "01 de 12",
-      "valor": 350.00,
+      "descricao": "Salário",
+      "complemento": null,
+      "valor": 3548.00,
       "cartao": null,
       "parcelas": 1,
       "intencao": "PROJETAR",
-      "tipo": "Saída",
-      "dia_mes": "10",
+      "tipo": "Entrada",
+      "dia_mes": "5",
       "dia_semana": null,
-      "regra_fds": "Posterga",
+      "regra_fds": "Manter",
       "is_cartao": false,
       "dia_corte": 31,
       "permite_parcial": false
@@ -184,7 +184,7 @@ def processar_texto_groq(
 
     return {
         "transcricao": texto_transcrito,
-        "intencao": dados_parsed.get("intencao", "REALIZAR"),
+        "intencao": dados_parsed.get("intencao", "PROJETAR"),
         "projeto_id": plano_ativo,
         "descricao": desc.capitalize(),
         "complemento": dados_parsed.get("complemento"),
@@ -285,8 +285,9 @@ def buscar_lancamento_no_banco(supabase, usuario_id, projeto_id, descricao):
 
 
 def fechar_modal_voz():
-  """Reseta as flags do modal no session state."""
+  """Reseta completamente as chaves para fechar o modal sem loops."""
   st.session_state.abrir_modal_orcas = False
+  st.session_state.exibir_modal_voz = False
   st.session_state.etapa_voz = "gravacao"
   st.session_state.dados_interpretados = None
   st.session_state.hash_ultimo_audio = None
@@ -294,7 +295,6 @@ def fechar_modal_voz():
 
 
 def buscar_df_lancamentos_projeto(supabase, projeto_id):
-  """Busca os lançamentos do projeto no banco para extrair cartões ($CCP)."""
   try:
     res = (
         supabase.table("lancamentos")
@@ -363,14 +363,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
                     item_banco.get("permite_parcial")
                 )
 
-              if dados.get("intencao") in ["ALTERAR", "EXCLUIR"]:
-                if not dados.get("valor") or dados.get("valor") == 0:
-                  dados["valor"] = float(
-                      item_banco.get("valor_plan")
-                      or item_banco.get("valor_real")
-                      or 0
-                  )
-
           st.session_state.dados_interpretados = dados
           st.session_state.etapa_voz = "confirmacao"
           st.rerun()
@@ -383,7 +375,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
     if dados.get("erro"):
       st.error(f"⚠️ **Detalhe do erro da IA:** `{dados.get('erro')}`")
 
-    # BUSCA OPÇÕES DE CARTÕES DISPONÍVEIS NO PLANO ATIVO
     df_proj = buscar_df_lancamentos_projeto(supabase, plano_ativo)
     opcoes_cartoes = buscar_cartoes_lcp(df_proj)
 
@@ -394,7 +385,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
           (opt for opt in opcoes_cartoes if opt.upper() == cartao_clean.upper()),
           None,
       )
-
       if match_opt:
         idx_cartao = opcoes_cartoes.index(match_opt)
       else:
@@ -403,18 +393,25 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
     else:
       idx_cartao = 0
 
+    # CONTROLE DE AÇÃO FORA DO FORMULÁRIO PARA ATUALIZAR A INTERFACE EM TEMPO REAL
+    opcoes_acao = ["PROJETAR", "REALIZAR", "PARCIAL", "ALTERAR", "EXCLUIR"]
+    intencao_sugerida = dados.get("intencao", "PROJETAR")
+    idx_intencao = (
+        opcoes_acao.index(intencao_sugerida)
+        if intencao_sugerida in opcoes_acao
+        else 0
+    )
+
+    intencao_selecionada = st.selectbox(
+        "Ação Desejada",
+        opcoes_acao,
+        index=idx_intencao,
+        key="sb_intencao_confirmacao",
+    )
+
     with st.form("form_confirmacao_voz"):
       c1, c2 = st.columns(2)
       with c1:
-        opcoes_acao = ["REALIZAR", "PROJETAR", "PARCIAL", "ALTERAR", "EXCLUIR"]
-        intencao_atual = dados.get("intencao", "REALIZAR")
-        idx_intencao = (
-            opcoes_acao.index(intencao_atual)
-            if intencao_atual in opcoes_acao
-            else 0
-        )
-
-        intencao = st.selectbox("Ação", opcoes_acao, index=idx_intencao)
         descricao = st.text_input("Descrição", value=dados.get("descricao", ""))
         complemento = st.text_input(
             "Complemento (Opcional)",
@@ -434,39 +431,39 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
             index=0 if dados.get("tipo") == "Saída" else 1,
         )
 
-        # SE REALIZAR/CONCILIAÇÃO: MANTÉM DADOS DE COMPRA E PARCELAS
-        if intencao != "PROJETAR":
-          dt_compra = st.date_input(
-              "Data da Compra",
-              value=datetime.strptime(
-                  dados.get("data_compra", str(obter_hoje_brasil())),
-                  "%Y-%m-%d",
-              ).date(),
-              format="DD/MM/YYYY",
-          )
-          parcelas = st.number_input(
-              "Parcelas", value=int(dados.get("parcelas") or 1), min_value=1
+      # DADOS ESPECÍFICOS DE REALIZAR / CONCILIAÇÃO
+      if intencao_selecionada != "PROJETAR":
+        c_real1, c_real2 = st.columns(2)
+        dt_compra = c_real1.date_input(
+            "Data da Compra",
+            value=datetime.strptime(
+                dados.get("data_compra", str(obter_hoje_brasil())), "%Y-%m-%d"
+            ).date(),
+            format="DD/MM/YYYY",
+        )
+        parcelas = c_real2.number_input(
+            "Parcelas", value=int(dados.get("parcelas") or 1), min_value=1
+        )
+
+        cartao_sel = st.selectbox(
+            "Cartão de Crédito", opcoes_cartoes, index=idx_cartao
+        )
+        cartao_manual = ""
+        if cartao_sel == "+ Outro Cartão...":
+          cartao_manual = st.text_input(
+              "Nome do Cartão", placeholder="Ex: MEU CARTÃO PERSONALIZADO"
           )
 
-          cartao_sel = st.selectbox(
-              "Cartão de Crédito", opcoes_cartoes, index=idx_cartao
-          )
-          cartao_manual = ""
-          if cartao_sel == "+ Outro Cartão...":
-            cartao_manual = st.text_input(
-                "Nome do Cartão", placeholder="Ex: MEU CARTÃO PERSONALIZADO"
-            )
-
-      # --- BLOCO EXCLUSIVO QUANDO A INTENÇÃO FOR PROJETAR ---
-      if intencao == "PROJETAR":
+      # DADOS ESPECÍFICOS DE PROJETAR
+      else:
         st.markdown("---")
-        st.markdown("##### 📅 Configurações do Projetar")
+        st.markdown("##### 📅 Configurações de Recorrência (Projetar)")
 
         col_rec1, col_rec2, col_rec3 = st.columns(3)
         d_m = col_rec1.text_input(
             "Dia (1-31, DD/MM ou *)", value=str(dados.get("dia_mes") or "")
         )
-        
+
         lista_ds = [
             "",
             "Segunda",
@@ -501,7 +498,9 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
         n_ocorrencias = col_noc.number_input(
             "Nº Ocorrências (0 = usar Data Até)",
             min_value=0,
-            value=int(dados.get("parcelas") or 0),
+            value=int(
+                dados.get("parcelas") if dados.get("parcelas") != 1 else 0
+            ),
         )
 
         st.markdown("##### 💳 Cartão & Opções Avançadas")
@@ -520,14 +519,14 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
             "Permite Lançamento Parcial?",
             value=bool(dados.get("permite_parcial", False)),
         )
-      else:
-        is_parcial_intencao = intencao == "PARCIAL"
+
+      if intencao_selecionada != "PROJETAR":
+        is_parcial_intencao = intencao_selecionada == "PARCIAL"
         val_parcial_chk = (
             False
             if is_parcial_intencao
             else bool(dados.get("permite_parcial", False))
         )
-
         chk_parcial = st.checkbox(
             "Permite Lançamento Parcial",
             value=val_parcial_chk,
@@ -544,8 +543,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
       sub_sair = b_sair.form_submit_button("❌ Sair", use_container_width=True)
 
       if sub_salvar:
-        if intencao == "PROJETAR":
-          # EXECUÇÃO ATRAVÉS DO MOTOR UNIFICADO DO PROJETAR
+        if intencao_selecionada == "PROJETAR":
           sucesso, msg, qtd = executar_inclusao_projetar(
               supabase=supabase,
               projeto_id=plano_ativo,
@@ -570,29 +568,26 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
           else:
             st.error(msg)
         else:
-          # EXECUÇÃO DO FLUXO NORMAL DE REALIZAR / CONCILIAÇÃO
           id_final = (
-              None if intencao == "PARCIAL" else dados.get("id_existente")
+              None
+              if intencao_selecionada == "PARCIAL"
+              else dados.get("id_existente")
           )
           permite_parcial_final = (
-              False if intencao == "PARCIAL" else chk_parcial
+              False if intencao_selecionada == "PARCIAL" else chk_parcial
           )
-
           nome_cartao_final = (
               cartao_manual.strip()
               if cartao_sel == "+ Outro Cartão..."
               else cartao_sel
           )
-
           str_dt_compra = dt_compra.strftime("%Y-%m-%d")
-
-          # Se houver complemento digitado, anexa à descrição
           desc_completa = (
               f"{descricao} {complemento}".strip() if complemento else descricao
           )
 
           dados_finais = {
-              "intencao": intencao,
+              "intencao": intencao_selecionada,
               "projeto_id": plano_ativo,
               "descricao": desc_completa,
               "valor": valor,
