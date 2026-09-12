@@ -1,7 +1,7 @@
 import json
 import re
 import time
-import zoneinfo
+
 from datetime import datetime, timedelta, timezone
 from groq import Groq
 import pandas as pd
@@ -58,56 +58,55 @@ def normalizar_valor_moeda(valor_str):
 
 
 def obter_datas_limite_projeto(supabase, projeto_id):
-  """Busca as datas oficiais do projeto no Supabase usando a mesma regra e fallback do módulo Projetar."""
+  """Busca as datas oficiais do projeto diretamente na tabela config_projetos (mesma regra do Projetar)."""
   hoje_br = obter_hoje_brasil()
-  dt_inicio_def = hoje_br.replace(day=1)
-  dt_fim_def = hoje_br
+  dt_ini_valida = None
+  dt_fim_valida = None
 
-  if not projeto_id:
-    return dt_inicio_def, dt_fim_def
-
-  try:
-    # Busca tanto por ID (UUID/String) quanto por Nome do projeto
-    res = (
-        supabase.table("projetos")
-        .select("data_inicio, data_fim")
-        .eq("nome", str(projeto_id))
-        .execute()
-    )
-
-    if not res or not res.data:
+  if projeto_id:
+    try:
+      # Consulta a tabela oficial config_projetos (usando nome do projeto)
       res = (
-          supabase.table("projetos")
-          .select("data_inicio, data_fim")
-          .eq("id", str(projeto_id))
+          supabase.table("config_projetos")
+          .select("data_ini, data_fim")
+          .eq("projeto", str(projeto_id))
           .execute()
       )
 
-    if res and res.data:
-      dados = res.data[0]
-      d_ini = dados.get("data_inicio")
-      d_fim = dados.get("data_fim")
+      # Caso não encontre por nome, busca por ID ou campo projeto_id
+      if not res or not res.data:
+        res = (
+            supabase.table("config_projetos")
+            .select("data_ini, data_fim")
+            .eq("id", str(projeto_id))
+            .execute()
+        )
 
-      if d_ini:
-        dt_inicio_def = datetime.strptime(str(d_ini)[:10], "%Y-%m-%d").date()
-      if d_fim:
-        dt_fim_def = datetime.strptime(str(d_fim)[:10], "%Y-%m-%d").date()
+      if res and res.data:
+        dados = res.data[0]
+        d_ini = dados.get("data_ini")
+        d_fim = dados.get("data_fim")
 
-  except Exception as e:
-    print(f"Aviso ao buscar limite do projeto no PorVoz: {e}")
+        if d_ini:
+          dt_ini_valida = datetime.strptime(str(d_ini)[:10], "%Y-%m-%d").date()
+        if d_fim:
+          dt_fim_valida = datetime.strptime(str(d_fim)[:10], "%Y-%m-%d").date()
 
-  # Ajusta data de início inicial idêntica à do módulo Projetar
+    except Exception as e:
+      print(f"Aviso ao buscar limite do projeto na config_projetos: {e}")
+
+  # Lógica idêntica de fallback e cálculo de padrão do programa Projetar
   val_i_p = hoje_br.replace(day=1)
-  if dt_inicio_def and val_i_p < dt_inicio_def:
-    val_i_p = dt_inicio_def
-  elif dt_fim_def and val_i_p > dt_fim_def:
-    val_i_p = dt_fim_def
+  if dt_ini_valida and val_i_p < dt_ini_valida:
+    val_i_p = dt_ini_valida
+  elif dt_fim_valida and val_i_p > dt_fim_valida:
+    val_i_p = dt_fim_valida
 
-  val_f_p = dt_fim_def if dt_fim_def else hoje_br
-  if dt_inicio_def and val_f_p < dt_inicio_def:
-    val_f_p = dt_inicio_def
+  val_f_p = dt_fim_valida if dt_fim_valida else hoje_br
+  if dt_ini_valida and val_f_p < dt_ini_valida:
+    val_f_p = dt_ini_valida
 
-  return val_i_p, val_f_p, dt_inicio_def, dt_fim_def
+  return val_i_p, val_f_p, dt_ini_valida, dt_fim_valida
 
 
 def processar_texto_groq(
@@ -339,7 +338,7 @@ def buscar_lancamento_no_banco(supabase, usuario_id, projeto_id, descricao):
 
 
 def fechar_modal_voz():
-  """Reseta completamente as chaves para fechar o modal sem loops."""
+  """Reseta completamente os controles do modal garantindo o fechamento imediato."""
   st.session_state.abrir_modal_orcas = False
   st.session_state.exibir_modal_voz = False
   st.session_state.etapa_voz = "gravacao"
@@ -462,7 +461,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
         key="sb_intencao_confirmacao",
     )
 
-    # Busca unificada das datas e limites do plano ativo
+    # Busca unificada na tabela config_projetos
     dt_inicio_plano, dt_fim_plano, min_db, max_db = (
         obter_datas_limite_projeto(supabase, plano_ativo)
     )
@@ -626,7 +625,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
               permitir_parcial=chk_parcial,
           )
           if sucesso:
-            st.success(msg)
+            st.session_state["msg_sucesso"] = msg
           else:
             st.error(msg)
         else:
@@ -663,9 +662,8 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
               "permite_parcial": permite_parcial_final,
           }
           msg = salvar_lancamento_oficial(supabase, id_usuario, dados_finais)
-          st.success(msg)
+          st.session_state["msg_sucesso"] = msg
 
-        time.sleep(1)
         fechar_modal_voz()
         st.rerun()
 
