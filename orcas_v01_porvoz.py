@@ -133,7 +133,7 @@ def processar_texto_groq(
     1. "descricao": Nome limpo do item (ex: "Mercado", "Curso de Inglês", "Dívida Edinho"). Remova verbos ("comprei", "agende", "planeje", "projete"), marcas não essenciais e artigos.
     2. "complemento": Texto de complemento citado (ex: "Turma A", "Lojas Americanas"). NÃO inclua numeração ou termos de parcelamento aqui (ex: "em 2x", "duas vezes", "3 parcelas" NÃO devem ir para o complemento). Se não houver complemento válido, retorne null.
     3. "valor": Valor numérico total em float. Ex: "5 mil reais" -> 5000.00, "357,00" -> 357.00.
-    4. "cartao": Extraia EXATAMENTE o nome do cartão de crédito citado (ex: "MASTER", "Nubank", "ABC Card"). Se não citado, null.
+    4. "cartao": Extraia EXATAMENTE o nome do cartão de crédito citado (ex: "MASTER", "Nubank", "ABC Card", "ELO"). Se não citado, null.
     5. "parcelas": Quantidade de parcelas como inteiro. Considerar "2x", "duas vezes", "3 vezes", "em 3x" e "3 meses" como quantidade de parcelas. Padrão: 1.
     6. "intencao": "PROJETAR" se a frase contiver termos como "planeje", "projete", "mensalmente", "todo mês", "todos os dias", "agende" ou referências a períodos/datas futuras. Caso contrário, "REALIZAR".
     7. "tipo": "Saída" para compras/gastos e "Entrada" para receitas.
@@ -150,7 +150,7 @@ def processar_texto_groq(
     12. "regra_fds": Se citar final de semana: "Posterga", "Antecipa" ou "Manter" (padrão).
     13. "is_cartao": true se citar cartão de crédito para a projeção, caso contrário false.
     14. "dia_corte": Dia do mês em inteiro para o corte da fatura do cartão (padrão: 31).
-    15. "permite_parcial": true se citar lançamento/realização parcial, caso contrário false.
+    15. "permite_parcial": Retorne true SOMENTE se o usuário citar explicitamente que é um pagamento/recebimento parcial ou uma entrada de valor parcial. Compras normais, à vista ou parceladas no cartão de crédito NUNCA devem ser marcadas como parcial (retorne false).
 
     Retorne exatamente esta estrutura JSON:
     {{
@@ -417,23 +417,24 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
           st.session_state.hash_ultimo_audio = hash(audio_bytes)
 
           if isinstance(dados, dict):
-            item_banco = buscar_lancamento_no_banco(
-                supabase, id_usuario, plano_ativo, dados.get("descricao")
-            )
-            if item_banco:
-              is_pai_parcial = bool(
-                  item_banco.get("permite_parcial")
-              ) or bool(item_banco.get("parcial_real"))
-
-              if is_pai_parcial:
-                dados["intencao"] = "PARCIAL"
-                dados["permite_parcial"] = False
-                dados["id_existente"] = None
-              else:
-                dados["id_existente"] = item_banco.get("id")
-                dados["permite_parcial"] = bool(
+            # Se for uma ação REALIZAR direta (ex: compra realizada), mantém permite_parcial = False
+            if dados.get("intencao") == "REALIZAR":
+              dados["id_existente"] = None
+            else:
+              item_banco = buscar_lancamento_no_banco(
+                  supabase, id_usuario, plano_ativo, dados.get("descricao")
+              )
+              if item_banco:
+                is_pai_parcial = bool(
                     item_banco.get("permite_parcial")
-                )
+                ) or bool(item_banco.get("parcial_real"))
+
+                if is_pai_parcial:
+                  dados["intencao"] = "PARCIAL"
+                  dados["permite_parcial"] = False
+                  dados["id_existente"] = None
+                else:
+                  dados["id_existente"] = item_banco.get("id")
 
           st.session_state.dados_interpretados = dados
           st.session_state.etapa_voz = "confirmacao"
