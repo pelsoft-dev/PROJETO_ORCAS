@@ -110,7 +110,7 @@ def renderizar_pagina_manutencao(supabase, usuario_id, projeto_ativo):
   with c_cont:
     conteudo = st.text_input(
         "CONTEÚDO DA DESCRIÇÃO",
-        placeholder="Ex: curso de inglês",
+        placeholder="Ex: visa ou curso de francês",
         key="manut_conteudo",
     )
 
@@ -204,11 +204,14 @@ def renderizar_pagina_manutencao(supabase, usuario_id, projeto_ativo):
       if dt_ate:
         query = query.lte("data_vencimento", str(dt_ate))
 
+      # Filtros específicos do 'SOBRE QUEM'
       if sobre_quem == "parciais":
         query = query.eq("permite_parcial", True)
       elif sobre_quem == "cartão de crédito":
-        query = query.not_.is_("cartao", "null")
+        # Filtra apenas lançamentos de cartão onde cc_tipo seja $CCP
+        query = query.eq("cc_tipo", "$CCP")
 
+      # O filtro por texto busca na coluna 'descricao'
       if conteudo:
         query = aplicar_filtro_argumento(
             query, "descricao", argumento, conteudo
@@ -280,9 +283,13 @@ def renderizar_pagina_manutencao(supabase, usuario_id, projeto_ativo):
             # 3. Demais campos (valor_plan, valor_real, cc_dia_corte, etc.)
             else:
               val_salvar = (
-                  str(novo_valor)
-                  if isinstance(novo_valor, datetime)
-                  else novo_valor
+                  int(novo_valor)
+                  if "Dia" in campo_label
+                  else (
+                      str(novo_valor)
+                      if isinstance(novo_valor, datetime)
+                      else novo_valor
+                  )
               )
               supabase.table("lancamentos").update({campo_db: val_salvar}).in_(
                   "id", ids_afetados
