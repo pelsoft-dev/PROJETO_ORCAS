@@ -150,7 +150,7 @@ def processar_texto_groq(
     12. "regra_fds": Se citar final de semana: "Posterga", "Antecipa" ou "Manter" (padrão).
     13. "is_cartao": true se citar cartão de crédito para a projeção, caso contrário false.
     14. "dia_corte": Dia do mês em inteiro para o corte da fatura do cartão (padrão: 31).
-    15. "permite_parcial": Retorne true SOMENTE se o usuário citar explicitamente que é um pagamento/recebimento parcial ou uma entrada de valor parcial. Compras normais, à vista ou parceladas no cartão de crédito NUNCA devem ser marcadas como parcial (retorne false).
+    15. "permite_parcial": NUNCA marque como true para compras normais, à vista ou no cartão de crédito. Retorne true APENAS se o usuário explicitar "pagamento parcial" ou "entrada parcial".
 
     Retorne exatamente esta estrutura JSON:
     {{
@@ -250,16 +250,23 @@ def processar_texto_groq(
     elif isinstance(cartao_extraido, str):
       cartao_extraido = cartao_extraido.strip()
 
+    intencao_ext = dados_parsed.get("intencao", "PROJETAR")
+    permite_parcial_ext = bool(dados_parsed.get("permite_parcial", False))
+    
+    # Se a intenção for REALIZAR, garante que permite_parcial é False
+    if intencao_ext == "REALIZAR":
+      permite_parcial_ext = False
+
     return {
         "transcricao": texto_transcrito,
-        "intencao": dados_parsed.get("intencao", "PROJETAR"),
+        "intencao": intencao_ext,
         "projeto_id": plano_ativo,
         "descricao": desc.capitalize(),
         "complemento": dados_parsed.get("complemento"),
         "valor": valor_float,
         "tipo": dados_parsed.get("tipo", "Saída"),
         "data_compra": str(hoje),
-        "permite_parcial": bool(dados_parsed.get("permite_parcial", False)),
+        "permite_parcial": permite_parcial_ext,
         "cartao": cartao_extraido,
         "parcelas": int(dados_parsed.get("parcelas") or 1),
         "dia_mes": str(dados_parsed.get("dia_mes") or ""),
@@ -420,6 +427,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
             # Se for uma ação REALIZAR direta (ex: compra realizada), mantém permite_parcial = False
             if dados.get("intencao") == "REALIZAR":
               dados["id_existente"] = None
+              dados["permite_parcial"] = False
             else:
               item_banco = buscar_lancamento_no_banco(
                   supabase, id_usuario, plano_ativo, dados.get("descricao")
@@ -648,16 +656,16 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
         )
 
       if intencao_selecionada != "PROJETAR":
-        is_parcial_intencao = intencao_selecionada == "PARCIAL"
+        is_realizar_ou_parcial = intencao_selecionada in ["REALIZAR", "PARCIAL"]
         val_parcial_chk = (
             False
-            if is_parcial_intencao
+            if is_realizar_ou_parcial
             else bool(dados.get("permite_parcial", False))
         )
         chk_parcial = st.checkbox(
             "Permite Lançamento Parcial",
             value=val_parcial_chk,
-            disabled=is_parcial_intencao,
+            disabled=is_realizar_ou_parcial,
         )
 
       b_salvar, b_refazer, b_sair = st.columns(3)
@@ -706,11 +714,11 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
         else:
           id_final = (
               None
-              if intencao_selecionada == "PARCIAL"
+              if intencao_selecionada in ["REALIZAR", "PARCIAL"]
               else dados.get("id_existente")
           )
           permite_parcial_final = (
-              False if intencao_selecionada == "PARCIAL" else chk_parcial
+              False if intencao_selecionada in ["REALIZAR", "PARCIAL"] else chk_parcial
           )
           nome_cartao_final = (
               cartao_manual.strip()
