@@ -208,7 +208,6 @@ def renderizar_pagina_manutencao(supabase, usuario_id, projeto_ativo):
       if sobre_quem == "parciais":
         query = query.eq("permite_parcial", True)
       elif sobre_quem == "cartão de crédito":
-        # Filtra apenas lançamentos de cartão onde cc_tipo seja $CCP
         query = query.eq("cc_tipo", "$CCP")
 
       # O filtro por texto busca na coluna 'descricao'
@@ -250,6 +249,29 @@ def renderizar_pagina_manutencao(supabase, usuario_id, projeto_ativo):
       )
 
       if btn_executar:
+        # --- TRAVA DE SEGURANÇA PARA ENTRADAS PARCIAIS ---
+        if acao == "alterar" and campo_label in [
+            "Data de Vencimento",
+            "Dia de Vencimento",
+        ]:
+          # Verifica se existem registros com permite_parcial == True ou parcial_real > 0
+          tem_parcial = False
+          if "permite_parcial" in df_preview.columns:
+            tem_parcial = tem_parcial or df_preview["permite_parcial"].any()
+          if "parcial_real" in df_preview.columns:
+            # Garante comparação numérica tratando nulos
+            parciais_num = pd.to_numeric(
+                df_preview["parcial_real"], errors="coerce"
+            ).fillna(0)
+            tem_parcial = tem_parcial or (parciais_num > 0).any()
+
+          if tem_parcial:
+            st.error(
+                "Esta manutenção não é possível, pois lançamentos referentes"
+                " a entradas parciais devem permanecer no dia 01"
+            )
+            st.stop()
+
         ids_afetados = df_preview["id"].tolist()
 
         try:
