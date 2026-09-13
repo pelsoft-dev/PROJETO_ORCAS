@@ -7,13 +7,11 @@ from groq import Groq
 import pandas as pd
 import streamlit as st
 
-# CONSUMO DIRETO DO MOTOR DE CONCILIAÇÃO UNIFICADO
 from orcas_v01_conciliacao import (
     buscar_cartoes_lcp,
     salvar_lancamento_oficial,
 )
 
-# IMPORTAÇÃO DO MOTOR DE PROJEÇÃO UNIFICADO
 from orcas_v01_projetar import executar_inclusao_projetar
 
 LIMITES_USO = {"PADRÃO": 30, "INTERMEDIÁRIO": 100, "ILIMITADO": 999999}
@@ -58,14 +56,12 @@ def normalizar_valor_moeda(valor_str):
 
 
 def obter_datas_limite_projeto(supabase, projeto_id):
-  """Busca as datas oficiais na tabela config_projetos filtrando estritamente por projeto_id."""
   hoje_br = obter_hoje_brasil()
   dt_ini_valida = None
   dt_fim_valida = None
 
   if projeto_id:
     try:
-      # Busca direta usando a coluna exata 'projeto_id'
       res = (
           supabase.table("config_projetos")
           .select("data_ini, data_fim")
@@ -73,7 +69,6 @@ def obter_datas_limite_projeto(supabase, projeto_id):
           .execute()
       )
 
-      # Caso não encontre, faz a busca com conversão/case-insensitive
       if not res or not res.data:
         res = (
             supabase.table("config_projetos")
@@ -95,12 +90,10 @@ def obter_datas_limite_projeto(supabase, projeto_id):
     except Exception as e:
       print(f"Aviso ao buscar limite na config_projetos: {e}")
 
-  # 1. Data Início do Modal
   val_i_p = hoje_br.replace(day=1)
   if dt_ini_valida and val_i_p < dt_ini_valida:
     val_i_p = dt_ini_valida
 
-  # 2. Data Fim do Modal
   if dt_fim_valida:
     val_f_p = dt_fim_valida
   else:
@@ -150,7 +143,7 @@ def processar_texto_groq(
     12. "regra_fds": Se citar final de semana: "Posterga", "Antecipa" ou "Manter" (padrão).
     13. "is_cartao": true se citar cartão de crédito para a projeção, caso contrário false.
     14. "dia_corte": Dia do mês em inteiro para o corte da fatura do cartão (padrão: 31).
-    15. "permite_parcial": NUNCA marque como true para compras normais, à vista ou no cartão de crédito. Retorne true APENAS se o usuário explicitar "pagamento parcial" ou "entrada parcial".
+    15. "permite_parcial": Retorne true se a frase contiver expressões como "permite parciais", "lançamento parcial", "pagamento parcial", "entrada parcial" ou "parciais". Caso contrário, retorne false.
 
     Retorne exatamente esta estrutura JSON:
     {{
@@ -253,7 +246,6 @@ def processar_texto_groq(
     intencao_ext = dados_parsed.get("intencao", "PROJETAR")
     permite_parcial_ext = bool(dados_parsed.get("permite_parcial", False))
     
-    # Se a intenção for REALIZAR, garante que permite_parcial é False
     if intencao_ext == "REALIZAR":
       permite_parcial_ext = False
 
@@ -364,7 +356,6 @@ def buscar_lancamento_no_banco(supabase, usuario_id, projeto_id, descricao):
 
 
 def fechar_modal_voz():
-  """Reseta completamente os controles do modal garantindo o fechamento imediato."""
   st.session_state.abrir_modal_orcas = False
   st.session_state.exibir_modal_voz = False
   st.session_state.etapa_voz = "gravacao"
@@ -399,7 +390,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
 
   client_groq = Groq(api_key=groq_key.strip())
 
-  # TELA 1: GRAVAÇÃO
   if st.session_state.etapa_voz == "gravacao":
     pode_usar, uso, limite = verificar_limite_uso(supabase, id_usuario)
     if not pode_usar:
@@ -424,7 +414,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
           st.session_state.hash_ultimo_audio = hash(audio_bytes)
 
           if isinstance(dados, dict):
-            # Se for uma ação REALIZAR direta (ex: compra realizada), mantém permite_parcial = False
             if dados.get("intencao") == "REALIZAR":
               dados["id_existente"] = None
               dados["permite_parcial"] = False
@@ -448,7 +437,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
           st.session_state.etapa_voz = "confirmacao"
           st.rerun()
 
-  # TELA 2: CONFIRMAÇÃO
   elif st.session_state.etapa_voz == "confirmacao":
     dados = st.session_state.dados_interpretados or {}
     st.info(f'🗣️ **Você disse:** "{dados.get("transcricao")}"')
@@ -471,7 +459,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
       if match_opt:
         idx_cartao = opcoes_cartoes.index(match_opt)
       else:
-        # Se não existe no cadastro, seleciona "+ Outro Cartão..." e preenche o nome
         idx_cartao = opcoes_cartoes.index("+ Outro Cartão...")
         cartao_sugerido_manual = cartao_clean
     else:
@@ -492,12 +479,10 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
         key="sb_intencao_confirmacao",
     )
 
-    # Busca na tabela config_projetos pela coluna projeto_id
     dt_inicio_plano, dt_fim_plano, min_db, max_db = (
         obter_datas_limite_projeto(supabase, plano_ativo)
     )
 
-    # DEFINIÇÃO DAS DATAS DO FORMULÁRIO (IA VS PADRÃO DO PLANO)
     val_dt_inicio = dt_inicio_plano
     val_dt_fim = dt_fim_plano
 
@@ -539,7 +524,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
             index=0 if dados.get("tipo") == "Saída" else 1,
         )
 
-      # DADOS ESPECÍFICOS DE REALIZAR / CONCILIAÇÃO
       sp_dia_corte = None
       sp_dia_venc = None
       cartao_manual = ""
@@ -585,7 +569,18 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
               key="voz_novo_cartao_venc",
           )
 
-      # DADOS ESPECÍFICOS DE PROJETAR
+        is_realizar_ou_parcial = intencao_selecionada in ["REALIZAR", "PARCIAL"]
+        val_parcial_chk = (
+            False
+            if is_realizar_ou_parcial
+            else bool(dados.get("permite_parcial", False))
+        )
+        chk_parcial = st.checkbox(
+            "Permite Lançamento Parcial",
+            value=val_parcial_chk,
+            disabled=is_realizar_ou_parcial,
+        )
+
       else:
         st.markdown("---")
         st.markdown("##### 📅 Configurações de Recorrência (Projetar)")
@@ -655,19 +650,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
             value=bool(dados.get("permite_parcial", False)),
         )
 
-      if intencao_selecionada != "PROJETAR":
-        is_realizar_ou_parcial = intencao_selecionada in ["REALIZAR", "PARCIAL"]
-        val_parcial_chk = (
-            False
-            if is_realizar_ou_parcial
-            else bool(dados.get("permite_parcial", False))
-        )
-        chk_parcial = st.checkbox(
-            "Permite Lançamento Parcial",
-            value=val_parcial_chk,
-            disabled=is_realizar_ou_parcial,
-        )
-
       b_salvar, b_refazer, b_sair = st.columns(3)
       sub_salvar = b_salvar.form_submit_button(
           "✅ Confirmar", type="primary", use_container_width=True
@@ -678,7 +660,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
       sub_sair = b_sair.form_submit_button("❌ Sair", use_container_width=True)
 
       if sub_salvar:
-        # VALIDAÇÃO CRÍTICA DE NOVO CARTÃO
         if intencao_selecionada != "PROJETAR" and cartao_sel == "+ Outro Cartão...":
           if not cartao_manual.strip() or sp_dia_corte is None or sp_dia_venc is None:
             st.error(
