@@ -114,17 +114,17 @@ def renderizar_pagina_manutencao(supabase, usuario_id, projeto_ativo):
         key="manut_conteudo",
     )
 
-  # Mapeamento correto com as colunas reais da tabela 'lancamentos'
+  # Mapeamento com as colunas reais confirmadas no Supabase
   campos_mapeados = {
-      "Data de Vencimento": "data_vencimento",
+      "Data de Vencimento": "AMBAS_DATAS",
       "Dia de Vencimento": "AJUSTAR_DIA_VENCIMENTO",
-      "Valor Planejado": "valor_planejado",
-      "Valor Realizado": "valor_realizado",
+      "Valor Planejado": "valor_plan",
+      "Valor Realizado": "valor_real",
       "Descrição": "descricao",
   }
 
   if sobre_quem == "cartão de crédito":
-    campos_mapeados["Dia de Corte"] = "dia_corte"
+    campos_mapeados["Dia de Corte"] = "cc_dia_corte"
     campos_mapeados["Nome Cartão"] = "cartao"
 
   with c_campo:
@@ -251,12 +251,20 @@ def renderizar_pagina_manutencao(supabase, usuario_id, projeto_ativo):
 
         try:
           if acao == "alterar":
-            # Alteração do dia mantendo o mês/ano do vencimento
-            if campo_db == "AJUSTAR_DIA_VENCIMENTO":
+            # 1. Troca completa de Data de Vencimento -> atualiza 'data_vencimento' e 'data'
+            if campo_db == "AMBAS_DATAS":
+              data_str = str(novo_valor)
+              supabase.table("lancamentos").update({
+                  "data_vencimento": data_str,
+                  "data": data_str,
+              }).in_("id", ids_afetados).execute()
+
+            # 2. Ajuste do dia mantendo ano/mês -> atualiza 'data_vencimento' e 'data'
+            elif campo_db == "AJUSTAR_DIA_VENCIMENTO":
               novo_dia_str = str(int(novo_valor))
               for idx, row in df_preview.iterrows():
                 id_reg = row["id"]
-                dt_atual = row.get("data_vencimento")
+                dt_atual = row.get("data_vencimento") or row.get("data")
                 dt_nova = (
                     ajustar_dia_vencimento(dt_atual, novo_dia_str)
                     if dt_atual
@@ -264,10 +272,12 @@ def renderizar_pagina_manutencao(supabase, usuario_id, projeto_ativo):
                 )
 
                 if dt_nova:
-                  supabase.table("lancamentos").update(
-                      {"data_vencimento": dt_nova}
-                  ).eq("id", id_reg).execute()
+                  supabase.table("lancamentos").update({
+                      "data_vencimento": dt_nova,
+                      "data": dt_nova,
+                  }).eq("id", id_reg).execute()
 
+            # 3. Demais campos (valor_plan, valor_real, cc_dia_corte, etc.)
             else:
               val_salvar = (
                   str(novo_valor)

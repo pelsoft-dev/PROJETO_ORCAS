@@ -1,4 +1,5 @@
 from datetime import datetime
+import calendar
 import pandas as pd
 import streamlit as st
 
@@ -51,6 +52,18 @@ def aplicar_filtro_argumento(query, campo_db, argumento, conteudo):
   return query
 
 
+def ajustar_dia_vencimento(data_str, novo_dia):
+  """Ajusta o dia de uma data 'YYYY-MM-DD' mantendo o ano e mês original."""
+  try:
+    dt = datetime.strptime(str(data_str)[:10], "%Y-%m-%d")
+    _, ultimo_dia_mes = calendar.monthrange(dt.year, dt.month)
+    dia_final = min(int(novo_dia), ultimo_dia_mes)
+    dt_nova = dt.replace(day=dia_final)
+    return dt_nova.strftime("%Y-%m-%d")
+  except Exception:
+    return data_str
+
+
 def renderizar_pagina_manutencao(supabase, usuario_id, projeto_ativo):
   st.markdown("### 🛠️ Manutenção em Lote de Dados")
   st.caption(
@@ -60,7 +73,7 @@ def renderizar_pagina_manutencao(supabase, usuario_id, projeto_ativo):
 
   dt_ini_padrao, dt_fim_padrao = obter_limites_projeto(supabase, projeto_ativo)
 
-  # --- CONSTRUÇÃO DO PAINEL DE REGRAS (ESTILO ANEXO 01) ---
+  # --- CONSTRUÇÃO DO PAINEL DE REGRAS ---
   st.markdown("#### 📐 Definir Regra de Operação")
 
   c_acao, c_sobre, c_de, c_ate = st.columns([1.5, 2, 2, 2])
@@ -101,17 +114,17 @@ def renderizar_pagina_manutencao(supabase, usuario_id, projeto_ativo):
         key="manut_conteudo",
     )
 
-  # Ajuste dinâmico dos campos disponíveis dependendo da ação
+  # Mapeamento com as colunas reais confirmadas no Supabase
   campos_mapeados = {
-      "Data de Vencimento": "data_vencimento",
-      "Valor Planejado": "valor_planejado",
-      "Valor Realizado": "valor_realizado",
-      "Dia de Vencimento (Fixo)": "dia_vencimento_fixo",
+      "Data de Vencimento": "AMBAS_DATAS",
+      "Dia de Vencimento": "AJUSTAR_DIA_VENCIMENTO",
+      "Valor Planejado": "valor_plan",
+      "Valor Realizado": "valor_real",
       "Descrição": "descricao",
   }
 
   if sobre_quem == "cartão de crédito":
-    campos_mapeados["Dia de Corte"] = "dia_corte"
+    campos_mapeados["Dia de Corte"] = "cc_dia_corte"
     campos_mapeados["Nome Cartão"] = "cartao"
 
   with c_campo:
@@ -132,7 +145,7 @@ def renderizar_pagina_manutencao(supabase, usuario_id, projeto_ativo):
   with c_para:
     novo_valor = None
     if acao == "alterar":
-      if "Data" in campo_label:
+      if campo_label == "Data de Vencimento":
         novo_valor = st.date_input(
             "PARA (Nova Data)",
             value=datetime.today().date(),
@@ -179,7 +192,6 @@ def renderizar_pagina_manutencao(supabase, usuario_id, projeto_ativo):
     if executar_busca:
       st.session_state["manut_preview_ativa"] = True
 
-      # Construção da Query Supabase
       query = (
           supabase.table("lancamentos")
           .select("*")
@@ -187,19 +199,16 @@ def renderizar_pagina_manutencao(supabase, usuario_id, projeto_ativo):
           .eq("projeto_id", str(projeto_ativo))
       )
 
-      # Filtros de data
       if dt_de:
         query = query.gte("data_vencimento", str(dt_de))
       if dt_ate:
         query = query.lte("data_vencimento", str(dt_ate))
 
-      # Filtro de tipo de alvo
       if sobre_quem == "parciais":
         query = query.eq("permite_parcial", True)
       elif sobre_quem == "cartão de crédito":
         query = query.not_.is_("cartao", "null")
 
-      # Filtro de argumento de texto
       if conteudo:
         query = aplicar_filtro_argumento(
             query, "descricao", argumento, conteudo
@@ -242,14 +251,43 @@ def renderizar_pagina_manutencao(supabase, usuario_id, projeto_ativo):
 
         try:
           if acao == "alterar":
-            val_salvar = (
-                str(novo_valor)
-                if isinstance(novo_valor, datetime)
-                else novo_valor
-            )
-            supabase.table("lancamentos").update({campo_db: val_salvar}).in_(
-                "id", ids_afetados
-            ).execute()
+            # 1. Troca completa de Data de Vencimento -> atualiza 'data_vencimento' e 'data'
+            if campo_db == "AMBAS_DATAS":
+              data_str = str(novo_valor)
+              supabase.table("lancamentos").update({
+                  "data_vencimento": data_str,
+                  "data": data_str,
+              }).in_("id", ids_afetados).execute()
+
+            # 2. Ajuste do dia mantendo ano/mês -> atualiza 'data_vencimento' e 'data'
+            elif campo_db == "AJUSTAR_DIA_VENCIMENTO":
+              novo_dia_str = str(int(novo_valor))
+              for idx, row in df_preview.iterrows():
+                id_reg = row["id"]
+                dt_atual = row.get("data_vencimento") or row.get("data")
+                dt_nova = (
+                    ajustar_dia_vencimento(dt_atual, novo_dia_str)
+                    if dt_atual
+                    else None
+                )
+
+                if dt_nova:
+                  supabase.table("lancamentos").update({
+                      "data_vencimento": dt_nova,
+                      "data": dt_nova,
+                  }).eq("id", id_reg).execute()
+
+            # 3. Demais campos (valor_plan, valor_real, cc_dia_corte, etc.)
+            else:
+              val_salvar = (
+                  str(novo_valor)
+                  if isinstance(novo_valor, datetime)
+                  else novo_valor
+              )
+              supabase.table("lancamentos").update({campo_db: val_salvar}).in_(
+                  "id", ids_afetados
+              ).execute()
+
             st.success(
                 f"✅ Sucesso! {len(ids_afetados)} registros foram alterados."
             )
@@ -262,7 +300,6 @@ def renderizar_pagina_manutencao(supabase, usuario_id, projeto_ativo):
                 f"🗑️ Sucesso! {len(ids_afetados)} registros foram excluídos."
             )
 
-          # Limpeza de estado após sucesso
           if "df_preview_manut" in st.session_state:
             del st.session_state["df_preview_manut"]
           st.session_state["manut_preview_ativa"] = False
