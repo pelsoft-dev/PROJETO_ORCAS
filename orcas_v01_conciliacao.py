@@ -580,8 +580,8 @@ def exibir_conciliacao(
     )
 
     sp_cartao_manual = ""
-    sp_dia_corte = 25
-    sp_dia_venc = 28
+    sp_dia_corte = None
+    sp_dia_venc = None
     if sp_cartao_sel == "+ Outro Cartão...":
       c_nc1, c_nc2, c_nc3 = st.columns([1, 1, 1])
       sp_cartao_manual = c_nc1.text_input(
@@ -593,14 +593,16 @@ def exibir_conciliacao(
           "Corte (Início Fatura)",
           min_value=1,
           max_value=31,
-          value=25,
+          value=None,
+          step=1,
           key=f"sp_corte_{reset_key}",
       )
       sp_dia_venc = c_nc3.number_input(
           "Dia Vencimento",
           min_value=1,
           max_value=31,
-          value=28,
+          value=None,
+          step=1,
           key=f"sp_venc_{reset_key}",
       )
 
@@ -613,6 +615,19 @@ def exibir_conciliacao(
       )
 
     if btn_confirmar:
+      # Validação obrigatória se for novo cartão
+      if sp_cartao_sel == "+ Outro Cartão...":
+        if (
+            not sp_cartao_manual.strip()
+            or sp_dia_corte is None
+            or sp_dia_venc is None
+        ):
+          st.error(
+              "Este cartão e este lançamento não serão gerados. Preencha o"
+              " nome do cartão, o dia de corte e o dia de vencimento."
+          )
+          return
+
       v_sp = parse_moeda(sp_valor)
       if sp_desc and v_sp > 0:
         nome_cartao_final = (
@@ -788,8 +803,8 @@ def exibir_conciliacao(
         )
 
         cc_outro_nome = ""
-        dia_corte_p = 25
-        dia_venc_p = 28
+        dia_corte_p = None
+        dia_venc_p = None
         if cc_sel == "+ Outro Cartão...":
           c_nc1, c_nc2, c_nc3 = st.columns([1, 1, 1])
           cc_outro_nome = c_nc1.text_input(
@@ -801,18 +816,33 @@ def exibir_conciliacao(
               "Corte (Início Fatura)",
               min_value=1,
               max_value=31,
-              value=25,
+              value=None,
+              step=1,
               key=f"cc_corte_p_{row['id']}_{reset_key}",
           )
           dia_venc_p = c_nc3.number_input(
               "Dia Vencimento",
               min_value=1,
               max_value=31,
-              value=28,
+              value=None,
+              step=1,
               key=f"cc_venc_p_{row['id']}_{reset_key}",
           )
 
         if c8.button("Ok", key=f"btn_p_{row['id']}", use_container_width=True):
+          # Validação obrigatória se for novo cartão
+          if cc_sel == "+ Outro Cartão...":
+            if (
+                not cc_outro_nome.strip()
+                or dia_corte_p is None
+                or dia_venc_p is None
+            ):
+              st.error(
+                  "Este cartão e este lançamento não serão gerados. Preencha o"
+                  " nome do cartão, o dia de corte e o dia de vencimento."
+              )
+              return
+
           v_dig = parse_moeda(v_parc_in)
           if v_dig > 0:
             nome_cartao_final = (
@@ -878,8 +908,8 @@ def exibir_conciliacao(
           )
 
           cc_norm_outro_nome = ""
-          dia_corte_n = 25
-          dia_venc_n = 28
+          dia_corte_n = None
+          dia_venc_n = None
           if cc_norm_sel == "+ Outro Cartão...":
             c_nc1, c_nc2, c_nc3 = st.columns([1, 1, 1])
             cc_norm_outro_nome = c_nc1.text_input(
@@ -891,20 +921,35 @@ def exibir_conciliacao(
                 "Corte (Início Fatura)",
                 min_value=1,
                 max_value=31,
-                value=25,
+                value=None,
+                step=1,
                 key=f"cc_corte_n_{row['id']}_{reset_key}",
             )
             dia_venc_n = c_nc3.number_input(
                 "Dia Vencimento",
                 min_value=1,
                 max_value=31,
-                value=28,
+                value=None,
+                step=1,
                 key=f"cc_venc_n_{row['id']}_{reset_key}",
             )
 
           if c8.button(
               "Ok", key=f"btn_n_{row['id']}", use_container_width=True
           ):
+            # Validação obrigatória se for novo cartão
+            if cc_norm_sel == "+ Outro Cartão...":
+              if (
+                  not cc_norm_outro_nome.strip()
+                  or dia_corte_n is None
+                  or dia_venc_n is None
+              ):
+                st.error(
+                    "Este cartão e este lançamento não serão gerados. Preencha"
+                    " o nome do cartão, o dia de corte e o dia de vencimento."
+                )
+                return
+
             v_para_gravar = parse_moeda(v_norm_in)
             if v_para_gravar == 0:
               v_para_gravar = row["valor_plan"]

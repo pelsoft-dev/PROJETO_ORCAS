@@ -133,7 +133,7 @@ def processar_texto_groq(
     1. "descricao": Nome limpo do item (ex: "Mercado", "Curso de Inglês", "Dívida Edinho"). Remova verbos ("comprei", "agende", "planeje", "projete"), marcas não essenciais e artigos.
     2. "complemento": Texto de complemento ou numeração de parcela citado (ex: "01 de 12", "Turma A"). Se não citado, null.
     3. "valor": Valor numérico total em float. Ex: "5 mil reais" -> 5000.00, "357,00" -> 357.00.
-    4. "cartao": Extraia EXATAMENTE o nome do cartão de crédito citado (ex: "MASTER", "Nubank"). Se não citado, null.
+    4. "cartao": Extraia EXATAMENTE o nome do cartão de crédito citado (ex: "MASTER", "Nubank", "ABC Card"). Se não citado, null.
     5. "parcelas": Quantidade de parcelas como inteiro. Considerar "3x", "3 vezes" e "3 meses" como 3. Padrão: 1.
     6. "intencao": "PROJETAR" se a frase contiver termos como "planeje", "projete", "mensalmente", "todo mês", "todos os dias", "agende" ou referências a períodos/datas futuras. Caso contrário, "REALIZAR".
     7. "tipo": "Saída" para compras/gastos e "Entrada" para receitas.
@@ -451,6 +451,8 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
     opcoes_cartoes = buscar_cartoes_lcp(df_proj)
 
     cartao_detectado = dados.get("cartao")
+    cartao_sugerido_manual = ""
+
     if cartao_detectado:
       cartao_clean = str(cartao_detectado).strip()
       match_opt = next(
@@ -460,8 +462,9 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
       if match_opt:
         idx_cartao = opcoes_cartoes.index(match_opt)
       else:
-        opcoes_cartoes.insert(-1, cartao_clean)
-        idx_cartao = opcoes_cartoes.index(cartao_clean)
+        # Se não existe no cadastro, seleciona "+ Outro Cartão..." e preenche o nome
+        idx_cartao = opcoes_cartoes.index("+ Outro Cartão...")
+        cartao_sugerido_manual = cartao_clean
     else:
       idx_cartao = 0
 
@@ -528,6 +531,10 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
         )
 
       # DADOS ESPECÍFICOS DE REALIZAR / CONCILIAÇÃO
+      sp_dia_corte = None
+      sp_dia_venc = None
+      cartao_manual = ""
+
       if intencao_selecionada != "PROJETAR":
         c_real1, c_real2 = st.columns(2)
         dt_compra = c_real1.date_input(
@@ -544,10 +551,29 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
         cartao_sel = st.selectbox(
             "Cartão de Crédito", opcoes_cartoes, index=idx_cartao
         )
-        cartao_manual = ""
+        
         if cartao_sel == "+ Outro Cartão...":
-          cartao_manual = st.text_input(
-              "Nome do Cartão", placeholder="Ex: MEU CARTÃO PERSONALIZADO"
+          c_nc1, c_nc2, c_nc3 = st.columns([1, 1, 1])
+          cartao_manual = c_nc1.text_input(
+              "Nome do Cartão",
+              value=cartao_sugerido_manual,
+              placeholder="Ex: ITAÚ MASTER",
+          )
+          sp_dia_corte = c_nc2.number_input(
+              "Corte (Início Fatura)",
+              min_value=1,
+              max_value=31,
+              value=None,
+              step=1,
+              key="voz_novo_cartao_corte",
+          )
+          sp_dia_venc = c_nc3.number_input(
+              "Dia Vencimento",
+              min_value=1,
+              max_value=31,
+              value=None,
+              step=1,
+              key="voz_novo_cartao_venc",
           )
 
       # DADOS ESPECÍFICOS DE PROJETAR
@@ -643,6 +669,15 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
       sub_sair = b_sair.form_submit_button("❌ Sair", use_container_width=True)
 
       if sub_salvar:
+        # VALIDAÇÃO CRÍTICA DE NOVO CARTÃO
+        if intencao_selecionada != "PROJETAR" and cartao_sel == "+ Outro Cartão...":
+          if not cartao_manual.strip() or sp_dia_corte is None or sp_dia_venc is None:
+            st.error(
+                "Este cartão e este lançamento não serão gerados. Preencha o"
+                " nome do cartão, o dia de corte e o dia de vencimento."
+            )
+            return
+
         if intencao_selecionada == "PROJETAR":
           sucesso, msg, qtd = executar_inclusao_projetar(
               supabase=supabase,
@@ -699,6 +734,8 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
               "parcelas": parcelas,
               "id_existente": id_final,
               "permite_parcial": permite_parcial_final,
+              "cc_dia_corte": sp_dia_corte if cartao_sel == "+ Outro Cartão..." else None,
+              "cc_dia_vencimento": sp_dia_venc if cartao_sel == "+ Outro Cartão..." else None,
           }
           msg = salvar_lancamento_oficial(supabase, id_usuario, dados_finais)
           st.session_state["msg_sucesso"] = msg
