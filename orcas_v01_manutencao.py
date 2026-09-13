@@ -1,4 +1,5 @@
 from datetime import datetime
+import calendar
 import pandas as pd
 import streamlit as st
 
@@ -52,14 +53,11 @@ def aplicar_filtro_argumento(query, campo_db, argumento, conteudo):
 
 
 def ajustar_dia_vencimento(data_str, novo_dia):
-  """Ajusta o dia de uma data 'YYYY-MM-DD' mantendo o ano e mês."""
+  """Ajusta o dia de uma data 'YYYY-MM-DD' mantendo o ano e mês original."""
   try:
     dt = datetime.strptime(str(data_str)[:10], "%Y-%m-%d")
-    # Trata caso o mês não tenha o dia desejado (ex: dia 31 em fevereiro)
-    import calendar
-
-    _, ultimo_dia = calendar.monthrange(dt.year, dt.month)
-    dia_final = min(int(novo_dia), ultimo_dia)
+    _, ultimo_dia_mes = calendar.monthrange(dt.year, dt.month)
+    dia_final = min(int(novo_dia), ultimo_dia_mes)
     dt_nova = dt.replace(day=dia_final)
     return dt_nova.strftime("%Y-%m-%d")
   except Exception:
@@ -116,12 +114,12 @@ def renderizar_pagina_manutencao(supabase, usuario_id, projeto_ativo):
         key="manut_conteudo",
     )
 
-  # Mapeamento correto com as colunas reais do schema Supabase
+  # Mapeamento correto com as colunas reais da tabela 'lancamentos'
   campos_mapeados = {
       "Data de Vencimento": "data_vencimento",
+      "Dia de Vencimento": "AJUSTAR_DIA_VENCIMENTO",
       "Valor Planejado": "valor_planejado",
       "Valor Realizado": "valor_realizado",
-      "Dia de Vencimento": "dia_mes",
       "Descrição": "descricao",
   }
 
@@ -147,7 +145,7 @@ def renderizar_pagina_manutencao(supabase, usuario_id, projeto_ativo):
   with c_para:
     novo_valor = None
     if acao == "alterar":
-      if "Data de Vencimento" in campo_label:
+      if campo_label == "Data de Vencimento":
         novo_valor = st.date_input(
             "PARA (Nova Data)",
             value=datetime.today().date(),
@@ -253,8 +251,8 @@ def renderizar_pagina_manutencao(supabase, usuario_id, projeto_ativo):
 
         try:
           if acao == "alterar":
-            # Trata alteração do Dia de Vencimento
-            if campo_label == "Dia de Vencimento":
+            # Alteração do dia mantendo o mês/ano do vencimento
+            if campo_db == "AJUSTAR_DIA_VENCIMENTO":
               novo_dia_str = str(int(novo_valor))
               for idx, row in df_preview.iterrows():
                 id_reg = row["id"]
@@ -265,13 +263,10 @@ def renderizar_pagina_manutencao(supabase, usuario_id, projeto_ativo):
                     else None
                 )
 
-                payload = {"dia_mes": novo_dia_str}
                 if dt_nova:
-                  payload["data_vencimento"] = dt_nova
-
-                supabase.table("lancamentos").update(payload).eq(
-                    "id", id_reg
-                ).execute()
+                  supabase.table("lancamentos").update(
+                      {"data_vencimento": dt_nova}
+                  ).eq("id", id_reg).execute()
 
             else:
               val_salvar = (
