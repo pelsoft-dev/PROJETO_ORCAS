@@ -131,10 +131,10 @@ def processar_texto_groq(
 
     Regras de extração:
     1. "descricao": Nome limpo do item (ex: "Mercado", "Curso de Inglês", "Dívida Edinho"). Remova verbos ("comprei", "agende", "planeje", "projete"), marcas não essenciais e artigos.
-    2. "complemento": Texto de complemento ou numeração de parcela citado (ex: "01 de 12", "Turma A"). Se não citado, null.
+    2. "complemento": Texto de complemento citado (ex: "Turma A", "Lojas Americanas"). NÃO inclua numeração ou termos de parcelamento aqui (ex: "em 2x", "duas vezes", "3 parcelas" NÃO devem ir para o complemento). Se não houver complemento válido, retorne null.
     3. "valor": Valor numérico total em float. Ex: "5 mil reais" -> 5000.00, "357,00" -> 357.00.
     4. "cartao": Extraia EXATAMENTE o nome do cartão de crédito citado (ex: "MASTER", "Nubank", "ABC Card"). Se não citado, null.
-    5. "parcelas": Quantidade de parcelas como inteiro. Considerar "3x", "3 vezes" e "3 meses" como 3. Padrão: 1.
+    5. "parcelas": Quantidade de parcelas como inteiro. Considerar "2x", "duas vezes", "3 vezes", "em 3x" e "3 meses" como quantidade de parcelas. Padrão: 1.
     6. "intencao": "PROJETAR" se a frase contiver termos como "planeje", "projete", "mensalmente", "todo mês", "todos os dias", "agende" ou referências a períodos/datas futuras. Caso contrário, "REALIZAR".
     7. "tipo": "Saída" para compras/gastos e "Entrada" para receitas.
     8. "dia_mes": Se for agendamento em dia do mês (ex: "dia 15", "todos os dias 19"), informe apenas o número como string (ex: "15"). Se não houver dia específico, null.
