@@ -327,15 +327,43 @@ def transcrever_audio_groq(client_groq, audio_bytes):
 
 
 def buscar_lancamento_no_banco(supabase, usuario_id, projeto_id, descricao):
-  """Busca inteligente no banco que tolera termos parciais e ignora complementos/parcelamentos."""
+  """Busca inteligente no banco restrita ao mês corrente para realizações."""
   if not descricao or not isinstance(descricao, str) or len(descricao.strip()) < 3:
     return None
 
   # Limpa complementos entre colchetes ou parcelamentos numéricos ex: "03 de 12"
   desc_limpa = re.sub(r"\[.*?\]|\b\d{1,2}\s*de\s*\d{1,2}\b", "", descricao, flags=re.IGNORECASE).strip()
 
+  hoje_br = obter_hoje_brasil()
+  primeiro_dia_mes = hoje_br.replace(day=1)
+
+  if hoje_br.month == 12:
+    ultimo_dia_mes = hoje_br.replace(day=31)
+  else:
+    proximo_mes = hoje_br.replace(month=hoje_br.month + 1, day=1)
+    ultimo_dia_mes = proximo_mes - timedelta(days=1)
+
+  str_ini = primeiro_dia_mes.strftime("%Y-%m-%d")
+  str_fim = ultimo_dia_mes.strftime("%Y-%m-%d")
+
   try:
+    # 1ª Tentativa: Busca exata no mês corrente
     res = (
+        supabase.table("lancamentos")
+        .select("*")
+        .eq("usuario_id", str(usuario_id))
+        .eq("projeto_id", str(projeto_id))
+        .ilike("descricao", f"%{desc_limpa}%")
+        .gte("data_vencimento", str_ini)
+        .lte("data_vencimento", str_fim)
+        .order("data_vencimento", desc=False)
+        .execute()
+    )
+    if res and res.data:
+      return res.data[0]
+
+    # 2ª Tentativa (Fallback): Se não houver no mês corrente, busca a ocorrência mais próxima
+    res_fallback = (
         supabase.table("lancamentos")
         .select("*")
         .eq("usuario_id", str(usuario_id))
@@ -344,8 +372,9 @@ def buscar_lancamento_no_banco(supabase, usuario_id, projeto_id, descricao):
         .order("data_vencimento", desc=False)
         .execute()
     )
-    if res and res.data:
-      return res.data[0]
+    if res_fallback and res_fallback.data:
+      return res_fallback.data[0]
+
   except Exception as e:
     print(f"Erro na busca do banco: {e}")
   return None
@@ -417,12 +446,17 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
             if item_banco:
               dados["id_existente"] = item_banco.get("id")
 
-              # Se o usuário não falou o valor, puxa do banco
-              if float(dados.get("valor") or 0.0) == 0.0:
-                dados["valor"] = float(item_banco.get("valor") or 0.0)
+              # Atualiza valor se não foi falado no áudio ou se a intenção for REALIZAR
+              valor_banco = float(item_banco.get("valor") or 0.0)
+              if float(dados.get("valor") or 0.0) == 0.0 or dados.get("intencao") == "REALIZAR":
+                dados["valor"] = valor_banco
 
-              # Atualização da Data de Compra/Vencimento vinda do Banco
-              dt_banco = item_banco.get("data_vencimento") or item_banco.get("data_movimento") or item_banco.get("data_compra")
+              # Atualização da Data de Compra/Vencimento vinda do Banco no mês corrente
+              dt_banco = (
+                  item_banco.get("data_vencimento")
+                  or item_banco.get("data_movimento")
+                  or item_banco.get("data_compra")
+              )
               if dt_banco:
                 dados["data_compra"] = str(dt_banco)[:10]
 
@@ -435,7 +469,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
                 dados["complemento"] = match_comp.group(1)
                 dados["descricao"] = re.sub(r"\[.*?\]", "", desc_banco).strip()
               elif not match_comp and not dados.get("complemento"):
-                # Caso o complemento no banco esteja sem colchetes ex: "Financiamento 03 de 12"
                 match_parc = re.search(r"(\b\d{1,2}\s*de\s*\d{1,2}\b)", desc_banco, re.IGNORECASE)
                 if match_parc:
                   dados["complemento"] = f"[{match_parc.group(1)}]"
@@ -566,7 +599,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
       if intencao_selecionada != "PROJETAR":
         c_real1, c_real2 = st.columns(2)
         
-        # Garante a leitura correta da data trazida do banco
+        # Leitura da data do banco para preencher a Data da Compra no modal
         dt_compra_val = obter_hoje_brasil()
         if dados.get("data_compra"):
           try:
