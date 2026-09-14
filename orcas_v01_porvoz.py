@@ -327,36 +327,22 @@ def transcrever_audio_groq(client_groq, audio_bytes):
 
 
 def buscar_lancamento_no_banco(supabase, usuario_id, projeto_id, descricao):
-  """Busca estrita no banco restrita APENAS ao mês corrente."""
+  """Busca o lançamento mais recente correspondente ao termo no projeto."""
   if not descricao or not isinstance(descricao, str) or len(descricao.strip()) < 3:
     return None
 
-  # Extrai a palavra principal removendo complementos entre colchetes ou padroes de parcelamento
+  # Isola a palavra-chave principal (ex: "PILATES" ou "FINANCIAMENTO")
   desc_limpa = re.sub(r"\[.*?\]|\b\d{1,2}\s*de\s*\d{1,2}\b", "", descricao, flags=re.IGNORECASE).strip().upper()
 
-  hoje_br = obter_hoje_brasil()
-  primeiro_dia_mes = hoje_br.replace(day=1)
-
-  if hoje_br.month == 12:
-    ultimo_dia_mes = hoje_br.replace(day=31)
-  else:
-    proximo_mes = hoje_br.replace(month=hoje_br.month + 1, day=1)
-    ultimo_dia_mes = proximo_mes - timedelta(days=1)
-
-  str_ini = primeiro_dia_mes.strftime("%Y-%m-%d")
-  str_fim = ultimo_dia_mes.strftime("%Y-%m-%d")
-
   try:
-    # Consulta estrita: Apenas lançamentos do mês corrente
+    # Consulta sem restrição estrita de datas para localizar registros em qualquer mês
     res = (
         supabase.table("lancamentos")
         .select("*")
         .eq("usuario_id", str(usuario_id))
         .eq("projeto_id", str(projeto_id))
         .ilike("descricao", f"%{desc_limpa}%")
-        .gte("data_vencimento", str_ini)
-        .lte("data_vencimento", str_fim)
-        .order("data_vencimento", desc=False)
+        .order("created_at", desc=True)
         .execute()
     )
     if res and res.data:
@@ -433,12 +419,12 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
             if item_banco:
               dados["id_existente"] = item_banco.get("id")
 
-              # Traz o valor do banco se não for informado via voz ou se for realização
+              # Se o valor veio zerado da transcrição, adota o valor do banco
               valor_banco = float(item_banco.get("valor") or 0.0)
-              if float(dados.get("valor") or 0.0) == 0.0 or dados.get("intencao") == "REALIZAR":
+              if float(dados.get("valor") or 0.0) == 0.0:
                 dados["valor"] = valor_banco
 
-              # Captura a data de vencimento/movimento cadastrada no mês corrente
+              # Garante resgate da data cadastrada (vencimento, movimento ou compra)
               dt_banco = (
                   item_banco.get("data_vencimento")
                   or item_banco.get("data_movimento")
@@ -452,7 +438,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
 
               desc_banco = str(item_banco.get("descricao") or "").upper()
               
-              # Separa descrição e complemento vindo do banco (ex: "FINANCIAMENTO [03 DE 12]")
+              # Separa descrição e complemento vindo do banco
               match_comp = re.search(r"(\[.*?\])", desc_banco)
               if match_comp:
                 dados["complemento"] = match_comp.group(1)
@@ -588,7 +574,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
       if intencao_selecionada != "PROJETAR":
         c_real1, c_real2 = st.columns(2)
         
-        # Leitura da data do banco para preencher a Data da Compra/Vencimento no modal
+        # Leitura da data recuperada do banco para preenchimento
         dt_compra_val = obter_hoje_brasil()
         if dados.get("data_compra"):
           try:
