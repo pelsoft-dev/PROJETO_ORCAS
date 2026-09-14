@@ -123,7 +123,7 @@ def processar_texto_groq(
     Projeto Ativo: "{plano_ativo}"
 
     Regras de extração:
-    1. "descricao": Nome limpo do item (ex: "Mercado", "Curso de Inglês", "Financiamento Carro", "Celular"). Remova verbos ("comprei", "paguei", "agende", "planeje", "projete"), marcas não essenciais e artigos.
+    1. "descricao": Nome limpo do item (ex: "Mercado", "Curso de Inglês", "Financiamento Carro", "Celular", "Pilates"). Remova verbos ("comprei", "paguei", "agende", "planeje", "projete"), marcas não essenciais e artigos.
     2. "complemento": Texto de complemento citado. Se for numeração de parcela ou ciclo (ex: "01 de 12", "parcela 4"), FORMATAR SEMPRE ENTRE COLCHETES, como "[01 de 12]" ou "[04 de 12]". Se não houver complemento válido, retorne null.
     3. "valor": Valor numérico total em float. Ex: "5 mil reais" -> 5000.00, "357,00" -> 357.00. Se o usuário apenas disser "paguei X" sem citar valor, retorne 0.0 para que o sistema busque no plano.
     4. "cartao": Extraia EXATAMENTE o nome do cartão de crédito citado (ex: "MASTER", "Nubank", "ABC Card", "ELO"). Se não citado, null.
@@ -327,11 +327,12 @@ def transcrever_audio_groq(client_groq, audio_bytes):
 
 
 def buscar_lancamento_no_banco(supabase, usuario_id, projeto_id, descricao):
-  """Busca inteligente no banco que tolera termos parciais e ignora complementos entre colchetes []."""
+  """Busca inteligente no banco que tolera termos parciais e ignora complementos/parcelamentos."""
   if not descricao or not isinstance(descricao, str) or len(descricao.strip()) < 3:
     return None
 
-  desc_limpa = re.sub(r"\[.*?\]", "", descricao).strip()
+  # Limpa complementos entre colchetes ou parcelamentos numéricos ex: "03 de 12"
+  desc_limpa = re.sub(r"\[.*?\]|\b\d{1,2}\s*de\s*\d{1,2}\b", "", descricao, flags=re.IGNORECASE).strip()
 
   try:
     res = (
@@ -416,8 +417,14 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
             if item_banco:
               dados["id_existente"] = item_banco.get("id")
 
+              # Se o usuário não falou o valor, puxa do banco
               if float(dados.get("valor") or 0.0) == 0.0:
                 dados["valor"] = float(item_banco.get("valor") or 0.0)
+
+              # Atualização da Data de Compra/Vencimento vinda do Banco
+              dt_banco = item_banco.get("data_vencimento") or item_banco.get("data_movimento") or item_banco.get("data_compra")
+              if dt_banco:
+                dados["data_compra"] = str(dt_banco)[:10]
 
               if item_banco.get("tipo"):
                 dados["tipo"] = item_banco.get("tipo")
@@ -427,6 +434,12 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
               if match_comp and not dados.get("complemento"):
                 dados["complemento"] = match_comp.group(1)
                 dados["descricao"] = re.sub(r"\[.*?\]", "", desc_banco).strip()
+              elif not match_comp and not dados.get("complemento"):
+                # Caso o complemento no banco esteja sem colchetes ex: "Financiamento 03 de 12"
+                match_parc = re.search(r"(\b\d{1,2}\s*de\s*\d{1,2}\b)", desc_banco, re.IGNORECASE)
+                if match_parc:
+                  dados["complemento"] = f"[{match_parc.group(1)}]"
+                  dados["descricao"] = re.sub(r"\b\d{1,2}\s*de\s*\d{1,2}\b", "", desc_banco, flags=re.IGNORECASE).strip()
 
               is_pai_parcial = bool(
                   item_banco.get("permite_parcial")
@@ -506,7 +519,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
         pass
 
     with st.form("form_confirmacao_voz"):
-      # EXIBIÇÃO CONDICIONAL DO CAMPO COMPLEMENTO
       mostrar_complemento = intencao_selecionada not in ["REALIZAR", "PARCIAL"]
       
       if mostrar_complemento:
@@ -531,7 +543,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
               index=0 if dados.get("tipo") == "Saída" else 1,
           )
       else:
-        # Layout simplificado para REALIZAR e PARCIAL
         c1, c2 = st.columns(2)
         with c1:
           descricao = st.text_input("Descrição", value=dados.get("descricao", ""))
@@ -554,11 +565,18 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
 
       if intencao_selecionada != "PROJETAR":
         c_real1, c_real2 = st.columns(2)
+        
+        # Garante a leitura correta da data trazida do banco
+        dt_compra_val = obter_hoje_brasil()
+        if dados.get("data_compra"):
+          try:
+            dt_compra_val = datetime.strptime(dados.get("data_compra")[:10], "%Y-%m-%d").date()
+          except Exception:
+            pass
+
         dt_compra = c_real1.date_input(
             "Data da Compra",
-            value=datetime.strptime(
-                dados.get("data_compra", str(obter_hoje_brasil())), "%Y-%m-%d"
-            ).date(),
+            value=dt_compra_val,
             format="DD/MM/YYYY",
         )
         parcelas = c_real2.number_input(
@@ -728,7 +746,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
           )
           str_dt_compra = dt_compra.strftime("%Y-%m-%d")
           
-          # Se o complemento veio do banco ou IA, mas está oculto na tela, mantém ele na gravação final
           desc_completa = (
               f"{descricao} {complemento}".strip() if complemento else descricao
           )
