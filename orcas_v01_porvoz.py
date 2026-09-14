@@ -195,7 +195,7 @@ def processar_texto_groq(
         "complemento": None,
         "valor": 0.0,
         "tipo": "Saída",
-        "data_compra": str(hoje),
+        "data": str(hoje),
         "permite_parcial": False,
         "cartao": None,
         "parcelas": 1,
@@ -251,7 +251,7 @@ def processar_texto_groq(
         "complemento": dados_parsed.get("complemento"),
         "valor": valor_float,
         "tipo": dados_parsed.get("tipo", "Saída"),
-        "data_compra": str(hoje),
+        "data": str(hoje),
         "permite_parcial": permite_parcial_ext,
         "cartao": cartao_extraido,
         "parcelas": int(dados_parsed.get("parcelas") or 1),
@@ -274,7 +274,7 @@ def processar_texto_groq(
         "complemento": None,
         "valor": 0.0,
         "tipo": "Saída",
-        "data_compra": str(hoje),
+        "data": str(hoje),
         "permite_parcial": False,
         "cartao": None,
         "parcelas": 1,
@@ -327,55 +327,40 @@ def transcrever_audio_groq(client_groq, audio_bytes):
 
 
 def buscar_lancamento_no_banco(supabase, usuario_id, projeto_id, descricao):
-  """Busca o lançamento restrito estritamente ao MÊS CORRENTE do projeto ativo."""
+  """Busca o lançamento correspondente no projeto ativo verificando as colunas data e data_vencimento."""
   if not descricao or not isinstance(descricao, str) or len(descricao.strip()) < 3:
     return None
 
-  # Palavra-chave principal para a query (ex: PILATES ou FINANCIAMENTO)
   desc_limpa = re.sub(r"\[.*?\]|\b\d{1,2}\s*de\s*\d{1,2}\b", "", descricao, flags=re.IGNORECASE).strip().upper()
   if not desc_limpa:
     desc_limpa = descricao.strip().upper()
 
   hoje = obter_hoje_brasil()
-  primeiro_dia_mes = hoje.replace(day=1).strftime("%Y-%m-%d")
-
-  # Determina o último dia do mês corrente
-  if hoje.month == 12:
-    ultimo_dia_mes = hoje.replace(day=31).strftime("%Y-%m-%d")
-  else:
-    prox_mes = hoje.replace(month=hoje.month + 1, day=1)
-    ultimo_dia_mes = (prox_mes - timedelta(days=1)).strftime("%Y-%m-%d")
+  mes_atual = hoje.month
+  ano_atual = hoje.year
 
   try:
-    # Query restrita ao mês corrente para o projeto ativo
     res = (
         supabase.table("lancamentos")
         .select("*")
-        .eq("usuario_id", str(usuario_id))
         .eq("projeto_id", str(projeto_id))
         .ilike("descricao", f"%{desc_limpa}%")
-        .gte("data_vencimento", primeiro_dia_mes)
-        .lte("data_vencimento", ultimo_dia_mes)
         .execute()
     )
-    
+
     if res and res.data:
+      # Filtra prioritariamente pelas colunas 'data' ou 'data_vencimento'
+      for rec in res.data:
+        dt_str = rec.get("data") or rec.get("data_vencimento")
+        if dt_str:
+          try:
+            dt_obj = datetime.strptime(str(dt_str)[:10], "%Y-%m-%d").date()
+            if dt_obj.month == mes_atual and dt_obj.year == ano_atual:
+              return rec
+          except Exception:
+            continue
+      
       return res.data[0]
-
-    # Fallback buscando pelo campo data_movimento no mês vigente caso data_vencimento não esteja preenchida
-    res_mov = (
-        supabase.table("lancamentos")
-        .select("*")
-        .eq("usuario_id", str(usuario_id))
-        .eq("projeto_id", str(projeto_id))
-        .ilike("descricao", f"%{desc_limpa}%")
-        .gte("data_movimento", primeiro_dia_mes)
-        .lte("data_movimento", ultimo_dia_mes)
-        .execute()
-    )
-
-    if res_mov and res_mov.data:
-      return res_mov.data[0]
 
   except Exception as e:
     print(f"Erro na busca do banco: {e}")
@@ -448,26 +433,22 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
             if item_banco:
               dados["id_existente"] = item_banco.get("id")
 
-              # Injeta SEMPRE o valor gravado no banco se existir
+              # Força a utilização do valor registrado no banco
               valor_banco = float(item_banco.get("valor") or 0.0)
               if valor_banco > 0:
                 dados["valor"] = valor_banco
 
-              # Injeta SEMPRE a data cadastrada no banco
-              dt_banco = (
-                  item_banco.get("data_vencimento")
-                  or item_banco.get("data_movimento")
-                  or item_banco.get("data_compra")
-              )
+              # Força a utilização da data registrada no banco (colunas data ou data_vencimento)
+              dt_banco = item_banco.get("data") or item_banco.get("data_vencimento")
               if dt_banco:
-                dados["data_compra"] = str(dt_banco)[:10]
+                dados["data"] = str(dt_banco)[:10]
 
               if item_banco.get("tipo"):
                 dados["tipo"] = item_banco.get("tipo")
 
               desc_banco = str(item_banco.get("descricao") or "").upper()
               
-              # Separa descrição e complemento exatamente como no banco
+              # Trata complemento e descrição vindos do banco
               match_comp = re.search(r"(\[.*?\])", desc_banco)
               if match_comp:
                 dados["complemento"] = match_comp.group(1)
@@ -605,11 +586,10 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
       if intencao_selecionada != "PROJETAR":
         c_real1, c_real2 = st.columns(2)
         
-        # Exibe a data exatamente recuperada do banco para o modal
         dt_compra_val = obter_hoje_brasil()
-        if dados.get("data_compra"):
+        if dados.get("data"):
           try:
-            dt_compra_val = datetime.strptime(dados.get("data_compra")[:10], "%Y-%m-%d").date()
+            dt_compra_val = datetime.strptime(dados.get("data")[:10], "%Y-%m-%d").date()
           except Exception:
             pass
 
@@ -795,8 +775,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
               "descricao": desc_completa,
               "valor": valor,
               "tipo": tipo,
-              "data_compra": str_dt_compra,
-              "data_movimento": str_dt_compra,
+              "data": str_dt_compra,
               "data_vencimento": str_dt_compra,
               "cartao": nome_cartao_final,
               "parcelas": parcelas,
