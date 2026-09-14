@@ -125,7 +125,7 @@ def processar_texto_groq(
     Regras de extração:
     1. "descricao": Nome limpo do item (ex: "MERCADO", "CURSO DE INGLÊS", "FINANCIAMENTO CARRO", "CELULAR", "PILATES"). Remova verbos ("comprei", "paguei", "agende", "planeje", "projete"), marcas não essenciais e artigos. Retornar sempre em MAIÚSCULAS.
     2. "complemento": Texto de complemento citado. Se for numeração de parcela ou ciclo (ex: "01 de 12", "parcela 4"), FORMATAR SEMPRE ENTRE COLCHETES, como "[01 de 12]" ou "[04 de 12]". Se não houver complemento válido, retorne null.
-    3. "valor": Valor numérico total em float. Ex: "5 mil reais" -> 5000.00, "357,00" -> 357.00. Se o usuário apenas disser "paguei X" sem citar valor, retorne 0.0 para que o sistema busque no plano.
+    3. "valor": Valor numérico total em float. Ex: "5 mil reais" -> 5000.00, "357,00" -> 357.00. Se o usuário disser apenas "paguei X" sem citar valor explicitamente, retorne 0.0 para que o sistema busque o valor planejado no banco.
     4. "cartao": Extraia EXATAMENTE o nome do cartão de crédito citado (ex: "MASTER", "Nubank", "ABC Card", "ELO"). Se não citado, null.
     5. "parcelas": Quantidade de parcelas como inteiro. Considerar "2x", "duas vezes", "3 vezes", "em 3x" e "3 meses" como quantidade de parcelas. Padrão: 1.
     6. "intencao": "PROJETAR" se a frase contiver termos como "planeje", "projete", "mensalmente", "todo mês", "todos os dias", "agende" ou referências a períodos/datas futuras. Caso o usuário diga "paguei", "recebi", "comprei", "concluí", retorne "REALIZAR".
@@ -433,12 +433,26 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
             if item_banco:
               dados["id_existente"] = item_banco.get("id")
 
-              # Força a utilização do valor registrado no banco
-              valor_banco = float(item_banco.get("valor") or 0.0)
-              if valor_banco > 0:
-                dados["valor"] = valor_banco
+              # 1. Busca o valor planejado/registrado no banco (procura por valor_plan, valor_previsto ou valor)
+              valor_banco_raw = (
+                  item_banco.get("valor_plan")
+                  or item_banco.get("valor_previsto")
+                  or item_banco.get("valor")
+              )
+              try:
+                valor_banco_float = float(valor_banco_raw or 0.0)
+              except (ValueError, TypeError):
+                valor_banco_float = 0.0
 
-              # Força a utilização da data registrada no banco (colunas data ou data_vencimento)
+              # Se a IA não pegou um valor falado (0.0) OU se a intenção for REALIZAR, utiliza o valor do banco
+              if (
+                  dados.get("valor") is None or float(dados.get("valor", 0.0)) == 0.0
+              ) and valor_banco_float > 0:
+                dados["valor"] = valor_banco_float
+              elif valor_banco_float > 0 and dados.get("intencao") == "REALIZAR":
+                dados["valor"] = valor_banco_float
+
+              # 2. Força a utilização da data registrada no banco (colunas data ou data_vencimento)
               dt_banco = item_banco.get("data") or item_banco.get("data_vencimento")
               if dt_banco:
                 dados["data"] = str(dt_banco)[:10]
