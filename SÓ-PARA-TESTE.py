@@ -445,15 +445,26 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
               except (ValueError, TypeError):
                 valor_banco_float = 0.0
 
-              if (
-                  dados.get("valor") is None or float(dados.get("valor", 0.0)) == 0.0
-              ) and valor_banco_float > 0:
-                dados["valor"] = valor_banco_float
-              elif valor_banco_float > 0 and dados.get("intencao") == "REALIZAR":
+              is_pai_parcial = bool(
+                  item_banco.get("permite_parcial")
+              ) or bool(item_banco.get("parcial_real"))
+
+              if is_pai_parcial:
+                dados["intencao"] = "PARCIAL"
+                dados["permite_parcial"] = False
+
+              # --- AJUSTE REGRA DE VALOR ---
+              # Se o usuário NÃO FALOU valor (valor_voz == 0.0), puxa o valor do banco.
+              # Se o usuário FALOU um valor (ex: 230,00 ou 400,00), MANTÉM o valor falado!
+              valor_voz = float(dados.get("valor") or 0.0)
+              if valor_voz == 0.0 and valor_banco_float > 0:
                 dados["valor"] = valor_banco_float
 
+              # --- AJUSTE REGRA DE DATA ---
+              # Se for PARCIAL, a data DEVE ser HOJE (ou a data específica falada), NÃO a data do banco (dia 01).
+              # Se for REALIZAR/ALTERAR (não parcial), puxamos a data de vencimento agendada no banco.
               dt_banco = item_banco.get("data") or item_banco.get("data_vencimento")
-              if dt_banco:
+              if dt_banco and dados.get("intencao") != "PARCIAL":
                 dados["data"] = str(dt_banco)[:10]
 
               if item_banco.get("tipo"):
@@ -472,14 +483,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
                   dados["descricao"] = re.sub(r"\b\d{1,2}\s*de\s*\d{1,2}\b", "", desc_banco, flags=re.IGNORECASE).strip()
                 else:
                   dados["descricao"] = desc_banco
-
-              is_pai_parcial = bool(
-                  item_banco.get("permite_parcial")
-              ) or bool(item_banco.get("parcial_real"))
-
-              if is_pai_parcial:
-                dados["intencao"] = "PARCIAL"
-                dados["permite_parcial"] = False
 
           st.session_state.dados_interpretados = dados
           st.session_state.etapa_voz = "confirmacao"
