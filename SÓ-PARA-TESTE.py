@@ -327,26 +327,55 @@ def transcrever_audio_groq(client_groq, audio_bytes):
 
 
 def buscar_lancamento_no_banco(supabase, usuario_id, projeto_id, descricao):
-  """Busca o lançamento mais recente correspondente ao termo no projeto."""
+  """Busca o lançamento restrito estritamente ao MÊS CORRENTE do projeto ativo."""
   if not descricao or not isinstance(descricao, str) or len(descricao.strip()) < 3:
     return None
 
-  # Isola a palavra-chave principal (ex: "PILATES" ou "FINANCIAMENTO")
+  # Palavra-chave principal para a query (ex: PILATES ou FINANCIAMENTO)
   desc_limpa = re.sub(r"\[.*?\]|\b\d{1,2}\s*de\s*\d{1,2}\b", "", descricao, flags=re.IGNORECASE).strip().upper()
+  if not desc_limpa:
+    desc_limpa = descricao.strip().upper()
+
+  hoje = obter_hoje_brasil()
+  primeiro_dia_mes = hoje.replace(day=1).strftime("%Y-%m-%d")
+
+  # Determina o último dia do mês corrente
+  if hoje.month == 12:
+    ultimo_dia_mes = hoje.replace(day=31).strftime("%Y-%m-%d")
+  else:
+    prox_mes = hoje.replace(month=hoje.month + 1, day=1)
+    ultimo_dia_mes = (prox_mes - timedelta(days=1)).strftime("%Y-%m-%d")
 
   try:
-    # Consulta sem restrição estrita de datas para localizar registros em qualquer mês
+    # Query restrita ao mês corrente para o projeto ativo
     res = (
         supabase.table("lancamentos")
         .select("*")
         .eq("usuario_id", str(usuario_id))
         .eq("projeto_id", str(projeto_id))
         .ilike("descricao", f"%{desc_limpa}%")
-        .order("created_at", desc=True)
+        .gte("data_vencimento", primeiro_dia_mes)
+        .lte("data_vencimento", ultimo_dia_mes)
         .execute()
     )
+    
     if res and res.data:
       return res.data[0]
+
+    # Fallback buscando pelo campo data_movimento no mês vigente caso data_vencimento não esteja preenchida
+    res_mov = (
+        supabase.table("lancamentos")
+        .select("*")
+        .eq("usuario_id", str(usuario_id))
+        .eq("projeto_id", str(projeto_id))
+        .ilike("descricao", f"%{desc_limpa}%")
+        .gte("data_movimento", primeiro_dia_mes)
+        .lte("data_movimento", ultimo_dia_mes)
+        .execute()
+    )
+
+    if res_mov and res_mov.data:
+      return res_mov.data[0]
 
   except Exception as e:
     print(f"Erro na busca do banco: {e}")
@@ -419,12 +448,12 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
             if item_banco:
               dados["id_existente"] = item_banco.get("id")
 
-              # Se o valor veio zerado da transcrição, adota o valor do banco
+              # Injeta SEMPRE o valor gravado no banco se existir
               valor_banco = float(item_banco.get("valor") or 0.0)
-              if float(dados.get("valor") or 0.0) == 0.0:
+              if valor_banco > 0:
                 dados["valor"] = valor_banco
 
-              # Garante resgate da data cadastrada (vencimento, movimento ou compra)
+              # Injeta SEMPRE a data cadastrada no banco
               dt_banco = (
                   item_banco.get("data_vencimento")
                   or item_banco.get("data_movimento")
@@ -438,7 +467,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
 
               desc_banco = str(item_banco.get("descricao") or "").upper()
               
-              # Separa descrição e complemento vindo do banco
+              # Separa descrição e complemento exatamente como no banco
               match_comp = re.search(r"(\[.*?\])", desc_banco)
               if match_comp:
                 dados["complemento"] = match_comp.group(1)
@@ -448,6 +477,8 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
                 if match_parc:
                   dados["complemento"] = f"[{match_parc.group(1)}]"
                   dados["descricao"] = re.sub(r"\b\d{1,2}\s*de\s*\d{1,2}\b", "", desc_banco, flags=re.IGNORECASE).strip()
+                else:
+                  dados["descricao"] = desc_banco
 
               is_pai_parcial = bool(
                   item_banco.get("permite_parcial")
@@ -574,7 +605,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
       if intencao_selecionada != "PROJETAR":
         c_real1, c_real2 = st.columns(2)
         
-        # Leitura da data recuperada do banco para preenchimento
+        # Exibe a data exatamente recuperada do banco para o modal
         dt_compra_val = obter_hoje_brasil()
         if dados.get("data_compra"):
           try:
