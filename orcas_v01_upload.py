@@ -36,6 +36,14 @@ ORDEM_COLUNAS_EXCEL = [
     "cc_data_compra"       # Coluna AA (27)
 ]
 
+# Colunas que exigem tipo INTEGER no PostgreSQL
+COLUNAS_INTEIRAS = {
+    "cc_dia_corte",
+    "cc_qtd_parcelas",
+    "correcao_freq",
+    "id_pai"
+}
+
 # Colunas aceitas na tabela 'lancamentos' do Supabase
 COLUNAS_VALIDAS_BANCO = set(ORDEM_COLUNAS_EXCEL) | {"usuario_id", "projeto_id"}
 
@@ -46,6 +54,20 @@ def sanitize_val(val):
     if isinstance(val, float) and math.isnan(val):
         return None
     return val
+
+
+def sanitize_int_val(val):
+    """Converte valores decimais do Pandas (ex: 12.0) em inteiros puros (ex: 12) para evitar erro no PostgreSQL."""
+    val_clean = sanitize_val(val)
+    if val_clean is None:
+        return None
+    try:
+        val_float = float(val_clean)
+        if math.isnan(val_float):
+            return None
+        return int(val_float)
+    except (ValueError, TypeError):
+        return None
 
 
 def parse_float_val(val):
@@ -215,7 +237,11 @@ def render_upload(usuario_id=None, projeto_id=None):
                                 "valor_real",
                                 "descricao",
                             ]:
-                                val = sanitize_val(row[col])
+                                # Tratamento específico para colunas do tipo INTEGER
+                                if col in COLUNAS_INTEIRAS:
+                                    val = sanitize_int_val(row[col])
+                                else:
+                                    val = sanitize_val(row[col])
 
                                 if col in [
                                     "realizado",
