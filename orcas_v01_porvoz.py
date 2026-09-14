@@ -7,13 +7,11 @@ from groq import Groq
 import pandas as pd
 import streamlit as st
 
-# CONSUMO DIRETO DO MOTOR DE CONCILIAÇÃO UNIFICADO
 from orcas_v01_conciliacao import (
     buscar_cartoes_lcp,
     salvar_lancamento_oficial,
 )
 
-# IMPORTAÇÃO DO MOTOR DE PROJEÇÃO UNIFICADO
 from orcas_v01_projetar import executar_inclusao_projetar
 
 LIMITES_USO = {"PADRÃO": 30, "INTERMEDIÁRIO": 100, "ILIMITADO": 999999}
@@ -58,14 +56,12 @@ def normalizar_valor_moeda(valor_str):
 
 
 def obter_datas_limite_projeto(supabase, projeto_id):
-  """Busca as datas oficiais na tabela config_projetos filtrando estritamente por projeto_id."""
   hoje_br = obter_hoje_brasil()
   dt_ini_valida = None
   dt_fim_valida = None
 
   if projeto_id:
     try:
-      # Busca direta usando a coluna exata 'projeto_id'
       res = (
           supabase.table("config_projetos")
           .select("data_ini, data_fim")
@@ -73,7 +69,6 @@ def obter_datas_limite_projeto(supabase, projeto_id):
           .execute()
       )
 
-      # Caso não encontre, faz a busca com conversão/case-insensitive
       if not res or not res.data:
         res = (
             supabase.table("config_projetos")
@@ -95,12 +90,10 @@ def obter_datas_limite_projeto(supabase, projeto_id):
     except Exception as e:
       print(f"Aviso ao buscar limite na config_projetos: {e}")
 
-  # 1. Data Início do Modal
   val_i_p = hoje_br.replace(day=1)
   if dt_ini_valida and val_i_p < dt_ini_valida:
     val_i_p = dt_ini_valida
 
-  # 2. Data Fim do Modal
   if dt_fim_valida:
     val_f_p = dt_fim_valida
   else:
@@ -130,40 +123,34 @@ def processar_texto_groq(
     Projeto Ativo: "{plano_ativo}"
 
     Regras de extração:
-    1. "descricao": Nome limpo do item (ex: "Mercado", "Curso de Inglês", "Dívida Edinho"). Remova verbos ("comprei", "agende", "planeje", "projete"), marcas não essenciais e artigos.
-    2. "complemento": Texto de complemento ou numeração de parcela citado (ex: "01 de 12", "Turma A"). Se não citado, null.
-    3. "valor": Valor numérico total em float. Ex: "5 mil reais" -> 5000.00, "357,00" -> 357.00.
-    4. "cartao": Extraia EXATAMENTE o nome do cartão de crédito citado (ex: "MASTER", "Nubank", "ABC Card"). Se não citado, null.
-    5. "parcelas": Quantidade de parcelas como inteiro. Considerar "3x", "3 vezes" e "3 meses" como 3. Padrão: 1.
-    6. "intencao": "PROJETAR" se a frase contiver termos como "planeje", "projete", "mensalmente", "todo mês", "todos os dias", "agende" ou referências a períodos/datas futuras. Caso contrário, "REALIZAR".
+    1. "descricao": Nome limpo do item (ex: "Mercado", "Curso de Inglês", "Financiamento Carro", "Celular"). Remova verbos ("comprei", "paguei", "agende", "planeje", "projete"), marcas não essenciais e artigos.
+    2. "complemento": Texto de complemento citado. Se for numeração de parcela ou ciclo (ex: "01 de 12", "parcela 4"), FORMATAR SEMPRE ENTRE COLCHETES, como "[01 de 12]" ou "[04 de 12]". Se não houver complemento válido, retorne null.
+    3. "valor": Valor numérico total em float. Ex: "5 mil reais" -> 5000.00, "357,00" -> 357.00. Se o usuário apenas disser "paguei X" sem citar valor, retorne 0.0 para que o sistema busque no plano.
+    4. "cartao": Extraia EXATAMENTE o nome do cartão de crédito citado (ex: "MASTER", "Nubank", "ABC Card", "ELO"). Se não citado, null.
+    5. "parcelas": Quantidade de parcelas como inteiro. Considerar "2x", "duas vezes", "3 vezes", "em 3x" e "3 meses" como quantidade de parcelas. Padrão: 1.
+    6. "intencao": "PROJETAR" se a frase contiver termos como "planeje", "projete", "mensalmente", "todo mês", "todos os dias", "agende" ou referências a períodos/datas futuras. Caso o usuário diga "paguei", "recebi", "comprei", "concluí", retorne "REALIZAR".
     7. "tipo": "Saída" para compras/gastos e "Entrada" para receitas.
     8. "dia_mes": Se for agendamento em dia do mês (ex: "dia 15", "todos os dias 19"), informe apenas o número como string (ex: "15"). Se não houver dia específico, null.
-    9. "data_inicio": Data em formato YYYY-MM-DD para o início do agendamento:
-       - Se for uma data PONTUAL (ex: "15 de dezembro de 2026"), informe "2026-12-15".
-       - Se for um período (ex: "entre setembro de 2026 até abril de 2027"), informe o primeiro dia desse mês inicial: "2026-09-01".
-       - Se não for mencionada data ou mês específico, informe null.
-    10. "data_fim": Data em formato YYYY-MM-DD para o fim do agendamento:
-       - Se for uma data PONTUAL (ex: "15 de dezembro de 2026"), data_fim DEVE SER IGUAL À data_inicio: "2026-12-15".
-       - Se for um período (ex: "entre setembro de 2026 até abril de 2027"), informe o último dia do mês final: "2027-04-30".
-       - Se não for mencionada data final específica, informe null.
-    11. "dia_semana": Se citar dia da semana ("Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"). Se não, null.
+    9. "data_inicio": Data em formato YYYY-MM-DD para o início do agendamento.
+    10. "data_fim": Data em formato YYYY-MM-DD para o fim do agendamento.
+    11. "dia_semana": Se citar dia da semana ("Segunda", "Terça", etc.). Se não, null.
     12. "regra_fds": Se citar final de semana: "Posterga", "Antecipa" ou "Manter" (padrão).
     13. "is_cartao": true se citar cartão de crédito para a projeção, caso contrário false.
     14. "dia_corte": Dia do mês em inteiro para o corte da fatura do cartão (padrão: 31).
-    15. "permite_parcial": true se citar lançamento/realização parcial, caso contrário false.
+    15. "permite_parcial": Retorne true se a frase contiver expressões como "permite parciais", "lançamento parcial", "pagamento parcial". Caso contrário, retorne false.
 
     Retorne exatamente esta estrutura JSON:
     {{
-      "descricao": "Dívida edinho",
-      "complemento": null,
-      "valor": 5000.00,
+      "descricao": "Financiamento carro",
+      "complemento": "[04 de 12]",
+      "valor": 0.0,
       "cartao": null,
       "parcelas": 1,
-      "intencao": "PROJETAR",
+      "intencao": "REALIZAR",
       "tipo": "Saída",
-      "dia_mes": "15",
-      "data_inicio": "2026-12-15",
-      "data_fim": "2026-12-15",
+      "dia_mes": null,
+      "data_inicio": null,
+      "data_fim": null,
       "dia_semana": null,
       "regra_fds": "Manter",
       "is_cartao": false,
@@ -250,16 +237,22 @@ def processar_texto_groq(
     elif isinstance(cartao_extraido, str):
       cartao_extraido = cartao_extraido.strip()
 
+    intencao_ext = dados_parsed.get("intencao", "PROJETAR")
+    permite_parcial_ext = bool(dados_parsed.get("permite_parcial", False))
+
+    if intencao_ext == "REALIZAR":
+      permite_parcial_ext = False
+
     return {
         "transcricao": texto_transcrito,
-        "intencao": dados_parsed.get("intencao", "PROJETAR"),
+        "intencao": intencao_ext,
         "projeto_id": plano_ativo,
         "descricao": desc.capitalize(),
         "complemento": dados_parsed.get("complemento"),
         "valor": valor_float,
         "tipo": dados_parsed.get("tipo", "Saída"),
         "data_compra": str(hoje),
-        "permite_parcial": bool(dados_parsed.get("permite_parcial", False)),
+        "permite_parcial": permite_parcial_ext,
         "cartao": cartao_extraido,
         "parcelas": int(dados_parsed.get("parcelas") or 1),
         "dia_mes": str(dados_parsed.get("dia_mes") or ""),
@@ -334,30 +327,30 @@ def transcrever_audio_groq(client_groq, audio_bytes):
 
 
 def buscar_lancamento_no_banco(supabase, usuario_id, projeto_id, descricao):
-  if (
-      not descricao
-      or not isinstance(descricao, str)
-      or len(descricao.strip()) < 3
-  ):
+  """Busca inteligente no banco que tolera termos parciais e ignora complementos entre colchetes []."""
+  if not descricao or not isinstance(descricao, str) or len(descricao.strip()) < 3:
     return None
+
+  desc_limpa = re.sub(r"\[.*?\]", "", descricao).strip()
+
   try:
     res = (
         supabase.table("lancamentos")
         .select("*")
         .eq("usuario_id", str(usuario_id))
         .eq("projeto_id", str(projeto_id))
-        .ilike("descricao", f"%{descricao.strip()}%")
+        .ilike("descricao", f"%{desc_limpa}%")
+        .order("data_vencimento", desc=False)
         .execute()
     )
     if res and res.data:
       return res.data[0]
   except Exception as e:
-    print(f"Erro na busca: {e}")
+    print(f"Erro na busca do banco: {e}")
   return None
 
 
 def fechar_modal_voz():
-  """Reseta completamente os controles do modal garantindo o fechamento imediato."""
   st.session_state.abrir_modal_orcas = False
   st.session_state.exibir_modal_voz = False
   st.session_state.etapa_voz = "gravacao"
@@ -392,7 +385,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
 
   client_groq = Groq(api_key=groq_key.strip())
 
-  # TELA 1: GRAVAÇÃO
   if st.session_state.etapa_voz == "gravacao":
     pode_usar, uso, limite = verificar_limite_uso(supabase, id_usuario)
     if not pode_usar:
@@ -420,7 +412,22 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
             item_banco = buscar_lancamento_no_banco(
                 supabase, id_usuario, plano_ativo, dados.get("descricao")
             )
+
             if item_banco:
+              dados["id_existente"] = item_banco.get("id")
+
+              if float(dados.get("valor") or 0.0) == 0.0:
+                dados["valor"] = float(item_banco.get("valor") or 0.0)
+
+              if item_banco.get("tipo"):
+                dados["tipo"] = item_banco.get("tipo")
+
+              desc_banco = item_banco.get("descricao", "")
+              match_comp = re.search(r"(\[.*?\])", desc_banco)
+              if match_comp and not dados.get("complemento"):
+                dados["complemento"] = match_comp.group(1)
+                dados["descricao"] = re.sub(r"\[.*?\]", "", desc_banco).strip()
+
               is_pai_parcial = bool(
                   item_banco.get("permite_parcial")
               ) or bool(item_banco.get("parcial_real"))
@@ -428,18 +435,11 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
               if is_pai_parcial:
                 dados["intencao"] = "PARCIAL"
                 dados["permite_parcial"] = False
-                dados["id_existente"] = None
-              else:
-                dados["id_existente"] = item_banco.get("id")
-                dados["permite_parcial"] = bool(
-                    item_banco.get("permite_parcial")
-                )
 
           st.session_state.dados_interpretados = dados
           st.session_state.etapa_voz = "confirmacao"
           st.rerun()
 
-  # TELA 2: CONFIRMAÇÃO
   elif st.session_state.etapa_voz == "confirmacao":
     dados = st.session_state.dados_interpretados or {}
     st.info(f'🗣️ **Você disse:** "{dados.get("transcricao")}"')
@@ -462,7 +462,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
       if match_opt:
         idx_cartao = opcoes_cartoes.index(match_opt)
       else:
-        # Se não existe no cadastro, seleciona "+ Outro Cartão..." e preenche o nome
         idx_cartao = opcoes_cartoes.index("+ Outro Cartão...")
         cartao_sugerido_manual = cartao_clean
     else:
@@ -483,12 +482,10 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
         key="sb_intencao_confirmacao",
     )
 
-    # Busca na tabela config_projetos pela coluna projeto_id
     dt_inicio_plano, dt_fim_plano, min_db, max_db = (
         obter_datas_limite_projeto(supabase, plano_ativo)
     )
 
-    # DEFINIÇÃO DAS DATAS DO FORMULÁRIO (IA VS PADRÃO DO PLANO)
     val_dt_inicio = dt_inicio_plano
     val_dt_fim = dt_fim_plano
 
@@ -509,28 +506,48 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
         pass
 
     with st.form("form_confirmacao_voz"):
-      c1, c2 = st.columns(2)
-      with c1:
-        descricao = st.text_input("Descrição", value=dados.get("descricao", ""))
-        complemento = st.text_input(
-            "Complemento (Opcional)",
-            value=dados.get("complemento") or "",
-            placeholder="Ex: 01 de 12",
-        )
+      # EXIBIÇÃO CONDICIONAL DO CAMPO COMPLEMENTO
+      mostrar_complemento = intencao_selecionada not in ["REALIZAR", "PARCIAL"]
+      
+      if mostrar_complemento:
+        c1, c2 = st.columns(2)
+        with c1:
+          descricao = st.text_input("Descrição", value=dados.get("descricao", ""))
+          complemento = st.text_input(
+              "Complemento (Opcional)",
+              value=dados.get("complemento") or "",
+              placeholder="Ex: [01 de 12]",
+          )
 
-      with c2:
-        valor = st.number_input(
-            "Valor Total (R$)",
-            value=float(dados.get("valor") or 0.0),
-            format="%.2f",
-        )
-        tipo = st.selectbox(
-            "Tipo",
-            ["Saída", "Entrada"],
-            index=0 if dados.get("tipo") == "Saída" else 1,
-        )
+        with c2:
+          valor = st.number_input(
+              "Valor Total (R$)",
+              value=float(dados.get("valor") or 0.0),
+              format="%.2f",
+          )
+          tipo = st.selectbox(
+              "Tipo",
+              ["Saída", "Entrada"],
+              index=0 if dados.get("tipo") == "Saída" else 1,
+          )
+      else:
+        # Layout simplificado para REALIZAR e PARCIAL
+        c1, c2 = st.columns(2)
+        with c1:
+          descricao = st.text_input("Descrição", value=dados.get("descricao", ""))
+          complemento = dados.get("complemento") or ""
+        with c2:
+          valor = st.number_input(
+              "Valor Total (R$)",
+              value=float(dados.get("valor") or 0.0),
+              format="%.2f",
+          )
+          tipo = st.selectbox(
+              "Tipo",
+              ["Saída", "Entrada"],
+              index=0 if dados.get("tipo") == "Saída" else 1,
+          )
 
-      # DADOS ESPECÍFICOS DE REALIZAR / CONCILIAÇÃO
       sp_dia_corte = None
       sp_dia_venc = None
       cartao_manual = ""
@@ -576,7 +593,18 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
               key="voz_novo_cartao_venc",
           )
 
-      # DADOS ESPECÍFICOS DE PROJETAR
+        is_realizar_ou_parcial = intencao_selecionada in ["REALIZAR", "PARCIAL"]
+        val_parcial_chk = (
+            False
+            if is_realizar_ou_parcial
+            else bool(dados.get("permite_parcial", False))
+        )
+        chk_parcial = st.checkbox(
+            "Permite Lançamento Parcial",
+            value=val_parcial_chk,
+            disabled=is_realizar_ou_parcial,
+        )
+
       else:
         st.markdown("---")
         st.markdown("##### 📅 Configurações de Recorrência (Projetar)")
@@ -646,19 +674,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
             value=bool(dados.get("permite_parcial", False)),
         )
 
-      if intencao_selecionada != "PROJETAR":
-        is_parcial_intencao = intencao_selecionada == "PARCIAL"
-        val_parcial_chk = (
-            False
-            if is_parcial_intencao
-            else bool(dados.get("permite_parcial", False))
-        )
-        chk_parcial = st.checkbox(
-            "Permite Lançamento Parcial",
-            value=val_parcial_chk,
-            disabled=is_parcial_intencao,
-        )
-
       b_salvar, b_refazer, b_sair = st.columns(3)
       sub_salvar = b_salvar.form_submit_button(
           "✅ Confirmar", type="primary", use_container_width=True
@@ -669,7 +684,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
       sub_sair = b_sair.form_submit_button("❌ Sair", use_container_width=True)
 
       if sub_salvar:
-        # VALIDAÇÃO CRÍTICA DE NOVO CARTÃO
         if intencao_selecionada != "PROJETAR" and cartao_sel == "+ Outro Cartão...":
           if not cartao_manual.strip() or sp_dia_corte is None or sp_dia_venc is None:
             st.error(
@@ -703,13 +717,9 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
           else:
             st.error(msg)
         else:
-          id_final = (
-              None
-              if intencao_selecionada == "PARCIAL"
-              else dados.get("id_existente")
-          )
+          id_final = dados.get("id_existente")
           permite_parcial_final = (
-              False if intencao_selecionada == "PARCIAL" else chk_parcial
+              False if intencao_selecionada in ["REALIZAR", "PARCIAL"] else chk_parcial
           )
           nome_cartao_final = (
               cartao_manual.strip()
@@ -717,6 +727,8 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
               else cartao_sel
           )
           str_dt_compra = dt_compra.strftime("%Y-%m-%d")
+          
+          # Se o complemento veio do banco ou IA, mas está oculto na tela, mantém ele na gravação final
           desc_completa = (
               f"{descricao} {complemento}".strip() if complemento else descricao
           )
