@@ -234,7 +234,6 @@ def processar_texto_groq(
 
     valor_float = normalizar_valor_moeda(dados_parsed.get("valor"))
     desc = str(dados_parsed.get("descricao") or "Novo Lançamento").strip()
-    # Limpa colchetes e pontuações do nome
     desc = re.sub(r"\[.*?\]", "", desc).strip()
     desc = re.sub(r"[.,;!?]+$", "", desc).strip()
 
@@ -431,7 +430,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
                   item_banco.get("permite_parcial")
               ) or bool(item_banco.get("parcial_real"))
 
-              # Separador visual de colchetes na confirmação
               desc_db = str(item_banco.get("descricao") or "")
               match_colchete = re.search(r"(\[.*?\])", desc_db)
               if match_colchete:
@@ -442,7 +440,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
                     r"\[.*?\]", "", desc_db
                 ).strip().capitalize()
 
-              # REGRA DE VALOR: Se não falou o valor no áudio (0.0), puxa do banco. Se falou, PRESERVA o dito no áudio.
               if float(dados.get("valor") or 0.0) == 0.0:
                 val_db = item_banco.get("valor_planejado") or item_banco.get(
                     "valor"
@@ -453,14 +450,12 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
                 dados["intencao"] = "PARCIAL"
                 dados["permite_parcial"] = False
                 dados["id_existente"] = None
-                # Parcial: data de hoje
                 dados["data_compra"] = str(obter_hoje_brasil())
               else:
                 dados["id_existente"] = item_banco.get("id")
                 dados["permite_parcial"] = bool(
                     item_banco.get("permite_parcial")
                 )
-                # Lançamento normal: puxa data do banco
                 dt_banco = item_banco.get("data_vencimento") or item_banco.get(
                     "data"
                 )
@@ -483,6 +478,8 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
     opcoes_cartoes = buscar_cartoes_lcp(df_proj)
 
     cartao_detectado = dados.get("cartao")
+    cartao_sugerido_manual = ""
+    
     if cartao_detectado:
       cartao_clean = str(cartao_detectado).strip()
       match_opt = next(
@@ -492,8 +489,9 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
       if match_opt:
         idx_cartao = opcoes_cartoes.index(match_opt)
       else:
-        opcoes_cartoes.insert(-1, cartao_clean)
-        idx_cartao = opcoes_cartoes.index(cartao_clean)
+        # Cartão não cadastrado: seleciona "+ Outro Cartão..." e sugere o nome
+        idx_cartao = opcoes_cartoes.index("+ Outro Cartão...")
+        cartao_sugerido_manual = cartao_clean.upper()
     else:
       idx_cartao = 0
 
@@ -559,8 +557,8 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
 
       cartao_sel = None
       cartao_manual = ""
-      dia_corte_novo = 31
-      dia_venc_novo = 10
+      dia_corte_novo = None
+      dia_venc_novo = None
 
       # DADOS ESPECÍFICOS DE REALIZAR / CONCILIAÇÃO
       if intencao_selecionada != "PROJETAR":
@@ -584,13 +582,15 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
           st.markdown("###### 💳 Cadastrar Novo Cartão")
           col_nc1, col_nc2, col_nc3 = st.columns([2, 1, 1])
           cartao_manual = col_nc1.text_input(
-              "Nome do Cartão*", placeholder="Ex: NUBANK VIRTUAL"
+              "Nome do Cartão*",
+              value=cartao_sugerido_manual,
+              placeholder="Ex: NUBANK VIRTUAL",
           )
           dia_corte_novo = col_nc2.number_input(
-              "Dia Corte*", min_value=1, max_value=31, value=5
+              "Dia Corte*", min_value=1, max_value=31, value=None, placeholder="Ex: 5"
           )
           dia_venc_novo = col_nc3.number_input(
-              "Dia Vencimento*", min_value=1, max_value=31, value=15
+              "Dia Vencimento*", min_value=1, max_value=31, value=None, placeholder="Ex: 15"
           )
 
       # DADOS ESPECÍFICOS DE PROJETAR
@@ -686,16 +686,19 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
       sub_sair = b_sair.form_submit_button("❌ Sair", use_container_width=True)
 
       if sub_salvar:
-        # TRAVA DE VALIDAÇÃO PARA NOVO CARTÃO
+        # TRAVA E VALIDAÇÃO DE CADASTRO DE NOVO CARTÃO
         if (
             intencao_selecionada != "PROJETAR"
             and cartao_sel == "+ Outro Cartão..."
         ):
           if not cartao_manual.strip():
-            st.error(
-                "⚠️ Informe o **Nome do Cartão** para prosseguir com o"
-                " cadastro!"
-            )
+            st.error("⚠️ Informe o **Nome do Cartão** para prosseguir com o cadastro!")
+            st.stop()
+          if not dia_corte_novo or dia_corte_novo < 1 or dia_corte_novo > 31:
+            st.error("⚠️ Informe um **Dia de Corte** válido (entre 1 e 31) para cadastrar o novo cartão!")
+            st.stop()
+          if not dia_venc_novo or dia_venc_novo < 1 or dia_venc_novo > 31:
+            st.error("⚠️ Informe um **Dia de Vencimento** válido (entre 1 e 31) para cadastrar o novo cartão!")
             st.stop()
 
         if intencao_selecionada == "PROJETAR":
@@ -751,8 +754,8 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
               "data_movimento": str_dt_compra,
               "data_vencimento": str_dt_compra,
               "cartao": nome_cartao_final,
-              "dia_corte": dia_corte_novo,
-              "dia_vencimento": dia_venc_novo,
+              "dia_corte": int(dia_corte_novo) if dia_corte_novo else 31,
+              "dia_vencimento": int(dia_venc_novo) if dia_venc_novo else 10,
               "parcelas": parcelas,
               "id_existente": id_final,
               "permite_parcial": permite_parcial_final,
