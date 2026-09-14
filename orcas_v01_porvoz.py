@@ -123,7 +123,7 @@ def processar_texto_groq(
     Projeto Ativo: "{plano_ativo}"
 
     Regras de extração:
-    1. "descricao": Nome limpo do item (ex: "Mercado", "Curso de Inglês", "Financiamento Carro", "Celular", "Pilates"). Remova verbos ("comprei", "paguei", "agende", "planeje", "projete"), marcas não essenciais e artigos.
+    1. "descricao": Nome limpo do item (ex: "MERCADO", "CURSO DE INGLÊS", "FINANCIAMENTO CARRO", "CELULAR", "PILATES"). Remova verbos ("comprei", "paguei", "agende", "planeje", "projete"), marcas não essenciais e artigos. Retornar sempre em MAIÚSCULAS.
     2. "complemento": Texto de complemento citado. Se for numeração de parcela ou ciclo (ex: "01 de 12", "parcela 4"), FORMATAR SEMPRE ENTRE COLCHETES, como "[01 de 12]" ou "[04 de 12]". Se não houver complemento válido, retorne null.
     3. "valor": Valor numérico total em float. Ex: "5 mil reais" -> 5000.00, "357,00" -> 357.00. Se o usuário apenas disser "paguei X" sem citar valor, retorne 0.0 para que o sistema busque no plano.
     4. "cartao": Extraia EXATAMENTE o nome do cartão de crédito citado (ex: "MASTER", "Nubank", "ABC Card", "ELO"). Se não citado, null.
@@ -141,7 +141,7 @@ def processar_texto_groq(
 
     Retorne exatamente esta estrutura JSON:
     {{
-      "descricao": "Financiamento carro",
+      "descricao": "FINANCIAMENTO CARRO",
       "complemento": "[04 de 12]",
       "valor": 0.0,
       "cartao": null,
@@ -191,7 +191,7 @@ def processar_texto_groq(
         "transcricao": texto_transcrito,
         "intencao": "REALIZAR",
         "projeto_id": plano_ativo,
-        "descricao": "Erro de Modelo",
+        "descricao": "ERRO DE MODELO",
         "complemento": None,
         "valor": 0.0,
         "tipo": "Saída",
@@ -221,7 +221,7 @@ def processar_texto_groq(
     dados_parsed = json.loads(conteudo_limpo)
 
     valor_float = normalizar_valor_moeda(dados_parsed.get("valor"))
-    desc = str(dados_parsed.get("descricao") or "Novo Lançamento").strip()
+    desc = str(dados_parsed.get("descricao") or "NOVO LANÇAMENTO").strip().upper()
     desc = re.sub(r"[.,;!?]+$", "", desc).strip()
 
     cartao_extraido = dados_parsed.get("cartao")
@@ -247,7 +247,7 @@ def processar_texto_groq(
         "transcricao": texto_transcrito,
         "intencao": intencao_ext,
         "projeto_id": plano_ativo,
-        "descricao": desc.capitalize(),
+        "descricao": desc,
         "complemento": dados_parsed.get("complemento"),
         "valor": valor_float,
         "tipo": dados_parsed.get("tipo", "Saída"),
@@ -270,7 +270,7 @@ def processar_texto_groq(
         "transcricao": texto_transcrito,
         "intencao": "REALIZAR",
         "projeto_id": plano_ativo,
-        "descricao": "Erro ao Interpretar",
+        "descricao": "ERRO AO INTERPRETAR",
         "complemento": None,
         "valor": 0.0,
         "tipo": "Saída",
@@ -327,12 +327,12 @@ def transcrever_audio_groq(client_groq, audio_bytes):
 
 
 def buscar_lancamento_no_banco(supabase, usuario_id, projeto_id, descricao):
-  """Busca inteligente no banco restrita ao mês corrente para realizações."""
+  """Busca estrita no banco restrita APENAS ao mês corrente."""
   if not descricao or not isinstance(descricao, str) or len(descricao.strip()) < 3:
     return None
 
-  # Limpa complementos entre colchetes ou parcelamentos numéricos ex: "03 de 12"
-  desc_limpa = re.sub(r"\[.*?\]|\b\d{1,2}\s*de\s*\d{1,2}\b", "", descricao, flags=re.IGNORECASE).strip()
+  # Extrai a palavra principal removendo complementos entre colchetes ou padroes de parcelamento
+  desc_limpa = re.sub(r"\[.*?\]|\b\d{1,2}\s*de\s*\d{1,2}\b", "", descricao, flags=re.IGNORECASE).strip().upper()
 
   hoje_br = obter_hoje_brasil()
   primeiro_dia_mes = hoje_br.replace(day=1)
@@ -347,7 +347,7 @@ def buscar_lancamento_no_banco(supabase, usuario_id, projeto_id, descricao):
   str_fim = ultimo_dia_mes.strftime("%Y-%m-%d")
 
   try:
-    # 1ª Tentativa: Busca exata no mês corrente
+    # Consulta estrita: Apenas lançamentos do mês corrente
     res = (
         supabase.table("lancamentos")
         .select("*")
@@ -361,19 +361,6 @@ def buscar_lancamento_no_banco(supabase, usuario_id, projeto_id, descricao):
     )
     if res and res.data:
       return res.data[0]
-
-    # 2ª Tentativa (Fallback): Se não houver no mês corrente, busca a ocorrência mais próxima
-    res_fallback = (
-        supabase.table("lancamentos")
-        .select("*")
-        .eq("usuario_id", str(usuario_id))
-        .eq("projeto_id", str(projeto_id))
-        .ilike("descricao", f"%{desc_limpa}%")
-        .order("data_vencimento", desc=False)
-        .execute()
-    )
-    if res_fallback and res_fallback.data:
-      return res_fallback.data[0]
 
   except Exception as e:
     print(f"Erro na busca do banco: {e}")
@@ -446,12 +433,12 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
             if item_banco:
               dados["id_existente"] = item_banco.get("id")
 
-              # Atualiza valor se não foi falado no áudio ou se a intenção for REALIZAR
+              # Traz o valor do banco se não for informado via voz ou se for realização
               valor_banco = float(item_banco.get("valor") or 0.0)
               if float(dados.get("valor") or 0.0) == 0.0 or dados.get("intencao") == "REALIZAR":
                 dados["valor"] = valor_banco
 
-              # Atualização da Data de Compra/Vencimento vinda do Banco no mês corrente
+              # Captura a data de vencimento/movimento cadastrada no mês corrente
               dt_banco = (
                   item_banco.get("data_vencimento")
                   or item_banco.get("data_movimento")
@@ -463,12 +450,14 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
               if item_banco.get("tipo"):
                 dados["tipo"] = item_banco.get("tipo")
 
-              desc_banco = item_banco.get("descricao", "")
+              desc_banco = str(item_banco.get("descricao") or "").upper()
+              
+              # Separa descrição e complemento vindo do banco (ex: "FINANCIAMENTO [03 DE 12]")
               match_comp = re.search(r"(\[.*?\])", desc_banco)
-              if match_comp and not dados.get("complemento"):
+              if match_comp:
                 dados["complemento"] = match_comp.group(1)
                 dados["descricao"] = re.sub(r"\[.*?\]", "", desc_banco).strip()
-              elif not match_comp and not dados.get("complemento"):
+              else:
                 match_parc = re.search(r"(\b\d{1,2}\s*de\s*\d{1,2}\b)", desc_banco, re.IGNORECASE)
                 if match_parc:
                   dados["complemento"] = f"[{match_parc.group(1)}]"
@@ -557,7 +546,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
       if mostrar_complemento:
         c1, c2 = st.columns(2)
         with c1:
-          descricao = st.text_input("Descrição", value=dados.get("descricao", ""))
+          descricao = st.text_input("Descrição", value=str(dados.get("descricao", "")).upper())
           complemento = st.text_input(
               "Complemento (Opcional)",
               value=dados.get("complemento") or "",
@@ -578,7 +567,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
       else:
         c1, c2 = st.columns(2)
         with c1:
-          descricao = st.text_input("Descrição", value=dados.get("descricao", ""))
+          descricao = st.text_input("Descrição", value=str(dados.get("descricao", "")).upper())
           complemento = dados.get("complemento") or ""
         with c2:
           valor = st.number_input(
@@ -599,7 +588,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
       if intencao_selecionada != "PROJETAR":
         c_real1, c_real2 = st.columns(2)
         
-        # Leitura da data do banco para preencher a Data da Compra no modal
+        # Leitura da data do banco para preencher a Data da Compra/Vencimento no modal
         dt_compra_val = obter_hoje_brasil()
         if dados.get("data_compra"):
           try:
@@ -608,7 +597,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
             pass
 
         dt_compra = c_real1.date_input(
-            "Data da Compra",
+            "Data da Compra / Vencimento",
             value=dt_compra_val,
             format="DD/MM/YYYY",
         )
@@ -748,7 +737,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
               supabase=supabase,
               projeto_id=plano_ativo,
               usuario_id=id_usuario,
-              descricao=descricao,
+              descricao=descricao.upper(),
               complemento_texto=complemento,
               valor_float=valor,
               tipo=tipo,
@@ -780,7 +769,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
           str_dt_compra = dt_compra.strftime("%Y-%m-%d")
           
           desc_completa = (
-              f"{descricao} {complemento}".strip() if complemento else descricao
+              f"{descricao.upper()} {complemento}".strip() if complemento else descricao.upper()
           )
 
           dados_finais = {
