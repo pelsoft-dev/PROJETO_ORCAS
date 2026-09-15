@@ -556,9 +556,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
         )
 
       cartao_sel = None
-      cartao_manual = ""
-      dia_corte_novo = None
-      dia_venc_novo = None
 
       # DADOS ESPECÍFICOS DE REALIZAR / CONCILIAÇÃO
       if intencao_selecionada != "PROJETAR":
@@ -585,12 +582,23 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
               "Nome do Cartão*",
               value=cartao_sugerido_manual,
               placeholder="Ex: NUBANK VIRTUAL",
+              key="input_cartao_manual",
           )
           dia_corte_novo = col_nc2.number_input(
-              "Dia Corte*", min_value=1, max_value=31, value=None, placeholder="Ex: 5"
+              "Dia Corte*",
+              min_value=1,
+              max_value=31,
+              value=None,
+              placeholder="Ex: 5",
+              key="input_dia_corte_novo",
           )
           dia_venc_novo = col_nc3.number_input(
-              "Dia Vencimento*", min_value=1, max_value=31, value=None, placeholder="Ex: 15"
+              "Dia Vencimento*",
+              min_value=1,
+              max_value=31,
+              value=None,
+              placeholder="Ex: 15",
+              key="input_dia_venc_novo",
           )
 
       # DADOS ESPECÍFICOS DE PROJETAR
@@ -686,18 +694,23 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
       sub_sair = b_sair.form_submit_button("❌ Sair", use_container_width=True)
 
       if sub_salvar:
+        # CAPTURA DE VALORES VIA SESSION_STATE PARA EVITAR PERDA NO FORM
+        val_cartao_manual = st.session_state.get("input_cartao_manual", "")
+        val_dia_corte = st.session_state.get("input_dia_corte_novo")
+        val_dia_venc = st.session_state.get("input_dia_venc_novo")
+
         # TRAVA E VALIDAÇÃO DE CADASTRO DE NOVO CARTÃO
         if (
             intencao_selecionada != "PROJETAR"
             and cartao_sel == "+ Outro Cartão..."
         ):
-          if not cartao_manual.strip():
+          if not str(val_cartao_manual).strip():
             st.error("⚠️ Informe o **Nome do Cartão** para prosseguir com o cadastro!")
             st.stop()
-          if not dia_corte_novo or dia_corte_novo < 1 or dia_corte_novo > 31:
+          if val_dia_corte is None or int(val_dia_corte) < 1 or int(val_dia_corte) > 31:
             st.error("⚠️ Informe um **Dia de Corte** válido (entre 1 e 31) para cadastrar o novo cartão!")
             st.stop()
-          if not dia_venc_novo or dia_venc_novo < 1 or dia_venc_novo > 31:
+          if val_dia_venc is None or int(val_dia_venc) < 1 or int(val_dia_venc) > 31:
             st.error("⚠️ Informe um **Dia de Vencimento** válido (entre 1 e 31) para cadastrar o novo cartão!")
             st.stop()
 
@@ -735,7 +748,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
               False if intencao_selecionada == "PARCIAL" else chk_parcial
           )
           nome_cartao_final = (
-              cartao_manual.strip()
+              str(val_cartao_manual).strip()
               if cartao_sel == "+ Outro Cartão..."
               else cartao_sel
           )
@@ -743,6 +756,9 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
           desc_completa = (
               f"{descricao} {complemento}".strip() if complemento else descricao
           )
+
+          corte_final = int(val_dia_corte) if val_dia_corte is not None else int(dados.get("dia_corte") or 31)
+          venc_final = int(val_dia_venc) if val_dia_venc is not None else int(dados.get("dia_vencimento") or 28)
 
           dados_finais = {
               "intencao": intencao_selecionada,
@@ -754,8 +770,8 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
               "data_movimento": str_dt_compra,
               "data_vencimento": str_dt_compra,
               "cartao": nome_cartao_final,
-              "dia_corte": int(dia_corte_novo) if dia_corte_novo is not None else int(dados.get("dia_corte") or 31),
-              "dia_vencimento": int(dia_venc_novo) if dia_venc_novo is not None else int(dados.get("dia_vencimento") or 28),
+              "dia_corte": corte_final,
+              "dia_vencimento": venc_final,
               "parcelas": parcelas,
               "id_existente": id_final,
               "permite_parcial": permite_parcial_final,
