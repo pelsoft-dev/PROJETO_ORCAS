@@ -57,6 +57,31 @@ def normalizar_valor_moeda(valor_str):
     return 0.0
 
 
+def calcular_data_vencimento(dt_base, dia_venc_alvo):
+  """Gera uma string YYYY-MM-DD calculando a data de vencimento com base no dia informado."""
+  if not dia_venc_alvo:
+    return dt_base.strftime("%Y-%m-%d")
+
+  dia_venc_alvo = int(dia_venc_alvo)
+  ano = dt_base.year
+  mes = dt_base.month
+
+  # Se o dia de vencimento for menor que o dia da compra, assume o próximo mês
+  if dia_venc_alvo < dt_base.day:
+    if mes == 12:
+      mes = 1
+      ano += 1
+    else:
+      mes += 1
+
+  # Trata meses com menos dias que o dia de vencimento alvo
+  while True:
+    try:
+      return datetime(ano, mes, dia_venc_alvo).strftime("%Y-%m-%d")
+    except ValueError:
+      dia_venc_alvo -= 1
+
+
 def obter_datas_limite_projeto(supabase, projeto_id):
   """Busca as datas oficiais na tabela config_projetos filtrando estritamente por projeto_id."""
   hoje_br = obter_hoje_brasil()
@@ -148,7 +173,7 @@ def processar_texto_groq(
     11. "dia_semana": Se citar dia da semana ("Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"). Se não, null.
     12. "regra_fds": Se citar final de semana: "Posterga", "Antecipa" ou "Manter" (padrão).
     13. "is_cartao": true se citar cartão de crédito para a projeção, caso contrário false.
-    14. "dia_corte": Dia do mês em inteiro para o corte da fatura do cartão (padrão: 31).
+    14. "cc_dia_corte": Dia do mês em inteiro para o corte da fatura do cartão (padrão: 31).
     15. "permite_parcial": true se citar lançamento/realização parcial, caso contrário false.
 
     Retorne exatamente esta estrutura JSON:
@@ -166,7 +191,7 @@ def processar_texto_groq(
       "dia_semana": null,
       "regra_fds": "Manter",
       "is_cartao": false,
-      "dia_corte": 31,
+      "cc_dia_corte": 31,
       "permite_parcial": false
     }}
   """
@@ -217,7 +242,7 @@ def processar_texto_groq(
         "dia_semana": "",
         "regra_fds": "Manter",
         "is_cartao": False,
-        "dia_corte": 31,
+        "cc_dia_corte": 31,
         "erro": f"Nenhum modelo Groq respondeu. Último erro: {ultimo_erro}.",
     }
 
@@ -268,7 +293,7 @@ def processar_texto_groq(
         "dia_semana": str(dados_parsed.get("dia_semana") or ""),
         "regra_fds": str(dados_parsed.get("regra_fds") or "Manter"),
         "is_cartao": bool(dados_parsed.get("is_cartao", False)),
-        "dia_corte": int(dados_parsed.get("dia_corte") or 31),
+        "cc_dia_corte": int(dados_parsed.get("cc_dia_corte") or 31),
         "erro": None,
     }
 
@@ -291,7 +316,7 @@ def processar_texto_groq(
         "dia_semana": "",
         "regra_fds": "Manter",
         "is_cartao": False,
-        "dia_corte": 31,
+        "cc_dia_corte": 31,
         "erro": f"Erro na conversão do JSON: {e}",
     }
 
@@ -479,7 +504,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
 
     cartao_detectado = dados.get("cartao")
     cartao_sugerido_manual = ""
-    
+
     if cartao_detectado:
       cartao_clean = str(cartao_detectado).strip()
       match_opt = next(
@@ -663,7 +688,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
             "Dia de Corte Fatura",
             min_value=1,
             max_value=31,
-            value=int(dados.get("dia_corte") or 31),
+            value=int(dados.get("cc_dia_corte") or 31),
             disabled=not is_cartao,
         )
         chk_parcial = col_c3.checkbox(
@@ -694,7 +719,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
       sub_sair = b_sair.form_submit_button("❌ Sair", use_container_width=True)
 
       if sub_salvar:
-        # CAPTURA DE VALORES VIA SESSION_STATE PARA EVITAR PERDA NO FORM
+        # CAPTURA DE VALORES VIA SESSION_STATE
         val_cartao_manual = st.session_state.get("input_cartao_manual", "")
         val_dia_corte = st.session_state.get("input_dia_corte_novo")
         val_dia_venc = st.session_state.get("input_dia_venc_novo")
@@ -757,8 +782,12 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
               f"{descricao} {complemento}".strip() if complemento else descricao
           )
 
-          corte_final = int(val_dia_corte) if val_dia_corte is not None else int(dados.get("dia_corte") or 31)
-          venc_final = int(val_dia_venc) if val_dia_venc is not None else int(dados.get("dia_vencimento") or 28)
+          # Definição do dia de corte e da data de vencimento final
+          corte_final = int(val_dia_corte) if val_dia_corte is not None else (int(dados.get("cc_dia_corte")) if dados.get("cc_dia_corte") is not None else None)
+          
+          # Calcula a data_vencimento em formato de data (YYYY-MM-DD)
+          dia_venc_num = int(val_dia_venc) if val_dia_venc is not None else dados.get("dia_vencimento")
+          dt_vencimento_final = calcular_data_vencimento(dt_compra, dia_venc_num)
 
           dados_finais = {
               "intencao": intencao_selecionada,
@@ -766,12 +795,11 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
               "descricao": desc_completa,
               "valor": valor,
               "tipo": tipo,
+              "data": dt_vencimento_final,
               "data_compra": str_dt_compra,
-              "data_movimento": str_dt_compra,
-              "data_vencimento": str_dt_compra,
+              "data_vencimento": dt_vencimento_final,
               "cartao": nome_cartao_final,
-              "dia_corte": corte_final,
-              "dia_vencimento": venc_final,
+              "cc_dia_corte": corte_final,
               "parcelas": parcelas,
               "id_existente": id_final,
               "permite_parcial": permite_parcial_final,
