@@ -712,6 +712,9 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
                 val_dia_corte = st.session_state.get("input_dia_corte_novo")
                 val_dia_venc = st.session_state.get("input_dia_venc_novo")
 
+                # Mapeamento exigido pelo banco: 'S' -> 'Saída', 'E' -> 'Entrada'
+                tipo_db = "Saída" if tipo == "S" else "Entrada"
+
                 if (
                     intencao_selecionada != "PROJETAR"
                     and cartao_sel == "+ Outro Cartão..."
@@ -751,7 +754,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
                         descricao=descricao,
                         complemento_texto=complemento,
                         valor_float=valor,
-                        tipo=tipo,
+                        tipo=tipo_db,
                         dia_mes=d_m,
                         dia_semana=d_s,
                         dia_especifico=None,
@@ -817,7 +820,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
                             "descricao": desc_compra,
                             "valor_planejado": valor_parcela,
                             "valor_realizado": 0.0,
-                            "tipo": tipo,
+                            "tipo": tipo_db,
                             "data": dt_venc_calculada,
                             "data_vencimento": dt_venc_calculada,
                             "cartao": nome_cartao_final,
@@ -838,7 +841,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
                             "projeto_id": plano_ativo,
                             "descricao": desc_completa,
                             "valor": valor,
-                            "tipo": tipo,
+                            "tipo": tipo_db,
                             "data": dt_venc_calculada,
                             "data_vencimento": dt_venc_calculada,
                             "cartao": nome_cartao_final,
