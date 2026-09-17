@@ -577,11 +577,10 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
             if intencao_selecionada != "PROJETAR":
                 c_real1, c_real2 = st.columns(2)
 
-                dia_venc_informado = c_real1.number_input(
-                    "Dia do Vencimento*",
-                    min_value=1,
-                    max_value=31,
-                    value=int(dados.get("dia_mes") or obter_hoje_brasil().day),
+                dt_compra_informada = c_real1.date_input(
+                    "Data da Compra / Vencto:*",
+                    value=obter_hoje_brasil(),
+                    format="DD/MM/YYYY",
                 )
 
                 parcelas = c_real2.number_input(
@@ -605,14 +604,14 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
                         "Dia Corte*",
                         min_value=1,
                         max_value=31,
-                        value=int(dados.get("cc_dia_corte") or 13),
+                        value=None,
                         key="input_dia_corte_novo",
                     )
                     dia_venc_novo = col_nc3.number_input(
                         "Dia Vencimento*",
                         min_value=1,
                         max_value=31,
-                        value=19,
+                        value=None,
                         key="input_dia_venc_novo",
                     )
 
@@ -794,11 +793,19 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
                     )
 
                     venc_alvo = (
-                        int(val_dia_venc) if val_dia_venc is not None else dia_venc_informado
+                        int(val_dia_venc)
+                        if val_dia_venc is not None
+                        else dt_compra_informada.day
                     )
 
-                    hoje_obj = obter_hoje_brasil()
-                    dt_hoje_str = hoje_obj.strftime("%Y-%m-%d")
+                    dt_compra_obj = dt_compra_informada
+                    dt_venc_calculada = calcular_data_vencimento_por_dia(
+                        dt_compra_obj, corte_final, venc_alvo
+                    )
+
+                    valor_parcela = (
+                        round(valor / parcelas, 2) if parcelas and parcelas > 0 else valor
+                    )
 
                     # Se for uma compra Parcelada/Cartão
                     if cartao_sel or nome_cartao_final:
@@ -808,11 +815,11 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
                             "intencao": intencao_selecionada,
                             "projeto_id": plano_ativo,
                             "descricao": desc_compra,
-                            "valor_planejado": 0.0,
-                            "valor_realizado": valor,
+                            "valor_planejado": valor_parcela,
+                            "valor_realizado": 0.0,
                             "tipo": tipo,
-                            "data": dt_hoje_str,
-                            "data_vencimento": dt_hoje_str,
+                            "data": dt_venc_calculada,
+                            "data_vencimento": dt_venc_calculada,
                             "cartao": nome_cartao_final,
                             "cc_tipo": "LCL",
                             "cc_dia_corte": corte_final,
@@ -822,9 +829,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
                             "permite_parcial": permite_parcial_final,
                         }
                     else:
-                        dt_venc_calculada = calcular_data_vencimento_por_dia(
-                            hoje_obj, corte_final, venc_alvo
-                        )
                         desc_completa = (
                             f"{descricao} {complemento}".strip() if complemento else descricao
                         )
