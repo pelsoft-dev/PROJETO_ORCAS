@@ -57,24 +57,38 @@ def normalizar_valor_moeda(valor_str):
     return 0.0
 
 
-def calcular_data_vencimento(dt_base, dia_venc_alvo):
-  """Gera uma string YYYY-MM-DD calculando a data de vencimento com base no dia informado."""
+def calcular_data_vencimento(dt_base, dia_corte, dia_venc_alvo):
+  """Gera uma string YYYY-MM-DD calculando a data de vencimento correta
+
+  considerando a data da compra, o dia de corte da fatura e o dia de
+  vencimento.
+  """
   if not dia_venc_alvo:
     return dt_base.strftime("%Y-%m-%d")
 
   dia_venc_alvo = int(dia_venc_alvo)
+  dia_corte = int(dia_corte) if dia_corte else 31
+
   ano = dt_base.year
   mes = dt_base.month
 
-  # Se o dia de vencimento for menor que o dia da compra, assume o próximo mês
-  if dia_venc_alvo < dt_base.day:
+  # Se a data da compra for maior ou igual ao dia de corte, lança na fatura do próximo mês
+  if dt_base.day >= dia_corte:
     if mes == 12:
       mes = 1
       ano += 1
     else:
       mes += 1
 
-  # Trata meses com menos dias que o dia de vencimento alvo
+  # Se o dia do vencimento for menor que o dia do corte, a fatura vence no mês seguinte ao corte
+  if dia_venc_alvo < dia_corte and dt_base.day < dia_corte:
+    if mes == 12:
+      mes = 1
+      ano += 1
+    else:
+      mes += 1
+
+  # Ajusta estouro de dias do mês (ex: dia 31 em fevereiro)
   while True:
     try:
       return datetime(ano, mes, dia_venc_alvo).strftime("%Y-%m-%d")
@@ -730,13 +744,30 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
             and cartao_sel == "+ Outro Cartão..."
         ):
           if not str(val_cartao_manual).strip():
-            st.error("⚠️ Informe o **Nome do Cartão** para prosseguir com o cadastro!")
+            st.error(
+                "⚠️ Informe o **Nome do Cartão** para prosseguir com o"
+                " cadastro!"
+            )
             st.stop()
-          if val_dia_corte is None or int(val_dia_corte) < 1 or int(val_dia_corte) > 31:
-            st.error("⚠️ Informe um **Dia de Corte** válido (entre 1 e 31) para cadastrar o novo cartão!")
+          if (
+              val_dia_corte is None
+              or int(val_dia_corte) < 1
+              or int(val_dia_corte) > 31
+          ):
+            st.error(
+                "⚠️ Informe um **Dia de Corte** válido (entre 1 e 31) para"
+                " cadastrar o novo cartão!"
+            )
             st.stop()
-          if val_dia_venc is None or int(val_dia_venc) < 1 or int(val_dia_venc) > 31:
-            st.error("⚠️ Informe um **Dia de Vencimento** válido (entre 1 e 31) para cadastrar o novo cartão!")
+          if (
+              val_dia_venc is None
+              or int(val_dia_venc) < 1
+              or int(val_dia_venc) > 31
+          ):
+            st.error(
+                "⚠️ Informe um **Dia de Vencimento** válido (entre 1 e 31) para"
+                " cadastrar o novo cartão!"
+            )
             st.stop()
 
         if intencao_selecionada == "PROJETAR":
@@ -783,11 +814,26 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
           )
 
           # Definição do dia de corte e da data de vencimento final
-          corte_final = int(val_dia_corte) if val_dia_corte is not None else (int(dados.get("cc_dia_corte")) if dados.get("cc_dia_corte") is not None else None)
-          
-          # Calcula a data_vencimento em formato de data (YYYY-MM-DD)
-          dia_venc_num = int(val_dia_venc) if val_dia_venc is not None else dados.get("dia_vencimento")
-          dt_vencimento_final = calcular_data_vencimento(dt_compra, dia_venc_num)
+          corte_final = (
+              int(val_dia_corte)
+              if val_dia_corte is not None
+              else (
+                  int(dados.get("cc_dia_corte"))
+                  if dados.get("cc_dia_corte") is not None
+                  else 31
+              )
+          )
+
+          dia_venc_num = (
+              int(val_dia_venc)
+              if val_dia_venc is not None
+              else dados.get("dia_vencimento")
+          )
+
+          # Cálculo corrigido levando em consideração a compra vs dia de corte
+          dt_vencimento_final = calcular_data_vencimento(
+              dt_compra, corte_final, dia_venc_num
+          )
 
           dados_finais = {
               "intencao": intencao_selecionada,
