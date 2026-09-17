@@ -296,7 +296,7 @@ def processar_texto_groq(
         "complemento": dados_parsed.get("complemento"),
         "valor": valor_float,
         "tipo": dados_parsed.get("tipo", "Saída"),
-        "data_compra": str(hoje),
+        "data_compra": str(hoje),  # GARANTE A DATA DE HOJE NA INTERPRETAÇÃO DA IA
         "permite_parcial": bool(dados_parsed.get("permite_parcial", False)),
         "cartao": cartao_extraido,
         "parcelas": int(dados_parsed.get("parcelas") or 1),
@@ -488,17 +488,14 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
                 dados["intencao"] = "PARCIAL"
                 dados["permite_parcial"] = False
                 dados["id_existente"] = None
-                dados["data_compra"] = str(obter_hoje_brasil())
               else:
                 dados["id_existente"] = item_banco.get("id")
                 dados["permite_parcial"] = bool(
                     item_banco.get("permite_parcial")
                 )
-                dt_banco = item_banco.get("data_vencimento") or item_banco.get(
-                    "data"
-                )
-                if dt_banco:
-                  dados["data_compra"] = str(dt_banco)[:10]
+
+          # GARANTIA EXPLICITA DA DATA DE HOJE
+          dados["data_compra"] = str(obter_hoje_brasil())
 
           st.session_state.dados_interpretados = dados
           st.session_state.etapa_voz = "confirmacao"
@@ -598,11 +595,11 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
       # DADOS ESPECÍFICOS DE REALIZAR / CONCILIAÇÃO
       if intencao_selecionada != "PROJETAR":
         c_real1, c_real2 = st.columns(2)
+        
+        # GARANTE DATA DE HOJE COMO VALOR PADRÃO NO CAMPO DE DATA
         dt_compra = c_real1.date_input(
             "Data da Compra",
-            value=datetime.strptime(
-                dados.get("data_compra", str(obter_hoje_brasil())), "%Y-%m-%d"
-            ).date(),
+            value=obter_hoje_brasil(),
             format="DD/MM/YYYY",
         )
         parcelas = c_real2.number_input(
@@ -829,35 +826,36 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
                 f"{descricao.upper()} - {nome_cartao_final} {parcelas}X"
             )
 
-            # 1. CRIAR O LANÇAMENTO DE REALIZAÇÃO (LCL) - COMPRA À VISTA NO TOTAL
+            # 1. LANÇAMENTO DE REALIZAÇÃO À VISTA (LCL / REAL)
             dados_realizacao = {
                 "intencao": intencao_selecionada,
                 "projeto_id": plano_ativo,
                 "descricao": desc_compra_real,
-                "valor": valor,
+                "valor": float(valor),
                 "valor_planejado": 0.0,
-                "valor_realizado": valor,
+                "valor_realizado": float(valor),
                 "tipo": "S" if tipo == "Saída" else "E",
                 "data": str_dt_compra,
                 "data_compra": str_dt_compra,
                 "data_movimento": str_dt_compra,
+                "data_vencimento": str_dt_compra,
                 "cartao": nome_cartao_final,
                 "cc_tipo": "LCL",
                 "status": "REAL",
                 "cc_dia_corte": corte_final,
                 "dia_corte": corte_final,
                 "dia_vencimento": dia_venc_num,
-                "parcelas": parcelas,
+                "parcelas": int(parcelas),
                 "id_existente": id_final,
                 "permite_parcial": permite_parcial_final,
             }
             salvar_lancamento_oficial(supabase, id_usuario, dados_realizacao)
 
-            # 2. GERAR AS PROJEÇÕES MENSAIS DAS PARCELAS (LCP) NA DATA DE VENCIMENTO DO CARTÃO
+            # 2. PROJEÇÕES MENSAIS DAS PARCELAS NO CARTÃO (LCP / PLAN)
             dt_primeiro_venc = calcular_data_vencimento(
                 dt_compra, corte_final, dia_venc_num
             )
-            val_parcela = round(valor / parcelas, 2)
+            val_parcela = round(float(valor) / parcelas, 2)
 
             for i in range(parcelas):
               dt_parcela = adicionar_meses(dt_primeiro_venc, i)
@@ -880,8 +878,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
                   "cc_dia_corte": corte_final,
                   "dia_corte": corte_final,
                   "dia_vencimento": dia_venc_num,
-                  "parcela_atual": i + 1,
-                  "total_parcelas": parcelas,
+                  "parcelas": i + 1,
               }
               salvar_lancamento_oficial(supabase, id_usuario, dados_parcela)
 
@@ -908,7 +905,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
                 "intencao": intencao_selecionada,
                 "projeto_id": plano_ativo,
                 "descricao": desc_completa,
-                "valor": valor,
+                "valor": float(valor),
                 "tipo": "S" if tipo == "Saída" else "E",
                 "data": str_dt_compra,
                 "data_compra": str_dt_compra,
@@ -918,7 +915,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
                 "cc_dia_corte": corte_final,
                 "dia_corte": corte_final,
                 "dia_vencimento": dia_venc_num,
-                "parcelas": parcelas,
+                "parcelas": int(parcelas),
                 "id_existente": id_final,
                 "permite_parcial": permite_parcial_final,
                 "is_cartao_compra_direta": True if nome_cartao_final else False,
