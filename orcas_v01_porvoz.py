@@ -176,7 +176,7 @@ def processar_texto_groq(
     11. "dia_semana": Se citar dia da semana ("Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"). Se não, null.
     12. "regra_fds": Se citar final de semana: "Posterga", "Antecipa" ou "Manter" (padrão).
     13. "is_cartao": true se citar cartão de crédito para a projeção, caso contrário false.
-    14. "dia_corte": Dia do mês em inteiro para o corte da fatura do cartão (padrão: 31).
+    14. "dia_corte": Dia do mês em inteiro para o corte da fatura do cartão (padrão: null).
     15. "permite_parcial": true se citar lançamento/realização parcial, caso contrário false.
 
     Retorne exatamente esta estrutura JSON:
@@ -194,7 +194,7 @@ def processar_texto_groq(
       "dia_semana": null,
       "regra_fds": "Manter",
       "is_cartao": false,
-      "dia_corte": 31,
+      "dia_corte": null,
       "permite_parcial": false
     }}
   """
@@ -245,7 +245,7 @@ def processar_texto_groq(
         "dia_semana": "",
         "regra_fds": "Manter",
         "is_cartao": False,
-        "dia_corte": 31,
+        "dia_corte": None,
         "erro": f"Nenhum modelo Groq respondeu. Último erro: {ultimo_erro}.",
     }
 
@@ -278,6 +278,8 @@ def processar_texto_groq(
     elif isinstance(cartao_extraido, str):
       cartao_extraido = cartao_extraido.strip()
 
+    corte_val = dados_parsed.get("dia_corte")
+
     return {
         "transcricao": texto_transcrito,
         "intencao": dados_parsed.get("intencao", "PROJETAR"),
@@ -296,7 +298,7 @@ def processar_texto_groq(
         "dia_semana": str(dados_parsed.get("dia_semana") or ""),
         "regra_fds": str(dados_parsed.get("regra_fds") or "Manter"),
         "is_cartao": bool(dados_parsed.get("is_cartao", False)),
-        "dia_corte": int(dados_parsed.get("dia_corte") or 31),
+        "dia_corte": int(corte_val) if corte_val else None,
         "erro": None,
     }
 
@@ -319,7 +321,7 @@ def processar_texto_groq(
         "dia_semana": "",
         "regra_fds": "Manter",
         "is_cartao": False,
-        "dia_corte": 31,
+        "dia_corte": None,
         "erro": f"Erro na conversão do JSON: {e}",
     }
 
@@ -606,14 +608,16 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
               "Dia Corte*",
               min_value=1,
               max_value=31,
-              value=11,
+              value=None,
+              placeholder="Ex: 11",
               key="input_dia_corte_novo",
           )
           dia_venc_novo = col_nc3.number_input(
               "Dia Vencimento*",
               min_value=1,
               max_value=31,
-              value=19,
+              value=None,
+              placeholder="Ex: 19",
               key="input_dia_venc_novo",
           )
 
@@ -674,11 +678,13 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
         is_cartao = col_c1.checkbox(
             "Cartão de Crédito?", value=bool(dados.get("is_cartao", False))
         )
+        corte_proj = dados.get("dia_corte")
         dia_corte = col_c2.number_input(
             "Dia de Corte Fatura",
             min_value=1,
             max_value=31,
-            value=int(dados.get("dia_corte") or 31),
+            value=int(corte_proj) if corte_proj else None,
+            placeholder="Ex: 11",
             disabled=not is_cartao,
         )
         chk_parcial = col_c3.checkbox(
@@ -721,6 +727,12 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
             st.error(
                 "⚠️ Informe o **Nome do Cartão** para prosseguir com o"
                 " cadastro!"
+            )
+            st.stop()
+          if not val_dia_corte or not val_dia_venc:
+            st.error(
+                "⚠️ Informe o **Dia de Corte** e o **Dia de Vencimento** do"
+                " novo cartão!"
             )
             st.stop()
 
@@ -766,13 +778,12 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
 
           corte_final = (
               int(val_dia_corte)
-              if val_dia_corte is not None
+              if val_dia_corte
               else int(dados.get("dia_corte") or 31)
           )
-
           dia_venc_num = (
               int(val_dia_venc)
-              if val_dia_venc is not None
+              if val_dia_venc
               else dados.get("dia_vencimento")
           )
 
