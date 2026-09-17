@@ -80,14 +80,6 @@ def calcular_data_vencimento(dt_base, dia_corte, dia_venc_alvo):
     else:
       mes += 1
 
-  # Se o dia do vencimento for menor que o dia do corte, a fatura vence no mês seguinte ao corte
-  if dia_venc_alvo < dia_corte and dt_base.day < dia_corte:
-    if mes == 12:
-      mes = 1
-      ano += 1
-    else:
-      mes += 1
-
   # Ajusta estouro de dias do mês (ex: dia 31 em fevereiro)
   while True:
     try:
@@ -841,9 +833,9 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
               "descricao": desc_completa,
               "valor": valor,
               "tipo": tipo,
-              "data": dt_vencimento_final,
+              "data": str_dt_compra,  # Mantém a data exata da compra no lançamento
               "data_compra": str_dt_compra,
-              "data_vencimento": dt_vencimento_final,
+              "data_vencimento": dt_vencimento_final,  # Data calculada da fatura (dia 18)
               "cartao": nome_cartao_final,
               "cc_dia_corte": corte_final,
               "parcelas": parcelas,
