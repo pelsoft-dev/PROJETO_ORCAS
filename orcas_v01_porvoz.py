@@ -58,11 +58,11 @@ def normalizar_valor_moeda(valor_str):
 
 
 def calcular_data_vencimento(dt_base, dia_corte, dia_venc_alvo):
-  """Gera uma string YYYY-MM-DD calculando a data de vencimento correta
+  """Gera um objeto date calculando a data de vencimento da primeira fatura
   considerando a data da compra, o dia de corte da fatura e o dia de vencimento.
   """
   if not dia_venc_alvo:
-    return dt_base.strftime("%Y-%m-%d")
+    return dt_base
 
   dia_venc_alvo = int(dia_venc_alvo)
   dia_corte = int(dia_corte) if dia_corte else 31
@@ -81,9 +81,21 @@ def calcular_data_vencimento(dt_base, dia_corte, dia_venc_alvo):
   # Ajusta estouro de dias do mês (ex: dia 31 em fevereiro)
   while True:
     try:
-      return datetime(ano, mes, dia_venc_alvo).strftime("%Y-%m-%d")
+      return datetime(ano, mes, dia_venc_alvo).date()
     except ValueError:
       dia_venc_alvo -= 1
+
+
+def adicionar_meses(dt, meses):
+  """Adiciona N meses a uma data mantendo o dia o mais próximo possível."""
+  ano = dt.year + (dt.month + meses - 1) // 12
+  mes = (dt.month + meses - 1) % 12 + 1
+  dia = dt.day
+  while True:
+    try:
+      return datetime(ano, mes, dia).date()
+    except ValueError:
+      dia -= 1
 
 
 def obter_datas_limite_projeto(supabase, projeto_id):
@@ -789,14 +801,11 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
               False if intencao_selecionada == "PARCIAL" else chk_parcial
           )
           nome_cartao_final = (
-              str(val_cartao_manual).strip()
+              str(val_cartao_manual).strip().upper()
               if cartao_sel == "+ Outro Cartão..."
-              else cartao_sel
+              else str(cartao_sel).upper()
           )
           str_dt_compra = dt_compra.strftime("%Y-%m-%d")
-          desc_completa = (
-              f"{descricao} {complemento}".strip() if complemento else descricao
-          )
 
           corte_final = (
               int(val_dia_corte)
@@ -814,31 +823,108 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
               else dados.get("dia_vencimento")
           )
 
-          dt_vencimento_final = calcular_data_vencimento(
-              dt_compra, corte_final, dia_venc_num
-          )
+          # SE FOR COMPRA PARCELADA NO CARTÃO
+          if nome_cartao_final and parcelas > 1:
+            desc_compra_real = (
+                f"{descricao.upper()} - {nome_cartao_final} {parcelas}X"
+            )
 
-          # MONTAGEM DA ESTRUTURA PARA CONCILIACAO SEGUINDO A TABELA DO EXCEL
-          dados_finais = {
-              "intencao": intencao_selecionada,
-              "projeto_id": plano_ativo,
-              "descricao": desc_completa,
-              "valor": valor,
-              "tipo": tipo,
-              "data": str_dt_compra,  # Data da realização/compra (17/09/2026)
-              "data_compra": str_dt_compra,
-              "data_movimento": str_dt_compra,
-              "data_vencimento": dt_vencimento_final,  # Data da fatura (19/10/2026)
-              "cartao": nome_cartao_final,
-              "cc_dia_corte": corte_final,
-              "dia_corte": corte_final,
-              "dia_vencimento": dia_venc_num,
-              "parcelas": parcelas,
-              "id_existente": id_final,
-              "permite_parcial": permite_parcial_final,
-              "is_cartao_compra_direta": True if parcelas > 1 or nome_cartao_final else False,
-          }
-          msg = salvar_lancamento_oficial(supabase, id_usuario, dados_finais)
+            # 1. CRIAR O LANÇAMENTO DE REALIZAÇÃO (LCL) - COMPRA À VISTA NO TOTAL
+            dados_realizacao = {
+                "intencao": intencao_selecionada,
+                "projeto_id": plano_ativo,
+                "descricao": desc_compra_real,
+                "valor": valor,
+                "valor_planejado": 0.0,
+                "valor_realizado": valor,
+                "tipo": "S" if tipo == "Saída" else "E",
+                "data": str_dt_compra,
+                "data_compra": str_dt_compra,
+                "data_movimento": str_dt_compra,
+                "cartao": nome_cartao_final,
+                "cc_tipo": "LCL",
+                "status": "REAL",
+                "cc_dia_corte": corte_final,
+                "dia_corte": corte_final,
+                "dia_vencimento": dia_venc_num,
+                "parcelas": parcelas,
+                "id_existente": id_final,
+                "permite_parcial": permite_parcial_final,
+            }
+            salvar_lancamento_oficial(supabase, id_usuario, dados_realizacao)
+
+            # 2. GERAR AS PROJEÇÕES MENSAIS DAS PARCELAS (LCP) NA DATA DE VENCIMENTO DO CARTÃO
+            dt_primeiro_venc = calcular_data_vencimento(
+                dt_compra, corte_final, dia_venc_num
+            )
+            val_parcela = round(valor / parcelas, 2)
+
+            for i in range(parcelas):
+              dt_parcela = adicionar_meses(dt_primeiro_venc, i)
+              str_dt_parcela = dt_parcela.strftime("%Y-%m-%d")
+
+              dados_parcela = {
+                  "intencao": "PROJETAR",
+                  "projeto_id": plano_ativo,
+                  "descricao": nome_cartao_final,
+                  "valor": val_parcela,
+                  "valor_planejado": val_parcela,
+                  "valor_realizado": 0.0,
+                  "tipo": "S" if tipo == "Saída" else "E",
+                  "data": str_dt_parcela,
+                  "data_compra": str_dt_compra,
+                  "data_vencimento": str_dt_parcela,
+                  "cartao": nome_cartao_final,
+                  "cc_tipo": "LCP",
+                  "status": "PLAN",
+                  "cc_dia_corte": corte_final,
+                  "dia_corte": corte_final,
+                  "dia_vencimento": dia_venc_num,
+                  "parcela_atual": i + 1,
+                  "total_parcelas": parcelas,
+              }
+              salvar_lancamento_oficial(supabase, id_usuario, dados_parcela)
+
+            msg = (
+                f"Lançamento realizado e {parcelas} parcelas de"
+                f" {formatar_moeda_br(val_parcela)} geradas no cartão"
+                f" {nome_cartao_final}!"
+            )
+
+          else:
+            dt_vencimento_final = (
+                calcular_data_vencimento(dt_compra, corte_final, dia_venc_num)
+                if dia_venc_num
+                else dt_compra
+            )
+            str_dt_venc = dt_vencimento_final.strftime("%Y-%m-%d")
+            desc_completa = (
+                f"{descricao} {complemento}".strip()
+                if complemento
+                else descricao
+            )
+
+            dados_finais = {
+                "intencao": intencao_selecionada,
+                "projeto_id": plano_ativo,
+                "descricao": desc_completa,
+                "valor": valor,
+                "tipo": "S" if tipo == "Saída" else "E",
+                "data": str_dt_compra,
+                "data_compra": str_dt_compra,
+                "data_movimento": str_dt_compra,
+                "data_vencimento": str_dt_venc,
+                "cartao": nome_cartao_final,
+                "cc_dia_corte": corte_final,
+                "dia_corte": corte_final,
+                "dia_vencimento": dia_venc_num,
+                "parcelas": parcelas,
+                "id_existente": id_final,
+                "permite_parcial": permite_parcial_final,
+                "is_cartao_compra_direta": True if nome_cartao_final else False,
+            }
+            msg = salvar_lancamento_oficial(supabase, id_usuario, dados_finais)
+
           st.session_state["msg_sucesso"] = msg
 
         fechar_modal_voz()
