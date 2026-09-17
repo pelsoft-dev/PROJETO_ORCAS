@@ -58,9 +58,6 @@ def normalizar_valor_moeda(valor_str):
 
 
 def calcular_data_vencimento(dt_base, dia_corte, dia_venc_alvo):
-  """Gera um objeto date calculando a data de vencimento da primeira fatura
-  considerando a data da compra, o dia de corte da fatura e o dia de vencimento.
-  """
   if not dia_venc_alvo:
     return dt_base
 
@@ -70,7 +67,6 @@ def calcular_data_vencimento(dt_base, dia_corte, dia_venc_alvo):
   ano = dt_base.year
   mes = dt_base.month
 
-  # Se a data da compra for maior ou igual ao dia de corte, lança na fatura do próximo mês
   if dt_base.day >= dia_corte:
     if mes == 12:
       mes = 1
@@ -78,7 +74,6 @@ def calcular_data_vencimento(dt_base, dia_corte, dia_venc_alvo):
     else:
       mes += 1
 
-  # Ajusta estouro de dias do mês (ex: dia 31 em fevereiro)
   while True:
     try:
       return datetime(ano, mes, dia_venc_alvo).date()
@@ -87,7 +82,6 @@ def calcular_data_vencimento(dt_base, dia_corte, dia_venc_alvo):
 
 
 def adicionar_meses(dt, meses):
-  """Adiciona N meses a uma data mantendo o dia o mais próximo possível."""
   ano = dt.year + (dt.month + meses - 1) // 12
   mes = (dt.month + meses - 1) % 12 + 1
   dia = dt.day
@@ -99,7 +93,6 @@ def adicionar_meses(dt, meses):
 
 
 def obter_datas_limite_projeto(supabase, projeto_id):
-  """Busca as datas oficiais na tabela config_projetos filtrando estritamente por projeto_id."""
   hoje_br = obter_hoje_brasil()
   dt_ini_valida = None
   dt_fim_valida = None
@@ -156,8 +149,11 @@ def processar_texto_groq(
 
   system_prompt = (
       "Você é o assistente financeiro do software ORCAS.\n"
-      "Sua tarefa é analisar a frase gravada pelo usuário e responder EXCLUSIVAMENTE com um objeto JSON válido contendo a estrutura solicitada.\n"
-      "Se houver especificação de parcelas ou ciclo no áudio, formate o campo complemento entre colchetes (ex: '[01 de 12]').\n"
+      "Sua tarefa é analisar a frase gravada pelo usuário e responder"
+      " EXCLUSIVAMENTE com um objeto JSON válido contendo a estrutura"
+      " solicitada.\n"
+      "Se houver especificação de parcelas ou ciclo no áudio, formate o campo"
+      " complemento entre colchetes (ex: '[01 de 12]').\n"
       "Não inclua explicações ou formatação markdown como ```json."
   )
 
@@ -175,14 +171,8 @@ def processar_texto_groq(
     6. "intencao": "PROJETAR" se a frase contiver termos como "planeje", "projete", "mensalmente", "todo mês", "todos os dias", "agende" ou referências a períodos/datas futuras. Caso contrário, "REALIZAR".
     7. "tipo": "Saída" para compras/gastos e "Entrada" para receitas.
     8. "dia_mes": Se for agendamento em dia do mês (ex: "dia 15", "todos os dias 19"), informe apenas o número como string (ex: "15"). Se não houver dia específico, null.
-    9. "data_inicio": Data em formato YYYY-MM-DD para o início do agendamento:
-       - Se for uma data PONTUAL (ex: "14 de setembro de 2026"), informe "2026-09-14".
-       - Se for um período (ex: "entre setembro de 2026 até abril de 2027"), informe o primeiro dia desse mês inicial: "2026-09-01".
-       - Se não for mencionada data ou mês específico, informe null.
-    10. "data_fim": Data em formato YYYY-MM-DD para o fim do agendamento:
-       - Se for uma data PONTUAL (ex: "14 de setembro de 2026"), data_fim DEVE SER IGUAL À data_inicio: "2026-09-14".
-       - Se for um período (ex: "entre setembro de 2026 até abril de 2027"), informe o último dia do mês final: "2027-04-30".
-       - Se não for mencionada data final específica, informe null.
+    9. "data_inicio": Data em formato YYYY-MM-DD para o início do agendamento.
+    10. "data_fim": Data em formato YYYY-MM-DD para o fim do agendamento.
     11. "dia_semana": Se citar dia da semana ("Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"). Se não, null.
     12. "regra_fds": Se citar final de semana: "Posterga", "Antecipa" ou "Manter" (padrão).
     13. "is_cartao": true se citar cartão de crédito para a projeção, caso contrário false.
@@ -296,7 +286,7 @@ def processar_texto_groq(
         "complemento": dados_parsed.get("complemento"),
         "valor": valor_float,
         "tipo": dados_parsed.get("tipo", "Saída"),
-        "data_compra": str(hoje),  # GARANTE A DATA DE HOJE NA INTERPRETAÇÃO DA IA
+        "data_compra": str(hoje),
         "permite_parcial": bool(dados_parsed.get("permite_parcial", False)),
         "cartao": cartao_extraido,
         "parcelas": int(dados_parsed.get("parcelas") or 1),
@@ -372,7 +362,6 @@ def transcrever_audio_groq(client_groq, audio_bytes):
 
 
 def buscar_lancamento_no_banco(supabase, usuario_id, projeto_id, descricao):
-  """Busca lançamento ignorando colchetes e numerações de parcela no termo digitado/falado."""
   if (
       not descricao
       or not isinstance(descricao, str)
@@ -400,7 +389,6 @@ def buscar_lancamento_no_banco(supabase, usuario_id, projeto_id, descricao):
 
 
 def fechar_modal_voz():
-  """Reseta completamente os controles do modal garantindo o fechamento imediato."""
   st.session_state.abrir_modal_orcas = False
   st.session_state.exibir_modal_voz = False
   st.session_state.etapa_voz = "gravacao"
@@ -494,9 +482,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
                     item_banco.get("permite_parcial")
                 )
 
-          # GARANTIA EXPLICITA DA DATA DE HOJE
           dados["data_compra"] = str(obter_hoje_brasil())
-
           st.session_state.dados_interpretados = dados
           st.session_state.etapa_voz = "confirmacao"
           st.rerun()
@@ -524,7 +510,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
       if match_opt:
         idx_cartao = opcoes_cartoes.index(match_opt)
       else:
-        # Cartão não cadastrado: seleciona "+ Outro Cartão..." e sugere o nome
         idx_cartao = opcoes_cartoes.index("+ Outro Cartão...")
         cartao_sugerido_manual = cartao_clean.upper()
     else:
@@ -592,11 +577,9 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
 
       cartao_sel = None
 
-      # DADOS ESPECÍFICOS DE REALIZAR / CONCILIAÇÃO
       if intencao_selecionada != "PROJETAR":
         c_real1, c_real2 = st.columns(2)
-        
-        # GARANTE DATA DE HOJE COMO VALOR PADRÃO NO CAMPO DE DATA
+
         dt_compra = c_real1.date_input(
             "Data da Compra",
             value=obter_hoje_brasil(),
@@ -623,20 +606,17 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
               "Dia Corte*",
               min_value=1,
               max_value=31,
-              value=None,
-              placeholder="Ex: 5",
+              value=11,
               key="input_dia_corte_novo",
           )
           dia_venc_novo = col_nc3.number_input(
               "Dia Vencimento*",
               min_value=1,
               max_value=31,
-              value=None,
-              placeholder="Ex: 15",
+              value=19,
               key="input_dia_venc_novo",
           )
 
-      # DADOS ESPECÍFICOS DE PROJETAR
       else:
         st.markdown("---")
         st.markdown("##### 📅 Configurações de Recorrência (Projetar)")
@@ -743,26 +723,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
                 " cadastro!"
             )
             st.stop()
-          if (
-              val_dia_corte is None
-              or int(val_dia_corte) < 1
-              or int(val_dia_corte) > 31
-          ):
-            st.error(
-                "⚠️ Informe um **Dia de Corte** válido (entre 1 e 31) para"
-                " cadastrar o novo cartão!"
-            )
-            st.stop()
-          if (
-              val_dia_venc is None
-              or int(val_dia_venc) < 1
-              or int(val_dia_venc) > 31
-          ):
-            st.error(
-                "⚠️ Informe um **Dia de Vencimento** válido (entre 1 e 31) para"
-                " cadastrar o novo cartão!"
-            )
-            st.stop()
 
         if intencao_selecionada == "PROJETAR":
           sucesso, msg, qtd = executar_inclusao_projetar(
@@ -807,11 +767,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
           corte_final = (
               int(val_dia_corte)
               if val_dia_corte is not None
-              else (
-                  int(dados.get("dia_corte"))
-                  if dados.get("dia_corte") is not None
-                  else 31
-              )
+              else int(dados.get("dia_corte") or 31)
           )
 
           dia_venc_num = (
@@ -820,13 +776,18 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
               else dados.get("dia_vencimento")
           )
 
-          # SE FOR COMPRA PARCELADA NO CARTÃO
+          dt_vencimento_calculada = (
+              calcular_data_vencimento(dt_compra, corte_final, dia_venc_num)
+              if dia_venc_num
+              else dt_compra
+          )
+          str_dt_venc_calculada = dt_vencimento_calculada.strftime("%Y-%m-%d")
+
           if nome_cartao_final and parcelas > 1:
             desc_compra_real = (
                 f"{descricao.upper()} - {nome_cartao_final} {parcelas}X"
             )
 
-            # 1. LANÇAMENTO DE REALIZAÇÃO À VISTA (LCL / REAL)
             dados_realizacao = {
                 "intencao": intencao_selecionada,
                 "projeto_id": plano_ativo,
@@ -844,21 +805,16 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
                 "status": "REAL",
                 "cc_dia_corte": corte_final,
                 "dia_corte": corte_final,
-                "dia_vencimento": dia_venc_num,
                 "parcelas": int(parcelas),
                 "id_existente": id_final,
                 "permite_parcial": permite_parcial_final,
             }
             salvar_lancamento_oficial(supabase, id_usuario, dados_realizacao)
 
-            # 2. PROJEÇÕES MENSAIS DAS PARCELAS NO CARTÃO (LCP / PLAN)
-            dt_primeiro_venc = calcular_data_vencimento(
-                dt_compra, corte_final, dia_venc_num
-            )
             val_parcela = round(float(valor) / parcelas, 2)
 
             for i in range(parcelas):
-              dt_parcela = adicionar_meses(dt_primeiro_venc, i)
+              dt_parcela = adicionar_meses(dt_vencimento_calculada, i)
               str_dt_parcela = dt_parcela.strftime("%Y-%m-%d")
 
               dados_parcela = {
@@ -877,7 +833,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
                   "status": "PLAN",
                   "cc_dia_corte": corte_final,
                   "dia_corte": corte_final,
-                  "dia_vencimento": dia_venc_num,
                   "parcelas": i + 1,
               }
               salvar_lancamento_oficial(supabase, id_usuario, dados_parcela)
@@ -889,12 +844,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
             )
 
           else:
-            dt_vencimento_final = (
-                calcular_data_vencimento(dt_compra, corte_final, dia_venc_num)
-                if dia_venc_num
-                else dt_compra
-            )
-            str_dt_venc = dt_vencimento_final.strftime("%Y-%m-%d")
             desc_completa = (
                 f"{descricao} {complemento}".strip()
                 if complemento
@@ -910,15 +859,13 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
                 "data": str_dt_compra,
                 "data_compra": str_dt_compra,
                 "data_movimento": str_dt_compra,
-                "data_vencimento": str_dt_venc,
+                "data_vencimento": str_dt_venc_calculada,
                 "cartao": nome_cartao_final,
                 "cc_dia_corte": corte_final,
                 "dia_corte": corte_final,
-                "dia_vencimento": dia_venc_num,
                 "parcelas": int(parcelas),
                 "id_existente": id_final,
                 "permite_parcial": permite_parcial_final,
-                "is_cartao_compra_direta": True if nome_cartao_final else False,
             }
             msg = salvar_lancamento_oficial(supabase, id_usuario, dados_finais)
 
