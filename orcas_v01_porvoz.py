@@ -57,6 +57,37 @@ def normalizar_valor_moeda(valor_str):
     return 0.0
 
 
+def calcular_data_vencimento(dt_base, dia_corte, dia_venc_alvo):
+  """Gera uma string YYYY-MM-DD calculando a data de vencimento correta
+
+  considerando a data da compra, o dia de corte da fatura e o dia de
+  vencimento.
+  """
+  if not dia_venc_alvo:
+    return dt_base.strftime("%Y-%m-%d")
+
+  dia_venc_alvo = int(dia_venc_alvo)
+  dia_corte = int(dia_corte) if dia_corte else 31
+
+  ano = dt_base.year
+  mes = dt_base.month
+
+  # Se a data da compra for maior ou igual ao dia de corte, lança na fatura do próximo mês
+  if dt_base.day >= dia_corte:
+    if mes == 12:
+      mes = 1
+      ano += 1
+    else:
+      mes += 1
+
+  # Ajusta estouro de dias do mês (ex: dia 31 em fevereiro)
+  while True:
+    try:
+      return datetime(ano, mes, dia_venc_alvo).strftime("%Y-%m-%d")
+    except ValueError:
+      dia_venc_alvo -= 1
+
+
 def obter_datas_limite_projeto(supabase, projeto_id):
   """Busca as datas oficiais na tabela config_projetos filtrando estritamente por projeto_id."""
   hoje_br = obter_hoje_brasil()
@@ -479,7 +510,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
 
     cartao_detectado = dados.get("cartao")
     cartao_sugerido_manual = ""
-    
+
     if cartao_detectado:
       cartao_clean = str(cartao_detectado).strip()
       match_opt = next(
@@ -556,9 +587,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
         )
 
       cartao_sel = None
-      cartao_manual = ""
-      dia_corte_novo = None
-      dia_venc_novo = None
 
       # DADOS ESPECÍFICOS DE REALIZAR / CONCILIAÇÃO
       if intencao_selecionada != "PROJETAR":
@@ -585,12 +613,23 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
               "Nome do Cartão*",
               value=cartao_sugerido_manual,
               placeholder="Ex: NUBANK VIRTUAL",
+              key="input_cartao_manual",
           )
           dia_corte_novo = col_nc2.number_input(
-              "Dia Corte*", min_value=1, max_value=31, value=None, placeholder="Ex: 5"
+              "Dia Corte*",
+              min_value=1,
+              max_value=31,
+              value=None,
+              placeholder="Ex: 5",
+              key="input_dia_corte_novo",
           )
           dia_venc_novo = col_nc3.number_input(
-              "Dia Vencimento*", min_value=1, max_value=31, value=None, placeholder="Ex: 15"
+              "Dia Vencimento*",
+              min_value=1,
+              max_value=31,
+              value=None,
+              placeholder="Ex: 15",
+              key="input_dia_venc_novo",
           )
 
       # DADOS ESPECÍFICOS DE PROJETAR
@@ -686,19 +725,41 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
       sub_sair = b_sair.form_submit_button("❌ Sair", use_container_width=True)
 
       if sub_salvar:
+        # CAPTURA DE VALORES VIA SESSION_STATE (Evita perda de estado no st.form)
+        val_cartao_manual = st.session_state.get("input_cartao_manual", "")
+        val_dia_corte = st.session_state.get("input_dia_corte_novo")
+        val_dia_venc = st.session_state.get("input_dia_venc_novo")
+
         # TRAVA E VALIDAÇÃO DE CADASTRO DE NOVO CARTÃO
         if (
             intencao_selecionada != "PROJETAR"
             and cartao_sel == "+ Outro Cartão..."
         ):
-          if not cartao_manual.strip():
-            st.error("⚠️ Informe o **Nome do Cartão** para prosseguir com o cadastro!")
+          if not str(val_cartao_manual).strip():
+            st.error(
+                "⚠️ Informe o **Nome do Cartão** para prosseguir com o"
+                " cadastro!"
+            )
             st.stop()
-          if not dia_corte_novo or dia_corte_novo < 1 or dia_corte_novo > 31:
-            st.error("⚠️ Informe um **Dia de Corte** válido (entre 1 e 31) para cadastrar o novo cartão!")
+          if (
+              val_dia_corte is None
+              or int(val_dia_corte) < 1
+              or int(val_dia_corte) > 31
+          ):
+            st.error(
+                "⚠️ Informe um **Dia de Corte** válido (entre 1 e 31) para"
+                " cadastrar o novo cartão!"
+            )
             st.stop()
-          if not dia_venc_novo or dia_venc_novo < 1 or dia_venc_novo > 31:
-            st.error("⚠️ Informe um **Dia de Vencimento** válido (entre 1 e 31) para cadastrar o novo cartão!")
+          if (
+              val_dia_venc is None
+              or int(val_dia_venc) < 1
+              or int(val_dia_venc) > 31
+          ):
+            st.error(
+                "⚠️ Informe um **Dia de Vencimento** válido (entre 1 e 31) para"
+                " cadastrar o novo cartão!"
+            )
             st.stop()
 
         if intencao_selecionada == "PROJETAR":
@@ -735,7 +796,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
               False if intencao_selecionada == "PARCIAL" else chk_parcial
           )
           nome_cartao_final = (
-              cartao_manual.strip()
+              str(val_cartao_manual).strip()
               if cartao_sel == "+ Outro Cartão..."
               else cartao_sel
           )
@@ -744,18 +805,42 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
               f"{descricao} {complemento}".strip() if complemento else descricao
           )
 
+          # Definição do dia de corte e do dia de vencimento
+          corte_final = (
+              int(val_dia_corte)
+              if val_dia_corte is not None
+              else (
+                  int(dados.get("dia_corte"))
+                  if dados.get("dia_corte") is not None
+                  else 31
+              )
+          )
+
+          dia_venc_num = (
+              int(val_dia_venc)
+              if val_dia_venc is not None
+              else dados.get("dia_vencimento")
+          )
+
+          # Cálculo dinâmico da data da fatura
+          dt_vencimento_final = calcular_data_vencimento(
+              dt_compra, corte_final, dia_venc_num
+          )
+
           dados_finais = {
               "intencao": intencao_selecionada,
               "projeto_id": plano_ativo,
               "descricao": desc_completa,
               "valor": valor,
               "tipo": tipo,
+              "data": str_dt_compra,  # Data real da compra
               "data_compra": str_dt_compra,
               "data_movimento": str_dt_compra,
-              "data_vencimento": str_dt_compra,
+              "data_vencimento": dt_vencimento_final,  # Data calculada da fatura
               "cartao": nome_cartao_final,
-              "dia_corte": int(dia_corte_novo) if dia_corte_novo else 31,
-              "dia_vencimento": int(dia_venc_novo) if dia_venc_novo else 10,
+              "cc_dia_corte": corte_final,
+              "dia_corte": corte_final,
+              "dia_vencimento": dia_venc_num,
               "parcelas": parcelas,
               "id_existente": id_final,
               "permite_parcial": permite_parcial_final,
