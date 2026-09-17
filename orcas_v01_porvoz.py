@@ -59,9 +59,7 @@ def normalizar_valor_moeda(valor_str):
 
 def calcular_data_vencimento(dt_base, dia_corte, dia_venc_alvo):
   """Gera uma string YYYY-MM-DD calculando a data de vencimento correta
-
-  considerando a data da compra, o dia de corte da fatura e o dia de
-  vencimento.
+  considerando a data da compra, o dia de corte da fatura e o dia de vencimento.
   """
   if not dia_venc_alvo:
     return dt_base.strftime("%Y-%m-%d")
@@ -146,11 +144,8 @@ def processar_texto_groq(
 
   system_prompt = (
       "Você é o assistente financeiro do software ORCAS.\n"
-      "Sua tarefa é analisar a frase gravada pelo usuário e responder"
-      " EXCLUSIVAMENTE com um objeto JSON válido contendo a estrutura"
-      " solicitada.\n"
-      "Se houver especificação de parcelas ou ciclo no áudio, formate o campo"
-      ' complemento entre colchetes (ex: "[01 de 12]").\n'
+      "Sua tarefa é analisar a frase gravada pelo usuário e responder EXCLUSIVAMENTE com um objeto JSON válido contendo a estrutura solicitada.\n"
+      "Se houver especificação de parcelas ou ciclo no áudio, formate o campo complemento entre colchetes (ex: '[01 de 12]').\n"
       "Não inclua explicações ou formatação markdown como ```json."
   )
 
@@ -725,12 +720,10 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
       sub_sair = b_sair.form_submit_button("❌ Sair", use_container_width=True)
 
       if sub_salvar:
-        # CAPTURA DE VALORES VIA SESSION_STATE (Evita perda de estado no st.form)
         val_cartao_manual = st.session_state.get("input_cartao_manual", "")
         val_dia_corte = st.session_state.get("input_dia_corte_novo")
         val_dia_venc = st.session_state.get("input_dia_venc_novo")
 
-        # TRAVA E VALIDAÇÃO DE CADASTRO DE NOVO CARTÃO
         if (
             intencao_selecionada != "PROJETAR"
             and cartao_sel == "+ Outro Cartão..."
@@ -805,7 +798,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
               f"{descricao} {complemento}".strip() if complemento else descricao
           )
 
-          # Definição do dia de corte e do dia de vencimento
           corte_final = (
               int(val_dia_corte)
               if val_dia_corte is not None
@@ -822,21 +814,21 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
               else dados.get("dia_vencimento")
           )
 
-          # Cálculo dinâmico da data da fatura
           dt_vencimento_final = calcular_data_vencimento(
               dt_compra, corte_final, dia_venc_num
           )
 
+          # MONTAGEM DA ESTRUTURA PARA CONCILIACAO SEGUINDO A TABELA DO EXCEL
           dados_finais = {
               "intencao": intencao_selecionada,
               "projeto_id": plano_ativo,
               "descricao": desc_completa,
               "valor": valor,
               "tipo": tipo,
-              "data": str_dt_compra,  # Data real da compra
+              "data": str_dt_compra,  # Data da realização/compra (17/09/2026)
               "data_compra": str_dt_compra,
               "data_movimento": str_dt_compra,
-              "data_vencimento": dt_vencimento_final,  # Data calculada da fatura
+              "data_vencimento": dt_vencimento_final,  # Data da fatura (19/10/2026)
               "cartao": nome_cartao_final,
               "cc_dia_corte": corte_final,
               "dia_corte": corte_final,
@@ -844,6 +836,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
               "parcelas": parcelas,
               "id_existente": id_final,
               "permite_parcial": permite_parcial_final,
+              "is_cartao_compra_direta": True if parcelas > 1 or nome_cartao_final else False,
           }
           msg = salvar_lancamento_oficial(supabase, id_usuario, dados_finais)
           st.session_state["msg_sucesso"] = msg
