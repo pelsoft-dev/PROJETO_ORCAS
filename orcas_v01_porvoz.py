@@ -713,7 +713,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
       if sub_salvar:
         val_cartao_manual = st.session_state.get("input_cartao_manual", "")
         val_dia_corte_in = st.session_state.get("input_dia_corte_novo")
-        val_dia_venc_in = st.session_state.get("input_dia_venc_novo")
 
         tipo_db = "Saída" if tipo == "S" else "Entrada"
 
@@ -734,16 +733,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
           ):
             st.error(
                 "⚠️ Informe um **Dia de Corte** válido (entre 1 e 31) para"
-                " cadastrar o novo cartão!"
-            )
-            st.stop()
-          if (
-              val_dia_venc_in is None
-              or int(val_dia_venc_in) < 1
-              or int(val_dia_venc_in) > 31
-          ):
-            st.error(
-                "⚠️ Informe um **Dia de Vencimento** válido (entre 1 e 31) para"
                 " cadastrar o novo cartão!"
             )
             st.stop()
@@ -796,15 +785,15 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
               else descricao
           )
 
-          # ESTRUTURA PADRÃO UTILIZADA PELO MOTOR DE CONCILIAÇÃO
+          # ESTRUTURA UTILIZANDO APENAS OS CAMPOS EXISTENTES
           dados_finais = {
               "intencao": intencao_selecionada,
               "projeto_id": plano_ativo,
               "descricao": desc_completa,
               "valor": val_float,
               "tipo": tipo_db,
-              "data_vencimento": dt_compra_str,
               "data": dt_compra_str,
+              "cc_data_compra": dt_compra_str,
               "cartao": nome_cartao_final,
               "parcelas": parcelas,
               "id_existente": id_final,
@@ -813,9 +802,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
                   val_dia_corte_in
                   if cartao_sel == "+ Outro Cartão..."
                   else None
-              ),
-              "dia_vencimento": (
-                  val_dia_venc_in if cartao_sel == "+ Outro Cartão..." else None
               ),
           }
 
