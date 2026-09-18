@@ -65,10 +65,8 @@ def montar_data_valida(ano, mes, dia):
   return datetime(ano, mes, dia_valido).date()
 
 
-def calcular_vencimento_cartao(
-    dt_compra, dia_corte, dia_vencimento_fixo=20
-):
-  """Calcula a data exata do vencimento (fixo dia 20) com base no dia do corte."""
+def calcular_vencimento_cartao(dt_compra, dia_corte, dia_vencimento):
+  """Calcula a data exata do vencimento com base no dia do corte e no dia de vencimento informados."""
   ano = dt_compra.year
   mes = dt_compra.month
 
@@ -78,7 +76,7 @@ def calcular_vencimento_cartao(
       mes = 1
       ano += 1
 
-  return montar_data_valida(ano, mes, dia_vencimento_fixo)
+  return montar_data_valida(ano, mes, dia_vencimento)
 
 
 def obter_datas_limite_projeto(supabase, projeto_id):
@@ -171,7 +169,8 @@ def processar_texto_groq(
     12. "regra_fds": "Posterga", "Antecipa" ou "Manter" (padrão).
     13. "is_cartao": true se citar cartão de crédito, false caso contrário.
     14. "cc_dia_corte": Dia do mês em inteiro para o corte da fatura.
-    15. "permite_parcial": true se citar lançamento parcial.
+    15. "cc_dia_vencimento": Dia do mês em inteiro para o vencimento da fatura.
+    16. "permite_parcial": true se citar lançamento parcial.
 
     Retorne exatamente esta estrutura JSON:
     {{
@@ -189,6 +188,7 @@ def processar_texto_groq(
       "regra_fds": "Manter",
       "is_cartao": true,
       "cc_dia_corte": 13,
+      "cc_dia_vencimento": 20,
       "permite_parcial": false
     }}
   """
@@ -239,6 +239,7 @@ def processar_texto_groq(
         "regra_fds": "Manter",
         "is_cartao": False,
         "cc_dia_corte": None,
+        "cc_dia_vencimento": None,
         "erro": f"Nenhum modelo Groq respondeu. Último erro: {ultimo_erro}.",
     }
 
@@ -276,6 +277,9 @@ def processar_texto_groq(
     corte_parsed = dados_parsed.get("cc_dia_corte")
     corte_val = int(corte_parsed) if corte_parsed is not None else None
 
+    venc_parsed = dados_parsed.get("cc_dia_vencimento")
+    venc_val = int(venc_parsed) if venc_parsed is not None else None
+
     return {
         "transcricao": texto_transcrito,
         "intencao": dados_parsed.get("intencao", "REALIZAR"),
@@ -294,6 +298,7 @@ def processar_texto_groq(
         "regra_fds": str(dados_parsed.get("regra_fds") or "Manter"),
         "is_cartao": bool(dados_parsed.get("is_cartao", False)),
         "cc_dia_corte": corte_val,
+        "cc_dia_vencimento": venc_val,
         "erro": None,
     }
 
@@ -316,6 +321,7 @@ def processar_texto_groq(
         "regra_fds": "Manter",
         "is_cartao": False,
         "cc_dia_corte": None,
+        "cc_dia_vencimento": None,
         "erro": f"Erro na conversão do JSON: {e}",
     }
 
@@ -581,6 +587,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
 
       cartao_sel = None
       val_dia_corte = None
+      val_dia_venc = None
 
       # DADOS ESPECÍFICOS DE REALIZAR / CONCILIAÇÃO
       if intencao_selecionada != "PROJETAR":
@@ -611,19 +618,26 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
 
         if cartao_sel == "+ Outro Cartão...":
           st.markdown("###### 💳 Cadastrar Novo Cartão")
-          col_nc1, col_nc2 = st.columns(2)
+          col_nc1, col_nc2, col_nc3 = st.columns([2, 1, 1])
           cartao_manual = col_nc1.text_input(
               "Nome do Cartão*",
               value=cartao_sugerido_manual,
-              placeholder="Ex: XXXCARD",
+              placeholder="Ex: TOP",
               key="input_cartao_manual",
           )
           val_dia_corte = col_nc2.number_input(
               "Dia Corte*",
               min_value=1,
               max_value=31,
-              value=13,
+              value=int(dados.get("cc_dia_corte") or 13),
               key="input_dia_corte_novo",
+          )
+          val_dia_venc = col_nc3.number_input(
+              "Dia Vencimento*",
+              min_value=1,
+              max_value=31,
+              value=int(dados.get("cc_dia_vencimento") or 20),
+              key="input_dia_venc_novo",
           )
 
       # DADOS ESPECÍFICOS DE PROJETAR
@@ -723,6 +737,9 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
         val_dia_corte_in = st.session_state.get(
             "input_dia_corte_novo", dados.get("cc_dia_corte") or 13
         )
+        val_dia_venc_in = st.session_state.get(
+            "input_dia_venc_novo", dados.get("cc_dia_vencimento") or 20
+        )
 
         tipo_db = "Saída" if tipo == "S" else "Entrada"
 
@@ -779,12 +796,14 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
           val_float = float(valor or 0.0)
           dt_compra_str = dt_compra_informada.strftime("%Y-%m-%d")
 
-          # CÁLCULO DIRETO DO VENCIMENTO NO DIA 20
+          # CÁLCULO DO VENCIMENTO UTILIZANDO O DIA DIGITADO PELO USUÁRIO
           dia_corte_efetivo = (
               int(val_dia_corte_in) if val_dia_corte_in else 13
           )
+          dia_venc_efetivo = int(val_dia_venc_in) if val_dia_venc_in else 20
+
           dt_vencimento_calculada = calcular_vencimento_cartao(
-              dt_compra_informada, dia_corte_efetivo, dia_vencimento_fixo=20
+              dt_compra_informada, dia_corte_efetivo, dia_venc_efetivo
           )
           dt_venc_str = dt_vencimento_calculada.strftime("%Y-%m-%d")
 
@@ -794,7 +813,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
               else descricao
           )
 
-          # APENAS OS CAMPOS REAIS DO SCHEMA UTILIZADOS
           dados_finais = {
               "intencao": intencao_selecionada,
               "projeto_id": plano_ativo,
