@@ -577,9 +577,18 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
             if intencao_selecionada != "PROJETAR":
                 c_real1, c_real2 = st.columns(2)
 
+                val_dt_compra = obter_hoje_brasil()
+                if dados.get("data_inicio"):
+                    try:
+                        val_dt_compra = datetime.strptime(
+                            dados.get("data_inicio"), "%Y-%m-%d"
+                        ).date()
+                    except Exception:
+                        pass
+
                 dt_compra_informada = c_real1.date_input(
                     "Data da Compra / Vencto:*",
-                    value=obter_hoje_brasil(),
+                    value=val_dt_compra,
                     format="DD/MM/YYYY",
                 )
 
@@ -801,54 +810,37 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
                         else dt_compra_informada.day
                     )
 
-                    dt_compra_obj = dt_compra_informada
-                    dt_venc_calculada = calcular_data_vencimento_por_dia(
-                        dt_compra_obj, corte_final, venc_alvo
+                    val_float = float(valor or 0.0)
+                    dt_compra_str = dt_compra_informada.strftime("%Y-%m-%d")
+
+                    val_plan = val_float
+                    val_real = val_float if intencao_selecionada in ["REALIZAR", "PARCIAL"] else 0.0
+
+                    desc_completa = (
+                        f"{descricao} {complemento}".strip() if complemento else descricao
                     )
 
-                    valor_parcela = (
-                        round(valor / parcelas, 2) if parcelas and parcelas > 0 else valor
-                    )
-
-                    # Se for uma compra Parcelada/Cartão
-                    if cartao_sel or nome_cartao_final:
-                        desc_compra = f"{descricao.upper()} - {nome_cartao_final} {parcelas}X"
-                        
-                        dados_finais = {
-                            "intencao": intencao_selecionada,
-                            "projeto_id": plano_ativo,
-                            "descricao": desc_compra,
-                            "valor_planejado": valor_parcela,
-                            "valor_realizado": 0.0,
-                            "tipo": tipo_db,
-                            "data": dt_venc_calculada,
-                            "data_vencimento": dt_venc_calculada,
-                            "cartao": nome_cartao_final,
-                            "cc_tipo": "LCL",
-                            "cc_dia_corte": corte_final,
-                            "cc_dia_venc": venc_alvo,
-                            "parcelas": parcelas,
-                            "id_existente": id_final,
-                            "permite_parcial": permite_parcial_final,
-                        }
-                    else:
-                        desc_completa = (
-                            f"{descricao} {complemento}".strip() if complemento else descricao
-                        )
-
-                        dados_finais = {
-                            "intencao": intencao_selecionada,
-                            "projeto_id": plano_ativo,
-                            "descricao": desc_completa,
-                            "valor": valor,
-                            "tipo": tipo_db,
-                            "data": dt_venc_calculada,
-                            "data_vencimento": dt_venc_calculada,
-                            "cartao": nome_cartao_final,
-                            "parcelas": parcelas,
-                            "id_existente": id_final,
-                            "permite_parcial": permite_parcial_final,
-                        }
+                    dados_finais = {
+                        "intencao": intencao_selecionada,
+                        "projeto_id": plano_ativo,
+                        "descricao": desc_completa,
+                        "valor": val_float,
+                        "valor_plan": val_plan,
+                        "valor_planejado": val_plan,
+                        "valor_real": val_real,
+                        "valor_realizado": val_real,
+                        "tipo": tipo_db,
+                        "data": dt_compra_str,
+                        "data_vencimento": dt_compra_str,
+                        "data_compra": dt_compra_str,
+                        "cartao": nome_cartao_final,
+                        "cc_tipo": "LCL" if nome_cartao_final else None,
+                        "cc_dia_corte": corte_final,
+                        "cc_dia_venc": venc_alvo,
+                        "parcelas": parcelas,
+                        "id_existente": id_final,
+                        "permite_parcial": permite_parcial_final,
+                    }
 
                     msg = salvar_lancamento_oficial(supabase, id_usuario, dados_finais)
                     st.session_state["msg_sucesso"] = msg
