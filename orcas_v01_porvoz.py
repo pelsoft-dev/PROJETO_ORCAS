@@ -2,6 +2,7 @@ import json
 import re
 import time
 from datetime import datetime, timedelta, timezone
+import calendar
 
 from groq import Groq
 import pandas as pd
@@ -57,32 +58,11 @@ def normalizar_valor_moeda(valor_str):
         return 0.0
 
 
-def calcular_data_vencimento_por_dia(dt_base, dia_corte, dia_venc_alvo):
-    """Calcula a data de vencimento (YYYY-MM-DD) com base no dia informado,
-    considerando o dia de corte para avançar o mês caso necessário.
-    """
-    if not dia_venc_alvo:
-        return dt_base.strftime("%Y-%m-%d")
-
-    dia_venc_alvo = int(dia_venc_alvo)
-    dia_corte = int(dia_corte) if dia_corte else 31
-
-    ano = dt_base.year
-    mes = dt_base.month
-
-    # Se o dia da base já passou ou atingiu o dia de corte, joga para o próximo mês
-    if dt_base.day >= dia_corte:
-        if mes == 12:
-            mes = 1
-            ano += 1
-        else:
-            mes += 1
-
-    while True:
-        try:
-            return datetime(ano, mes, dia_venc_alvo).strftime("%Y-%m-%d")
-        except ValueError:
-            dia_venc_alvo -= 1
+def montar_data_valida(ano, mes, dia):
+    """Garante a construção de uma data válida tratando meses com menos dias."""
+    _, max_dias = calendar.monthrange(ano, mes)
+    dia_valido = min(int(dia), max_dias)
+    return datetime(ano, mes, dia_valido).date()
 
 
 def obter_datas_limite_projeto(supabase, projeto_id):
@@ -170,7 +150,7 @@ def processar_texto_groq(
     11. "dia_semana": Dia da semana se citado.
     12. "regra_fds": "Posterga", "Antecipa" ou "Manter" (padrão).
     13. "is_cartao": true se citar cartão de crédito, false caso contrário.
-    14. "cc_dia_corte": Dia do mês em inteiro para o corte da fatura (padrão: 31).
+    14. "cc_dia_corte": Dia do mês em inteiro para o corte da fatura.
     15. "permite_parcial": true se citar lançamento parcial.
 
     Retorne exatamente esta estrutura JSON:
@@ -238,7 +218,7 @@ def processar_texto_groq(
             "dia_semana": "",
             "regra_fds": "Manter",
             "is_cartao": False,
-            "cc_dia_corte": 31,
+            "cc_dia_corte": None,
             "erro": f"Nenhum modelo Groq respondeu. Último erro: {ultimo_erro}.",
         }
 
@@ -259,9 +239,7 @@ def processar_texto_groq(
         desc = re.sub(r"[.,;!?]+$", "", desc).strip()
 
         cartao_extraido = dados_parsed.get("cartao")
-        if isinstance(
-            cartao_extraido, str
-        ) and cartao_extraido.lower() in [
+        if isinstance(cartao_extraido, str) and cartao_extraido.lower() in [
             "none",
             "null",
             "nenhum",
@@ -274,6 +252,9 @@ def processar_texto_groq(
         tipo_ret = str(dados_parsed.get("tipo", "S")).upper()
         if tipo_ret not in ["S", "E"]:
             tipo_ret = "S" if "SAÍDA" in tipo_ret or "SAIDA" in tipo_ret else "E"
+
+        corte_parsed = dados_parsed.get("cc_dia_corte")
+        corte_val = int(corte_parsed) if corte_parsed is not None else None
 
         return {
             "transcricao": texto_transcrito,
@@ -292,7 +273,7 @@ def processar_texto_groq(
             "dia_semana": str(dados_parsed.get("dia_semana") or ""),
             "regra_fds": str(dados_parsed.get("regra_fds") or "Manter"),
             "is_cartao": bool(dados_parsed.get("is_cartao", False)),
-            "cc_dia_corte": int(dados_parsed.get("cc_dia_corte") or 31),
+            "cc_dia_corte": corte_val,
             "erro": None,
         }
 
@@ -314,7 +295,7 @@ def processar_texto_groq(
             "dia_semana": "",
             "regra_fds": "Manter",
             "is_cartao": False,
-            "cc_dia_corte": 31,
+            "cc_dia_corte": None,
             "erro": f"Erro na conversão do JSON: {e}",
         }
 
@@ -385,7 +366,7 @@ def buscar_lancamento_no_banco(supabase, usuario_id, projeto_id, descricao):
 
 
 def fechar_modal_voz():
-    """Reseta os controles do modal permitindo o fechamento imediato."""
+    """Reseta e desativa os controles do modal permitindo o fechamento imediato."""
     st.session_state.abrir_modal_orcas = False
     st.session_state.exibir_modal_voz = False
     st.session_state.etapa_voz = "gravacao"
@@ -572,6 +553,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
                 )
 
             cartao_sel = None
+            val_dia_venc_novo = None
 
             # DADOS ESPECÍFICOS DE REALIZAR / CONCILIAÇÃO
             if intencao_selecionada != "PROJETAR":
@@ -587,7 +569,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
                         pass
 
                 dt_compra_informada = c_real1.date_input(
-                    "Data da Compra / Vencto:*",
+                    "Data da Compra / Lançamento:*",
                     value=val_dt_compra,
                     format="DD/MM/YYYY",
                 )
@@ -721,7 +703,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
                 val_dia_corte = st.session_state.get("input_dia_corte_novo")
                 val_dia_venc = st.session_state.get("input_dia_venc_novo")
 
-                # Mapeamento exigido pelo banco: 'S' -> 'Saída', 'E' -> 'Entrada'
                 tipo_db = "Saída" if tipo == "S" else "Entrada"
 
                 if (
@@ -794,52 +775,37 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
                         else cartao_sel
                     )
 
-                    corte_final = (
-                        int(val_dia_corte)
-                        if val_dia_corte is not None
-                        else (
-                            int(dados.get("cc_dia_corte"))
-                            if dados.get("cc_dia_corte") is not None
-                            else 31
-                        )
-                    )
-
-                    venc_alvo = (
-                        int(val_dia_venc)
-                        if val_dia_venc is not None
-                        else dt_compra_informada.day
-                    )
-
                     val_float = float(valor or 0.0)
-                    dt_compra_str = dt_compra_informada.strftime("%Y-%m-%d")
 
-                    val_plan = val_float
-                    val_real = val_float if intencao_selecionada in ["REALIZAR", "PARCIAL"] else 0.0
+                    # CONVERSÃO DO DIA DO VENCIMENTO EM DATA REAL YYYY-MM-DD
+                    if cartao_sel == "+ Outro Cartão..." and val_dia_venc:
+                        dt_venc_calculada = montar_data_valida(
+                            dt_compra_informada.year,
+                            dt_compra_informada.month,
+                            val_dia_venc,
+                        )
+                        dt_venc_str = dt_venc_calculada.strftime("%Y-%m-%d")
+                    else:
+                        dt_venc_str = dt_compra_informada.strftime("%Y-%m-%d")
 
                     desc_completa = (
                         f"{descricao} {complemento}".strip() if complemento else descricao
                     )
 
+                    # GRAVAÇÃO DIRETA NAS COLUNAS DATA_VENCIMENTO E DATA
                     dados_finais = {
                         "intencao": intencao_selecionada,
                         "projeto_id": plano_ativo,
                         "descricao": desc_completa,
                         "valor": val_float,
-                        "valor_plan": val_plan,
-                        "valor_planejado": val_plan,
-                        "valor_real": val_real,
-                        "valor_realizado": val_real,
                         "tipo": tipo_db,
-                        "data": dt_compra_str,
-                        "data_vencimento": dt_compra_str,
-                        "data_compra": dt_compra_str,
+                        "data_vencimento": dt_venc_str,
+                        "data": dt_venc_str,
                         "cartao": nome_cartao_final,
-                        "cc_tipo": "LCL" if nome_cartao_final else None,
-                        "cc_dia_corte": corte_final,
-                        "cc_dia_venc": venc_alvo,
                         "parcelas": parcelas,
                         "id_existente": id_final,
                         "permite_parcial": permite_parcial_final,
+                        "cc_dia_corte": val_dia_corte,
                     }
 
                     msg = salvar_lancamento_oficial(supabase, id_usuario, dados_finais)
@@ -859,6 +825,12 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
 
 
 def exibir_modal_voz_orcas(supabase, id_usuario, planos_disponiveis=None):
+    if "exibir_modal_voz" not in st.session_state:
+        st.session_state.exibir_modal_voz = False
+
+    if not st.session_state.exibir_modal_voz and not st.session_state.get("abrir_modal_orcas", False):
+        return
+
     if "etapa_voz" not in st.session_state or not st.session_state.etapa_voz:
         st.session_state.etapa_voz = "gravacao"
 
