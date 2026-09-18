@@ -65,6 +65,22 @@ def montar_data_valida(ano, mes, dia):
   return datetime(ano, mes, dia_valido).date()
 
 
+def calcular_vencimento_cartao(
+    dt_compra, dia_corte, dia_vencimento_fixo=20
+):
+  """Calcula a data exata do vencimento (fixo dia 20) com base no dia do corte."""
+  ano = dt_compra.year
+  mes = dt_compra.month
+
+  if dt_compra.day > dia_corte:
+    mes += 1
+    if mes > 12:
+      mes = 1
+      ano += 1
+
+  return montar_data_valida(ano, mes, dia_vencimento_fixo)
+
+
 def obter_datas_limite_projeto(supabase, projeto_id):
   """Busca as datas oficiais na tabela config_projetos filtrando por projeto_id."""
   hoje_br = obter_hoje_brasil()
@@ -565,7 +581,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
 
       cartao_sel = None
       val_dia_corte = None
-      val_dia_venc = None
 
       # DADOS ESPECÍFICOS DE REALIZAR / CONCILIAÇÃO
       if intencao_selecionada != "PROJETAR":
@@ -596,7 +611,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
 
         if cartao_sel == "+ Outro Cartão...":
           st.markdown("###### 💳 Cadastrar Novo Cartão")
-          col_nc1, col_nc2, col_nc3 = st.columns([2, 1, 1])
+          col_nc1, col_nc2 = st.columns(2)
           cartao_manual = col_nc1.text_input(
               "Nome do Cartão*",
               value=cartao_sugerido_manual,
@@ -607,15 +622,8 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
               "Dia Corte*",
               min_value=1,
               max_value=31,
-              value=None,
+              value=13,
               key="input_dia_corte_novo",
-          )
-          val_dia_venc = col_nc3.number_input(
-              "Dia Vencimento*",
-              min_value=1,
-              max_value=31,
-              value=None,
-              key="input_dia_venc_novo",
           )
 
       # DADOS ESPECÍFICOS DE PROJETAR
@@ -680,7 +688,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
             "Dia de Corte Fatura",
             min_value=1,
             max_value=31,
-            value=int(dados.get("cc_dia_corte") or 31),
+            value=int(dados.get("cc_dia_corte") or 13),
             disabled=not is_cartao,
         )
         chk_parcial = col_c3.checkbox(
@@ -712,7 +720,9 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
 
       if sub_salvar:
         val_cartao_manual = st.session_state.get("input_cartao_manual", "")
-        val_dia_corte_in = st.session_state.get("input_dia_corte_novo")
+        val_dia_corte_in = st.session_state.get(
+            "input_dia_corte_novo", dados.get("cc_dia_corte") or 13
+        )
 
         tipo_db = "Saída" if tipo == "S" else "Entrada"
 
@@ -724,16 +734,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
             st.error(
                 "⚠️ Informe o **Nome do Cartão** para prosseguir com o"
                 " cadastro!"
-            )
-            st.stop()
-          if (
-              val_dia_corte_in is None
-              or int(val_dia_corte_in) < 1
-              or int(val_dia_corte_in) > 31
-          ):
-            st.error(
-                "⚠️ Informe um **Dia de Corte** válido (entre 1 e 31) para"
-                " cadastrar o novo cartão!"
             )
             st.stop()
 
@@ -779,30 +779,36 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
           val_float = float(valor or 0.0)
           dt_compra_str = dt_compra_informada.strftime("%Y-%m-%d")
 
+          # CÁLCULO DIRETO DO VENCIMENTO NO DIA 20
+          dia_corte_efetivo = (
+              int(val_dia_corte_in) if val_dia_corte_in else 13
+          )
+          dt_vencimento_calculada = calcular_vencimento_cartao(
+              dt_compra_informada, dia_corte_efetivo, dia_vencimento_fixo=20
+          )
+          dt_venc_str = dt_vencimento_calculada.strftime("%Y-%m-%d")
+
           desc_completa = (
               f"{descricao} {complemento}".strip()
               if complemento
               else descricao
           )
 
-          # ESTRUTURA UTILIZANDO APENAS OS CAMPOS EXISTENTES
+          # APENAS OS CAMPOS REAIS DO SCHEMA UTILIZADOS
           dados_finais = {
               "intencao": intencao_selecionada,
               "projeto_id": plano_ativo,
               "descricao": desc_completa,
               "valor": val_float,
               "tipo": tipo_db,
-              "data": dt_compra_str,
+              "data": dt_venc_str,
+              "data_vencimento": dt_venc_str,
               "cc_data_compra": dt_compra_str,
               "cartao": nome_cartao_final,
               "parcelas": parcelas,
               "id_existente": id_final,
               "permite_parcial": permite_parcial_final,
-              "cc_dia_corte": (
-                  val_dia_corte_in
-                  if cartao_sel == "+ Outro Cartão..."
-                  else None
-              ),
+              "cc_dia_corte": dia_corte_efetivo,
           }
 
           msg = salvar_lancamento_oficial(supabase, id_usuario, dados_finais)
