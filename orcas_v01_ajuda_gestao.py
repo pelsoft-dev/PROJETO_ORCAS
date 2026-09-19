@@ -53,7 +53,7 @@ def renderizar_ajuda_gestao():
   # Para novas ajudas, basta alterar as condições e os caminhos dos arquivos PDF.
   # ==============================================================================
   if opcao == "É sua primeira vez aqui?":
-    exibir_pdf("orcas-ajuda-primeira-vez.pdf")
+    exibir_pdf("orcas-ajuda-gestao.pdf")
 
   elif opcao == "Você já possui um Plano?":
     exibir_pdf("orcas-ajuda-ja-possui-plano.pdf")
