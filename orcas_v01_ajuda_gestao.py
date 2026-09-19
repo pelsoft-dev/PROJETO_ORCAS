@@ -26,7 +26,7 @@ def exibir_pdf(caminho_pdf):
 
 def renderizar_ajuda_gestao():
   """Renderiza as opções de ajuda e carrega o PDF correspondente."""
-  st.markdown("### ❓ Central de Ajuda - Gestão")
+  # st.markdown("### ❓ Central de Ajuda - Gestão")
 
   # ==============================================================================
   # 1. OPÇÕES DE RADIO BUTTON (NENHUMA SELECIONADA POR PADRÃO + OPÇÃO SAIR)
@@ -41,7 +41,7 @@ def renderizar_ajuda_gestao():
           "Você já possui um Plano?",
           "Você quer entender sobre os seus valores?",
           "Visão Geral da Gestão",
-          "❌ Sair",
+    #      "❌ Sair",
       ],
       index=None,
       key="radio_ajuda_gestao",
@@ -68,6 +68,6 @@ def renderizar_ajuda_gestao():
   elif opcao == "Visão Geral da Gestão":
     exibir_pdf("orcas-ajuda-gestao.pdf")
 
-  elif opcao == "❌ Sair":
-    # Interrompe a execução do bloco da ajuda e limpa/fecha o fluxo
-    st.stop()
+  # elif opcao == "❌ Sair":
+    # # Interrompe a execução do bloco da ajuda e limpa/fecha o fluxo
+    # st.stop()
