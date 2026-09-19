@@ -511,6 +511,13 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
         else 1
     )
 
+    intencao_selecionada = st.selectbox(
+        "Ação Desejada",
+        opcoes_acao,
+        index=idx_intencao,
+        key="sb_intencao_confirmacao",
+    )
+
     dt_inicio_plano, dt_fim_plano, min_db, max_db = obter_datas_limite_projeto(
         supabase, plano_ativo
     )
@@ -535,13 +542,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
         pass
 
     with st.form("form_confirmacao_voz"):
-      intencao_selecionada = st.selectbox(
-          "Ação Desejada",
-          opcoes_acao,
-          index=idx_intencao,
-          key="sb_intencao_confirmacao",
-      )
-
       c1, c2 = st.columns(2)
       with c1:
         descricao = st.text_input("Descrição", value=dados.get("descricao", ""))
@@ -584,7 +584,6 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
             "Data da Compra / Lançamento:*",
             value=val_dt_compra,
             format="DD/MM/YYYY",
-            key="dt_compra_confirmacao",
         )
 
         parcelas = c_real2.number_input(
