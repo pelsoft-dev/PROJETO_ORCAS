@@ -33,7 +33,7 @@ def renderizar_ajuda_gestao():
   st.markdown(
       """
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-          <span style="font-weight: 600; font-size: 0.95rem;">Como podemos te ajudar hoje? Selecione um tópico:</span>
+          <span style="font-weight: 600; font-size: 0.95rem;">Como podemos te ajudar?</span>
           <span style="font-size: 0.85rem; color: #6c757d; font-weight: 500;">💡 Para SAIR, clique novamente no botão AJUDA</span>
       </div>
       """,
