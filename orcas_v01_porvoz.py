@@ -596,9 +596,10 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
               pass
           st.session_state["dt_compra_confirmacao"] = dt_base
 
-        # SEM O PARÂMETRO 'value', O STREAMLIT USA APENAS O SESSION_STATE E PRESERVA A SELEÇÃO DO USUÁRIO
-        c_real1.date_input(
+        # CAPTURA DIRETA DO COMPONENTE PARA O SESSION_STATE E USO NO ENVIAR DO FORM
+        dt_compra_sel = c_real1.date_input(
             "Data da Compra / Lançamento:*",
+            value=st.session_state["dt_compra_confirmacao"],
             format="DD/MM/YYYY",
             key="dt_compra_confirmacao",
         )
@@ -806,8 +807,8 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
 
           val_float = float(valor or 0.0)
 
-          # LEITURA DIRETA DO ESTADO PERSISTIDO NO SESSION_STATE
-          dt_compra_obj = st.session_state.get(
+          # ATRIBUIÇÃO DA DATA ATUALIZADA DO WIDGET
+          dt_compra_obj = dt_compra_sel or st.session_state.get(
               "dt_compra_confirmacao", obter_hoje_brasil()
           )
           dt_compra_str = dt_compra_obj.strftime("%Y-%m-%d")
