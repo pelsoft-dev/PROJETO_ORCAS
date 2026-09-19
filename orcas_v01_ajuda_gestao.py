@@ -26,31 +26,40 @@ def exibir_pdf(caminho_pdf):
 
 def renderizar_ajuda_gestao():
   """Renderiza as opções de ajuda e carrega o PDF correspondente."""
-  # st.markdown("### ❓ Central de Ajuda - Gestão")
 
   # ==============================================================================
-  # 1. OPÇÕES DE RADIO BUTTON (NENHUMA SELECIONADA POR PADRÃO + OPÇÃO SAIR)
+  # 1. CABEÇALHO CUSTOMIZADO COM TEXTO ALINHADO À ESQUERDA E À DIREITA
   # ==============================================================================
-  # - index=None garante que inicia desmarcado.
-  # - Adicionada a opção "❌ Sair" ao final da lista.
+  st.markdown(
+      """
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <span style="font-weight: 600; font-size: 0.95rem;">Como podemos te ajudar hoje? Selecione um tópico:</span>
+          <span style="font-size: 0.85rem; color: #6c757d; font-weight: 500;">💡 Para SAIR, clique novamente no botão AJUDA acima</span>
+      </div>
+      """,
+      unsafe_allow_html=True,
+  )
+
+  # ==============================================================================
+  # 2. OPÇÕES DE RADIO BUTTON (LABEL OCULTA PARA USAR O CABEÇALHO ACIMA)
   # ==============================================================================
   opcao = st.radio(
-      "Como podemos te ajudar hoje? Selecione um tópico: ################################ Para SAIR, clique novamente no botão AJUDA ",
+      "Como podemos te ajudar hoje?",
       [
           "É sua primeira vez aqui?",
           "Você já possui um Plano?",
           "Você quer entender sobre os seus valores?",
           "Visão Geral da Gestão",
-    #      "❌ Sair",
       ],
       index=None,
       key="radio_ajuda_gestao",
+      label_visibility="collapsed",  # Oculta a label padrão para evitar duplicação
   )
 
   st.divider()
 
   # ==============================================================================
-  # 2. ESTRUTURA IF / ELIF PARA CHAMAR O PDF CORRESPONDENTE OU FECHAR
+  # 3. ESTRUTURA IF / ELIF PARA CHAMAR O PDF CORRESPONDENTE
   # ==============================================================================
   if opcao is None:
     # Nenhuma opção selecionada ainda
@@ -67,7 +76,3 @@ def renderizar_ajuda_gestao():
 
   elif opcao == "Visão Geral da Gestão":
     exibir_pdf("orcas-ajuda-gestao.pdf")
-
-  # elif opcao == "❌ Sair":
-    # # Interrompe a execução do bloco da ajuda e limpa/fecha o fluxo
-    # st.stop()
