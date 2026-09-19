@@ -29,9 +29,10 @@ def renderizar_ajuda_gestao():
   st.markdown("### ❓ Central de Ajuda - Gestão")
 
   # ==============================================================================
-  # 1. OPÇÕES DE RADIO BUTTON
+  # 1. OPÇÕES DE RADIO BUTTON (NENHUMA SELECIONADA POR PADRÃO + OPÇÃO SAIR)
   # ==============================================================================
-  # Adicione ou altere o texto dos botões diretamente na lista abaixo.
+  # - index=None garante que inicia desmarcado.
+  # - Adicionada a opção "❌ Sair" ao final da lista.
   # ==============================================================================
   opcao = st.radio(
       "Como podemos te ajudar hoje? Selecione um tópico:",
@@ -40,19 +41,22 @@ def renderizar_ajuda_gestao():
           "Você já possui um Plano?",
           "Você quer entender sobre os seus valores?",
           "Visão Geral da Gestão",
+          "❌ Sair",
       ],
-      index=0,
+      index=None,
       key="radio_ajuda_gestao",
   )
 
   st.divider()
 
   # ==============================================================================
-  # 2. ESTRUTURA IF / ELIF PARA CHAMAR O PDF CORRESPONDENTE
+  # 2. ESTRUTURA IF / ELIF PARA CHAMAR O PDF CORRESPONDENTE OU FECHAR
   # ==============================================================================
-  # Para novas ajudas, basta alterar as condições e os caminhos dos arquivos PDF.
-  # ==============================================================================
-  if opcao == "É sua primeira vez aqui?":
+  if opcao is None:
+    # Nenhuma opção selecionada ainda
+    st.info("👆 Selecione uma das opções acima para visualizar a ajuda.")
+
+  elif opcao == "É sua primeira vez aqui?":
     exibir_pdf("orcas-ajuda-gestao.pdf")
 
   elif opcao == "Você já possui um Plano?":
@@ -63,3 +67,7 @@ def renderizar_ajuda_gestao():
 
   elif opcao == "Visão Geral da Gestão":
     exibir_pdf("orcas-ajuda-gestao.pdf")
+
+  elif opcao == "❌ Sair":
+    # Interrompe a execução do bloco da ajuda e limpa/fecha o fluxo
+    st.stop()
