@@ -378,6 +378,7 @@ def fechar_modal_voz():
   st.session_state.etapa_voz = "gravacao"
   st.session_state.dados_interpretados = None
   st.session_state.hash_ultimo_audio = None
+  st.session_state.pop("dt_compra_confirmacao", None)
   st.session_state.audio_key = st.session_state.get("audio_key", 0) + 1
 
 
@@ -468,6 +469,18 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
                 )
 
           st.session_state.dados_interpretados = dados
+
+          # INICIALIZAÇÃO ÚNICA E GARANTIDA DO ESTADO DA DATA DE COMPRA
+          dt_padrao = obter_hoje_brasil()
+          if dados.get("data_inicio"):
+            try:
+              dt_padrao = datetime.strptime(
+                  dados.get("data_inicio"), "%Y-%m-%d"
+              ).date()
+            except Exception:
+              pass
+          st.session_state["dt_compra_confirmacao"] = dt_padrao
+
           st.session_state.etapa_voz = "confirmacao"
           st.rerun()
 
@@ -571,18 +584,21 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
       if intencao_selecionada != "PROJETAR":
         c_real1, c_real2 = st.columns(2)
 
-        val_dt_compra = obter_hoje_brasil()
-        if dados.get("data_inicio"):
-          try:
-            val_dt_compra = datetime.strptime(
-                dados.get("data_inicio"), "%Y-%m-%d"
-            ).date()
-          except Exception:
-            pass
+        # SE A CHAVE AINDA NÃO EXISTIR POR SEGURANÇA, INICIALIZA UMA ÚNICA VEZ
+        if "dt_compra_confirmacao" not in st.session_state:
+          dt_base = obter_hoje_brasil()
+          if dados.get("data_inicio"):
+            try:
+              dt_base = datetime.strptime(
+                  dados.get("data_inicio"), "%Y-%m-%d"
+              ).date()
+            except Exception:
+              pass
+          st.session_state["dt_compra_confirmacao"] = dt_base
 
-        dt_compra_informada = c_real1.date_input(
+        # SEM O PARÂMETRO 'value', O STREAMLIT USA APENAS O SESSION_STATE E PRESERVA A SELEÇÃO DO USUÁRIO
+        c_real1.date_input(
             "Data da Compra / Lançamento:*",
-            value=val_dt_compra,
             format="DD/MM/YYYY",
             key="dt_compra_confirmacao",
         )
@@ -789,7 +805,12 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
           )
 
           val_float = float(valor or 0.0)
-          dt_compra_str = dt_compra_informada.strftime("%Y-%m-%d")
+
+          # LEITURA DIRETA DO ESTADO PERSISTIDO NO SESSION_STATE
+          dt_compra_obj = st.session_state.get(
+              "dt_compra_confirmacao", obter_hoje_brasil()
+          )
+          dt_compra_str = dt_compra_obj.strftime("%Y-%m-%d")
 
           desc_completa = (
               f"{descricao} {complemento}".strip()
@@ -827,6 +848,7 @@ def _renderizar_dialogo_voz(supabase, id_usuario, planos_disponiveis):
         st.rerun()
 
       elif sub_refazer:
+        fechar_modal_voz()
         st.session_state.etapa_voz = "gravacao"
         st.session_state.audio_key = st.session_state.get("audio_key", 0) + 1
         st.rerun()
