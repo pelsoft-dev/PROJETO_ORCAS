@@ -35,7 +35,7 @@ def renderizar_ajuda_gestao():
   # - Adicionada a opção "❌ Sair" ao final da lista.
   # ==============================================================================
   opcao = st.radio(
-      "Como podemos te ajudar hoje? Selecione um tópico:",
+      "Como podemos te ajudar hoje? Selecione um tópico:                                      Para SAIR, clique novamente no botão AJUDA ",
       [
           "É sua primeira vez aqui?",
           "Você já possui um Plano?",
